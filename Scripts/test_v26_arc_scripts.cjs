@@ -174,6 +174,18 @@ test('zap: starting twice is harmless, clicks on the highlight itself are ignore
   assert.equal(B.stopZap(), true); assert.equal(B.stopZap(), false);
 });
 
+// V26.1: klik op YouTube's onzichtbare klik-animatielaag → de knop zelf verdwijnt, niet de lege laag.
+test('zap: an invisible touch-feedback overlay zaps the button underneath', () => {
+  const { w, d, B, messages } = page(`<div id="owner"><button id="join" class="join">Join
+    <yt-touch-feedback-shape><div class="yt-spec-touch-feedback-shape__fill"></div></yt-touch-feedback-shape></button></div>`);
+  B.startZap();
+  click(w, d.querySelector('.yt-spec-touch-feedback-shape__fill'));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].selector, '#join');
+  assert.equal(d.getElementById('join').style.display, 'none');
+  B.stopZap();
+});
+
 // ── Paginalezer ────────────────────────────────────────────────────────────────────────────────
 test('reader: article text without menus, scripts, buttons or hidden parts', () => {
   const { R } = page(`<nav>Home Menu</nav><header>Site header</header>

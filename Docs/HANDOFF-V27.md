@@ -48,6 +48,12 @@
 ## Opgelost in 26.1: vast in fullscreen na herstart
 Herstelde videotab ging fullscreen tijdens YouTube's korte autoplay-blip (vóór de stil-bewaking pauzeerde) → gepauzeerd, laadrondje, F/Esc dood. Fix in `sitePreferences.js` (geen automatische fullscreen zolang `JoeToepMedia.diagnostics().quiet` actief is). Na de fix op de Mac twee keer herstart: geen fullscreen meer. Let op: of de video na een herstart speelt hangt af van "Keep playing when JoeToep reopens" (Sync & devices) — bij Tijn lijkt die aan te staan.
 
+## Mac-tests ronde 2 (26.1)
+OK: fullscreen F/Esc/spatie, Zap (na fix), Undo/Done, instellingenpagina V26, stresstest (geen crash, geheugen stabiel).
+Opgelost: Zap koos YouTube's onzichtbare `yt-touch-feedback-shape` → `meaningful()` in `boosts.js`.
+Open: Split View in een Space met één tab laat een lege Home-tab achter; Peek niet getest (⇧-klik/rechtsklik kan niet op de achtergrond).
+Les voor computer use: een tab kiezen met een AX-klik werkt niet (raakt een binnenknop); gebruik het menu Tabs › Show Next/Previous Tab.
+
 ## Afvinklijst voor Tijn (eiFoon, iPad, Watch)
 - [ ] eiFoon: JoeToep 26.1 opent, tabs en Spaces kloppen met de Mac (sync).
 - [ ] eiFoon: Space wisselen via de Space-knop in de tabbalk; tab naar een andere Space.
@@ -60,4 +66,5 @@ Herstelde videotab ging fullscreen tijdens YouTube's korte autoplay-blip (vóór
 - [ ] eiFoon: widgets en de knoppen van de Live Activity.
 - [ ] Watch: bediening play/pauze en de huidige titel.
 - [ ] iPad (aansluiten en ontgrendelen, dan bouwen): Split View, lijn slepen, fullscreen in een paneel en terug.
+- [ ] Mac: Peek met ⇧-klik op een link en via rechtsklik › Open in Peek; Esc, ⌘↩.
 - [ ] Mac: herstart met een gepauzeerde video → geen fullscreen, F/Esc/spatie werken.

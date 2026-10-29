@@ -119,8 +119,29 @@
   const ignorable = el => !el || el.nodeType !== 1 || el === document.documentElement || el === document.body ||
     (zap && (el === zap.box || el === zap.label || zap.box.contains(el)));
 
+  // V26.1: onzichtbare lagen bovenop een knop (YouTube's klik-animatie `yt-touch-feedback-shape`, ripples) zijn
+  // geen onderdeel om te zappen: dan verdween er niets zichtbaars. Klim naar het echte onderdeel eronder.
+  const overlayTags = /^(yt-touch-feedback-shape|tp-yt-paper-ripple|paper-ripple|yt-interaction)$/;
+  function meaningful(el) {
+    let node = el;
+    for (let i = 0; i < 6 && node && !ignorable(node) && node.parentElement && !ignorable(node.parentElement); i++) {
+      const cls = typeof node.className === 'string' ? node.className : '';
+      const overlay = overlayTags.test(node.localName) || /touch-feedback|ripple/.test(cls);
+      let covering = false;
+      if (!overlay && !node.textContent.trim() && !node.querySelector('img,svg,video,canvas,picture')) {
+        const a = node.getBoundingClientRect(), b = node.parentElement.getBoundingClientRect();
+        covering = Math.abs(a.left - b.left) < 3 && Math.abs(a.top - b.top) < 3 &&
+          Math.abs(a.width - b.width) < 3 && Math.abs(a.height - b.height) < 3 && getComputedStyle(node).position === 'absolute';
+      }
+      if (!overlay && !covering) break;
+      node = node.parentElement;
+    }
+    return node;
+  }
+
   function place(target) {
     if (!zap) return;
+    target = meaningful(target);
     if (ignorable(target)) { zap.box.style.display = 'none'; zap.current = null; return; }
     zap.current = target;
     const rect = target.getBoundingClientRect();
@@ -158,7 +179,7 @@
     const onMove = e => place(e.target);
     const onClick = e => {
       swallow(e);
-      const target = ignorable(e.target) ? zap.current : e.target;
+      const target = ignorable(e.target) ? zap.current : meaningful(e.target);
       if (ignorable(target)) return;
       const selector = selectorFor(target);
       if (!selector) return;

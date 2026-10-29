@@ -12,13 +12,24 @@ Eerste test van V26 op echte apparaten (Mac). Gebouwd en geïnstalleerd op de Ma
 - **Oorzaak**: een herstelde tab wordt stil gehouden tot je zelf iets aanraakt. YouTube's eigen autoplay speelt dan heel even voordat JoeToep pauzeert. Sinds V26 wacht automatische fullscreen niet meer eerst op de theatermodus, waardoor het fullscreen-verzoek precies in dat korte moment viel; daarna stond een gepauzeerde video in een fullscreen die nergens meer op reageerde.
 - **Oplossing**: `sitePreferences.js` vraagt nooit automatisch fullscreen aan zolang de stil-bewaking actief is. Zodra jij op play drukt (of JoeToep zelf laat spelen) werkt automatische fullscreen gewoon. Nieuwe jsdom-test (faalt zonder de fix).
 
+## Opgelost: Zap verborg niets bij knoppen op YouTube
+- **Wat merkte je**: Zap op de Join-knop meldde "1 hidden — saved for this site", maar de knop bleef gewoon staan.
+- **Oorzaak**: boven elke YouTube-knop ligt een onzichtbare klik-animatielaag (`yt-touch-feedback-shape`). Zap koos die lege laag in plaats van de knop.
+- **Oplossing**: `boosts.js` klimt bij het aanwijzen en klikken over zulke lagen heen (klik-animaties, ripples en lege, absoluut gepositioneerde lagen die precies over hun ouder liggen) naar het echte onderdeel. Nieuwe jsdom-test (faalt zonder de fix).
+
 ## Getest op de Mac (OK)
 - Spaces: nieuwe Space maken (opent met een Home-tab), heen en terug wisselen.
 - Split View: openen via het menu; een opgeschorte tab is een paar seconden wit tot hij geladen is, daarna staan beide panelen goed.
 - Boosts: reacties en aanbevelingen verbergen en weer tonen werkt direct, in beide panelen.
 - Pagina-assistent: samenvatten met Apple Intelligence werkt.
+- Fullscreen: F erin en eruit, Esc eruit, spatie pauzeert/speelt elke keer (getest 3×).
+- Zap: Undo zet gezapte onderdelen terug, Done sluit Zap.
+- Instellingen › Spaces, Split View & Boosts: alle schakelaars met uitleg; Split View uit → de functie verdwijnt meteen.
+- Stresstest: Spaces en Split View snel wisselen — geen crash, geheugen stabiel (274 → 285 MB).
 
 ## Nog open (zie Docs/HANDOFF-V27.md › 26.1)
+- Split View openen in een Space met één tab maakt een lege Home-tab als tweede paneel; die blijft na sluiten staan.
+- Peek (⇧-klik / rechtsklikmenu) niet getest: kan niet op de achtergrond bediend worden.
 - iPhone, iPad, Watch, widgets en Live Activity zijn nog niet getest (iPhone Mirroring is in deze regio niet beschikbaar).
 
 # 26.0.0 (39)
