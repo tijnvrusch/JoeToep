@@ -18,6 +18,12 @@ Persoonlijke YouTube-browser/-speler (SwiftUI + WKWebView) van Tijn, één multi
 - SwiftUI/AppKit/UIKit/WebKit kunnen hier niet gecompileerd worden: wees extra zorgvuldig (`#if os(macOS)`/`os(iOS)` voor AppKit/UIKit, `@MainActor`, toegang tot `private` leden, hooguit 10 onderdelen per Commands-/ViewBuilder-niveau, geen dubbele sleutels in dictionary-literals zoals `SettingHelp.texts` — dat crasht bij het starten).
 - Echte builds en tests gebeuren op Tijns Mac via Xcode (zie `Docs/RUNBOOK.md`, `Docs/BUILD_REPORT.md`).
 
+## Swift-compiler = GitHub Actions (macOS-runner)
+Een Linux-Swift-toolchain helpt niet (geen SwiftUI/AppKit/UIKit) en download.swift.org is hier geblokkeerd. De compiler is daarom `.github/workflows/build.yml`: bij **elke push** bouwt GitHub de app met de nieuwste Xcode voor macOS én iOS Simulator (zonder ondertekenen), plus alle `Scripts/test_*.cjs` en `validate_project.py`.
+- Werkwijze: wijzig → commit → push (eigen branch, bijv. `werk/<onderwerp>`, of `main`) → wacht ~5–10 min → `Scripts/ci_status.sh [branch]` toont de status en bij een fout de `error:`-regels. Herhaal tot alle jobs groen zijn vóórdat je een versie oplevert.
+- Zonder `gh`: `curl -s https://api.github.com/repos/tijnvrusch/JoeToep/actions/runs?branch=<branch>&per_page=1` (status/conclusion); volledige logs staan als artifact `build-log-macOS`/`build-log-iOS` bij de run.
+- Groen in CI = compileert; gedrag testen blijft op Tijns apparaten.
+
 ## Werken op Tijns Mac (alleen als die gekoppeld is)
 - Xcode **alleen klikken** — nooit typen/toetsen/app-menu in Xcode, nooit AppleScript.
 - Nooit wachtwoorden typen of inloggen. Geen weblinks in apps aanklikken. Niet in andere apps handelen.
