@@ -1,3 +1,68 @@
+# 22.0.0 (30)
+
+## Sync Mac ⇄ iPhone (topprioriteit)
+- **Precies doorspelen na wisselen, ook als de iPhone naar de achtergrond gaat.** Vlak voordat de iPhone naar de achtergrond gaat (en zelf pauzeert), stuurt hij de exacte positie. Open je daarna JoeToep op de Mac, dan speelt dezelfde video daar verder op precies die seconde.
+- **Geen verkeerde video meer.** Tabs die door de sync werden bijgewerkt, mogen 8 tot 20 s niet zelf gaan spelen (YouTube-autoplay, spoelen op een gepauzeerde speler). Dat gebeurde vroeger bij het openen van de Mac: een andere tab ging dan fullscreen spelen. Een echte klik of een JoeToep-opdracht start hem wel.
+- Sneller en vaker bijgewerkt:
+  - De positie wordt elke 0,5 s bijgehouden met verbonden apparaten.
+  - De spelende tab wordt al vanaf 1 s verschil gedeeld.
+  - Titelwijzigingen tellen ook mee.
+  - Na terugkomst wordt direct (en na 0,6 en 1,5 s nog een keer) opnieuw verbonden.
+  - Er wordt elke 2 s gezocht zolang er niets verbonden is.
+- Het sluiten van een tab is meteen zichtbaar op het andere apparaat.
+
+## Picture in Picture
+- **✕ in het PiP-venster = stoppen** op alle platforms. De video blijft gepauzeerd, het PiP-venster verdwijnt en er komt géén fullscreen-video meer tevoorschijn.
+- iPad: de terugknop in PiP gaat nu rechtstreeks naar fullscreen, zonder tussenstap via de kleine YouTube-speler.
+
+## Fullscreen-opties (alle platforms)
+- "Fullscreen wanneer een video laadt en start" (standaard aan): op een video klikken → meteen fullscreen.
+- "Fullscreen wanneer je op play drukt" (standaard aan): een gepauzeerde video weer starten → fullscreen.
+- "Fullscreen verlaten bij pauzeren" (nu standaard uit).
+
+## iPhone
+- De pagina staat weer precies van rand tot rand. Een te brede balk kan de layout niet meer oprekken en een hangende horizontale verschuiving wordt meteen hersteld; ook op de iPhone 13 Pro.
+
+## Tabs slepen (Mac)
+- De hele tab beweegt mee met de muis en de andere tabs schuiven opzij.
+- Heel vergevingsgezind: te hoog, te laag of iets ernaast loslaten maakt niet uit. Hij snapt naar de dichtstbijzijnde plek.
+
+## Nieuwe-tab-overlay
+- Aanpasbaar dashboard:
+  - platforms;
+  - wat er nu speelt (met bediening, PiP en "verder op…");
+  - je andere apparaten (play/pauze, +10 s, "hier spelen");
+  - Spotify (shuffle, vorige, play/pauze, volgende, herhalen, volume);
+  - snelle acties;
+  - favorieten;
+  - verder kijken;
+  - open tabs.
+- Met het schuifjes-icoon pas je het aan: blokken slepen (of pijltjes), oogje aan/uit, acties kiezen, aantallen instellen, compacte weergave. Het dashboard is ook uit te zetten.
+- Zoeken op een platform vanuit een widget verandert je standaardplatform niet meer.
+
+## Widgets en Live Activity
+- Nieuw:
+  - Afstandsbediening (±10/±30 s, alle apparaten, alles pauzeren);
+  - Apparaat wisselen ("Hier" / "Stuur");
+  - Voortgangsring;
+  - Spotify compact (ook op het vergrendelscherm);
+  - Spotify groot (hoes, voortgang, volume);
+  - Dashboard;
+  - Apparaten op het vergrendelscherm.
+- Widgets tonen de videolengte en voortgang, en worden vaker ververst (max. elke seconde).
+- **Live Activity** (iPhone/iPad): wat er waar speelt, op het vergrendelscherm, in het Dynamic Island en in de Smart Stack van je Watch. Met ±10/±30 s, play/pauze, "hier verder" en Spotify. De voortgang loopt vanzelf door.
+
+## Apple Watch
+- Live overzicht van al je apparaten (iPhone, Mac, iPad) met voortgang. Bediening per apparaat en "verder op …" (ook van Mac naar iPad).
+- Spotify-bediening: vorige, play/pauze, volgende, shuffle, herhalen en volume.
+- Zoeken (met recente zoekopdrachten), de home-feed, en downloads van je iPhone.
+- **Downloads op de Watch.** Zet een iPhone-download (van websites, geen YouTube) op de Watch:
+  - Handmatig, automatisch, of meteen met "download huidige iPhone-pagina".
+  - Kwaliteit instelbaar: laag, 480p, 540p of alleen audio.
+  - Daarna offline af te spelen op de Watch, met onthouden positie.
+- **Complicaties:** Nu aan het spelen (met voortgang), Spotify, Apparaten en JoeToep-snelstart. Voor alle wijzerplaatvormen: rond, hoek, rechthoek en inline.
+- Instellingen: kwaliteit, automatisch synchroniseren, "volg wat speelt" en de spoelstap.
+
 # 21.0.0 (29)
 
 ## Wisselen tussen Mac en iPhone (topprioriteit)

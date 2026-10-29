@@ -7,6 +7,9 @@
 // Knoppen in een widget zetten een opdracht in de gedeelde map en seinen de app met een
 // systeemnotificatie; de app voert hem uit (ook voor je andere apparaten, via sync).
 import Foundation
+#if os(iOS) && canImport(ActivityKit)
+import ActivityKit
+#endif
 
 enum WidgetShared {
     #if os(macOS)
@@ -139,6 +142,15 @@ struct WidgetSpotify: Codable, Equatable {
     var position: Double
     var duration: Double
     var updated: Date
+    var album: String? = nil
+    var volume: Double? = nil
+    var shuffling: Bool? = nil
+    var repeating: Bool? = nil
+
+    func livePosition(at now: Date = Date()) -> Double {
+        guard playing else { return position }
+        return min(duration > 0 ? duration : .infinity, position + now.timeIntervalSince(updated))
+    }
 }
 
 struct WidgetLink: Codable, Equatable, Identifiable {
@@ -148,9 +160,40 @@ struct WidgetLink: Codable, Equatable, Identifiable {
 }
 
 struct WidgetCommand: Codable, Equatable {
-    enum Action: String, Codable { case playPause, play, pause, skipForward, skipBack, spotifyPlayPause, spotifyNext, spotifyPrevious, open, takeOver }
+    enum Action: String, Codable { case playPause, play, pause, skipForward, skipBack, spotifyPlayPause, spotifyNext, spotifyPrevious, open, takeOver,
+        // V22
+        continueOn, spotifyVolumeUp, spotifyVolumeDown, skipForward30, skipBack30, pauseAll }
     var action: Action
     var deviceID: String?        // nil = dit apparaat
     var url: URL?
     var created = Date()
 }
+
+// MARK: - V22 Live Activity (iPhone/iPad: vergrendelscherm, Dynamic Island, Apple Watch Smart Stack)
+#if os(iOS) && canImport(ActivityKit)
+struct NowPlayingActivityAttributes: ActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        var title: String
+        var deviceName: String
+        var deviceKind: String            // "mac", "iphone", "ipad"
+        var deviceID: String
+        var isThisDevice: Bool
+        var playing: Bool
+        var time: Double                  // positie op moment `updated`
+        var duration: Double              // 0 = onbekend
+        var updated: Date
+        var thumbnail: URL?
+        var spotifyTrack: String?
+        var spotifyArtist: String?
+        var spotifyPlaying: Bool?
+
+        var symbol: String { deviceKind == "mac" ? "laptopcomputer" : (deviceKind == "ipad" ? "ipad" : "iphone") }
+        /// Begin/eind van de video in klok-tijd → voortgang loopt vanzelf door zonder updates.
+        var interval: ClosedRange<Date>? {
+            guard playing, duration > 0, time < duration else { return nil }
+            let start = updated.addingTimeInterval(-time)
+            return start...start.addingTimeInterval(duration)
+        }
+    }
+}
+#endif

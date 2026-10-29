@@ -48,7 +48,7 @@ final class WidgetBridge {
         guard !pending else { return }
         pending = true
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(250))
             guard let self else { return }
             self.pending = false
             self.write()
@@ -57,6 +57,12 @@ final class WidgetBridge {
 
     private func write() {
         let snapshot = makeSnapshot()
+        #if os(iOS) && canImport(ActivityKit)
+        LiveActivityManager.shared.update(from: snapshot)   // V22
+        #endif
+        #if os(iOS)
+        WatchBridge.shared.setNeedsPush()                   // V22: Watch + complicaties live
+        #endif
         var comparable = snapshot; comparable.updated = .distantPast
         var previous = lastWritten; previous?.updated = .distantPast
         guard comparable != previous else { return }
@@ -68,13 +74,13 @@ final class WidgetBridge {
     private func reloadWidgets() {
         #if canImport(WidgetKit)
         let since = Date().timeIntervalSince(lastReload)
-        if since >= 1.5 {
+        if since >= 1.0 {
             lastReload = Date()
             WidgetCenter.shared.reloadAllTimelines()
         } else if !reloadQueued {
             reloadQueued = true
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(1.5 - since))
+                try? await Task.sleep(for: .seconds(1.0 - since))
                 guard let self else { return }
                 self.reloadQueued = false; self.lastReload = Date()
                 WidgetCenter.shared.reloadAllTimelines()
@@ -115,6 +121,7 @@ final class WidgetBridge {
             me.title = focus.fullTitle; me.url = url
             me.playing = playing != nil
             me.time = focus.session.resumePoint?.time
+            me.duration = focus.session.resumePoint?.duration
             me.updated = Date()
         }
         me.tabCount = allTabs.count
@@ -124,9 +131,11 @@ final class WidgetBridge {
         // Andere apparaten (wat de sync het laatst van ze hoorde).
         for (id, snap) in sync.latestByDevice where id != sync.deviceID {
             var d = WidgetDevice(id: id, name: snap.originName, kind: Self.kind(forName: snap.originName), isThisDevice: false)
-            let tab = snap.playingID.flatMap { pid in snap.tabs.first { $0.id == pid } } ?? snap.tabs.first { $0.id == snap.selectedID }
+            let tab = snap.playingID.flatMap { pid in snap.tabs.first { $0.id == pid } }
+                ?? snap.handoffID.flatMap { hid in snap.tabs.first { $0.id == hid } }
+                ?? snap.tabs.first { $0.id == snap.selectedID }
             if let tab, let url = tab.url {
-                d.title = tab.title; d.url = url; d.time = tab.time
+                d.title = tab.title; d.url = url; d.time = tab.time; d.duration = tab.duration
                 d.playing = snap.playingID == tab.id && sync.devices[id] != nil
                 d.updated = snap.sentAt
             }
@@ -137,7 +146,8 @@ final class WidgetBridge {
 
         if let sp = SpotifyController.shared.current, sp.hasTrack {
             s.spotify = WidgetSpotify(deviceID: sp.deviceID, deviceName: sp.device, playing: sp.playing, track: sp.track, artist: sp.artist,
-                                      artworkURL: sp.artworkURL, position: sp.position, duration: sp.duration, updated: sp.updated)
+                                      artworkURL: sp.artworkURL, position: sp.position, duration: sp.duration, updated: sp.updated,
+                                      album: sp.album, volume: sp.volume, shuffling: sp.shuffling, repeating: sp.repeating)
         }
         let lib = BrowserLibrary.shared
         s.favourites = lib.bookmarks.prefix(12).map { WidgetLink(title: $0.title, url: $0.url) }
@@ -164,6 +174,20 @@ final class WidgetBridge {
             if let url = command.url { workspace?.addTab(url: url) }
         case .takeOver:
             if let id = command.deviceID { workspace?.takeOverFrom(device: id) }
+        case .continueOn:
+            if let id = command.deviceID { workspace?.continuePlayback(on: id) }
+        case .spotifyVolumeUp, .spotifyVolumeDown:
+            let v = SpotifyController.shared.current?.volume ?? 50
+            SpotifyController.shared.perform(.setVolume, value: min(100, max(0, v + (command.action == .spotifyVolumeUp ? 10 : -10))))
+        case .pauseAll:
+            MediaHub.shared.scan(); MediaHub.shared.pauseAll()
+            for id in sync.devices.keys where sync.latestByDevice[id]?.playingID != nil {
+                sync.send(SyncCommand(kind: .toggle, target: id, url: nil, value: nil))
+            }
+        case .skipForward30, .skipBack30:
+            let delta: Double = command.action == .skipForward30 ? 30 : -30
+            if local { workspace?.mediaTab.session.remoteSeek(by: delta) }
+            else if let target = command.deviceID { sync.send(SyncCommand(kind: .seek, target: target, url: nil, value: delta)) }
         case .playPause, .play, .pause, .skipForward, .skipBack:
             if local {
                 guard let session = workspace?.mediaTab.session else { return }

@@ -16,7 +16,7 @@
   try {
     const noBounce = document.createElement('style');
     noBounce.id = 'joetoep-no-hbounce';
-    noBounce.textContent = 'html,body{overscroll-behavior-x:none!important}#movie_player,.html5-video-player,video{touch-action:pan-y pinch-zoom}';
+    noBounce.textContent = (/Mobile|iPhone|iPad/.test(navigator.userAgent) ? 'html,body{overflow-x:hidden!important;max-width:100%!important}' : '') + 'html,body{overscroll-behavior-x:none!important}#movie_player,.html5-video-player,video{touch-action:pan-y pinch-zoom}';
     (document.head || document.documentElement).appendChild(noBounce);
   } catch (_) {}
   // Checkt of het element waarop getypt wordt een tekstveld is (input, textarea, etc.),
@@ -322,6 +322,7 @@
   }, true);
   const fullscreenLeft = () => {
     if (cfg.resumeAfterFullscreenExit === false || window.__joetoepExitedByPause) return;
+    if (Date.now() - (window.__joetoepPiPClosedAt || 0) < 5000) return; // V22: PiP met ✕ gesloten
     const v = pick();
     if (!v || v.ended || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
     const wasPlaying = Date.now() - lastPlayingAt < 700 && lastPlayingAt > lastUserPauseAt;

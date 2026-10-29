@@ -817,6 +817,37 @@ test('V12 optional YouTube element fullscreen uses the player container, not the
   assert.equal(h.nativeCalls.fullscreen,0,'no Apple video fullscreen');h.close();
 });
 
+// V22 — ✕ in het PiP-venster: gepauzeerd blijven, geen fullscreen terug, niet hervatten.
+test('V22 closing PiP with X keeps the video paused and never restores fullscreen', () => {
+  const h=harness(); h.api.enterPiP(); h.advance(2000);
+  h.rawPause(h.v);                         // WebKit pauzeert eerst…
+  h.setMode(h.v,'inline');                 // …en verlaat dan PiP
+  h.advance(500); h.rawPause(h.v);
+  assert.equal(h.v.paused,true); assert.equal(h.nativeCalls.play,0);
+  assert.equal(h.api.restoreFullscreen(true),false); h.close();
+});
+test('V22 PiP return button (still playing) keeps playing as before', () => {
+  const h=harness(); h.api.enterPiP(); h.advance(2000); h.setMode(h.v,'inline');
+  assert.equal(h.v.paused,false); h.close();
+});
+test('V22 native PiP closed with X stays paused', () => {
+  const h=harness(); h.api.nativeReturn(42, true, false);
+  assert.equal(h.v.paused,true); assert.equal(h.nativeCalls.play,0); h.close();
+});
+// V22 — een tab die door sync werd bijgewerkt mag niet zelf gaan spelen.
+test('V22 sync quiet window blocks autoplay but allows a real click or JoeToep command', () => {
+  const h=harness(); h.rawPause(h.v); h.api.quiet(10000);
+  h.rawPlay(h.v); assert.equal(h.v.paused,true);
+  h.userClick(h.v); h.rawPlay(h.v); assert.equal(h.v.paused,false);
+  h.rawPause(h.v); h.advance(3000); h.api.quiet(10000);
+  h.api.remoteAction('play'); assert.equal(h.v.paused,false);
+  h.close();
+});
+test('V22 quiet window expires by itself', () => {
+  const h=harness(); h.rawPause(h.v); h.api.quiet(1000); h.advance(1500);
+  h.rawPlay(h.v); assert.equal(h.v.paused,false); h.close();
+});
+
 (async()=>{
   const failed=[];
   if (process.env.LIST_FAILS) { for(const [name,body] of tests){ try { await body(); } catch(e) { failed.push(name+' :: '+String(e.message).split('\n')[0]); } unhandled.length=0; } console.log(failed.join('\n')); return; }

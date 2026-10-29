@@ -24,7 +24,7 @@ final class TabSyncService: NSObject, ObservableObject {
     /// Apparaat-id's van verbonden apparaten, met hun naam (voor "speel af op …").
     @Published private(set) var devices: [String: String] = [:]
     /// Laatste snapshot per apparaat (ook als hij niet "won"): wat speelt waar (voor de Watch).
-    private(set) var latestByDevice: [String: SyncSnapshot] = [:]
+    @Published private(set) var latestByDevice: [String: SyncSnapshot] = [:]
 
     let deviceID: String
     let deviceName: String
@@ -122,8 +122,8 @@ final class TabSyncService: NSObject, ObservableObject {
     private func scheduleReconnect() {
         reconnectTask?.cancel()
         reconnectTask = Task { @MainActor [weak self] in
-            for _ in 0..<90 {                           // max. ±6 minuten, daarna bij volgende activatie weer
-                try? await Task.sleep(for: .seconds(4))
+            for _ in 0..<180 {                           // max. ±6 minuten, daarna bij volgende activatie weer
+                try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled, let self, self.running else { return }
                 if !(self.session?.connectedPeers.isEmpty ?? true) { return }
                 self.restartDiscovery()
@@ -141,7 +141,7 @@ final class TabSyncService: NSObject, ObservableObject {
     /// in je crashlog). De browser blijft nu de hele sessie draaien; we nodigen de apparaten die
     /// hij al kende gewoon opnieuw uit. Hooguit eens per 8 s.
     private func restartDiscovery() {
-        guard running, let session, Date().timeIntervalSince(lastRestart) >= 8 else { return }
+        guard running, let session, Date().timeIntervalSince(lastRestart) >= 4 else { return }
         lastRestart = Date()
         for (peer, otherID) in foundPeers where otherID != deviceID && !session.connectedPeers.contains(peer) {
             browser?.invitePeer(peer, to: session, withContext: nil, timeout: 10)
@@ -166,15 +166,24 @@ final class TabSyncService: NSObject, ObservableObject {
     func resume() {
         guard UserDefaults.standard.object(forKey: "tabSyncV18") as? Bool ?? true else { return }
         if !running { start(); return }
-        restartDiscovery(); scheduleReconnect()
+        // V22: meteen (en nog twee keer kort daarna) opnieuw uitnodigen — sneller weer verbonden.
+        lastRestart = .distantPast; restartDiscovery(); scheduleReconnect()
+        Task { @MainActor [weak self] in
+            for delay in [600, 1500] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard let self, self.running, self.session?.connectedPeers.isEmpty ?? false else { return }
+                self.lastRestart = .distantPast; self.restartDiscovery()
+            }
+        }
         if let current = ledger.current { broadcast(.snapshot(current)) }
     }
 
     // MARK: Publiceren
 
     /// Roep aan bij élke lokale wijziging. Stuurt alleen als de inhoud echt veranderde.
-    func publish(tabs: [SyncTab], selectedID: UUID, playingID: UUID?) {
-        guard let snapshot = ledger.makeLocal(name: deviceName, tabs: tabs, selectedID: selectedID, playingID: playingID) else { return }
+    func publish(tabs: [SyncTab], selectedID: UUID, playingID: UUID?, handoff: (id: UUID, time: Double)? = nil, force: Bool = false) {
+        guard let snapshot = ledger.makeLocal(name: deviceName, tabs: tabs, selectedID: selectedID, playingID: playingID,
+                                              handoff: handoff, force: force) else { return }
         lastSync = Date()
         broadcast(.snapshot(snapshot))
         WidgetBridge.shared.setNeedsUpdate()

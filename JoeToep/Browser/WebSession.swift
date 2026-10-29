@@ -69,7 +69,7 @@ final class WebSession: NSObject, ObservableObject {
     var restoredTime: Double?
     var restoredPlaying = false
     var focusSearchWhenReady = false
-    struct ResumePoint: Equatable { var url: URL; var time: Double; var playing: Bool }
+    struct ResumePoint: Equatable { var url: URL; var time: Double; var playing: Bool; var duration: Double? = nil }
     @Published private(set) var resumePoint: ResumePoint?
     private var pendingResume: (time: Double, play: Bool)?
     private var positionTask: Task<Void, Never>?
@@ -218,6 +218,17 @@ final class WebSession: NSObject, ObservableObject {
         webView.scrollView.keyboardDismissMode = .interactive
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.alwaysBounceHorizontal = false
+        // V22: de pagina stond op de iPhone soms een stukje naar links geschoven (horizontale
+        // offset bleef hangen na een veeg/scrub of een te brede pagina). Zolang de pagina niet
+        // bewust ingezoomd is, blijft hij altijd precies van rand tot rand staan.
+        webView.scrollView.contentInset = .zero
+        webView.scrollView.showsHorizontalScrollIndicator = false
+        horizontalLock = webView.scrollView.observe(\.contentOffset, options: [.new]) { scroll, _ in
+            MainActor.assumeIsolated {
+                guard !scroll.isZooming, !scroll.isZoomBouncing, scroll.zoomScale <= scroll.minimumZoomScale + 0.01 else { return }
+                if abs(scroll.contentOffset.x) > 0.5 { scroll.contentOffset.x = 0 }
+            }
+        }
         // V19.1: trekken om te verversen (iPhone/iPad), instelbaar.
         // V19.2: "trekken" = fullscreen (standaard), verversen, of uit.
         if Self.pullAction != "off" {
@@ -347,7 +358,8 @@ final class WebSession: NSObject, ObservableObject {
         if old.pipReturnTarget != updated.pipReturnTarget || old.pipReturnKeepsPlaying != updated.pipReturnKeepsPlaying ||
             old.swipeSeekSeconds != updated.swipeSeekSeconds || old.volumeStepPercent != updated.volumeStepPercent ||
             old.showControlsWhileScrubbing != updated.showControlsWhileScrubbing || old.scrubThumbnail != updated.scrubThumbnail ||
-            old.arrowKeysShowControls != updated.arrowKeysShowControls || old.exitFullscreenOnPause != updated.exitFullscreenOnPause {
+            old.arrowKeysShowControls != updated.arrowKeysShowControls || old.exitFullscreenOnPause != updated.exitFullscreenOnPause ||
+            old.fullscreenOnPlay != updated.fullscreenOnPlay || old.automaticFullscreen != updated.automaticFullscreen {
             configureCompatibility()
         }
         if old.videoFit != updated.videoFit || old.pinchMode != updated.pinchMode { configureBridge() }
@@ -522,7 +534,8 @@ final class WebSession: NSObject, ObservableObject {
         webView.evaluateJavaScript("window.JoeToepMedia?.sourceInfo()") { [weak self] value, _ in
             guard let self, let info = value as? [String: Any], let time = info["time"] as? Double,
                   time.isFinite, time >= 0, (info["media"] as? Bool) == true else { return }
-            let point = ResumePoint(url: url, time: time, playing: (info["playing"] as? Bool) ?? false)
+            let duration = (info["duration"] as? Double).flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
+            let point = ResumePoint(url: url, time: time, playing: (info["playing"] as? Bool) ?? false, duration: duration)
             if self.resumePoint != point { self.resumePoint = point }
         }
     }
@@ -532,7 +545,7 @@ final class WebSession: NSObject, ObservableObject {
             positionTask = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
                     // V18: met verbonden apparaten elke 2 s (live positie), anders elke 5 s (zuinig).
-                    let interval = TabSyncService.shared.peers.isEmpty ? 5.0 : 1.0
+                    let interval = TabSyncService.shared.peers.isEmpty ? 3.0 : 0.5  // V22: live positie
                     try? await Task.sleep(for: .seconds(interval))
                     guard !Task.isCancelled, let self else { break }
                     self.capturePosition()
@@ -895,6 +908,13 @@ final class WebSession: NSObject, ObservableObject {
             let safeTime = time.isFinite ? time : -1
             self.webView.evaluateJavaScript("window.JoeToepMedia?.nativeReturn(\(safeTime), \(play), \(reason == .restore))", completionHandler: nil)
             self.refreshNativeShadow()
+        }
+        nativePiP.onRestoreRequested = { [weak self] time, playing in
+            guard let self, self.nativePiPWasFullscreen || self.settings.automaticFullscreen else { return 0 }
+            let t = time.isFinite ? time : -1
+            self.recordLifecycle("native PiP restore → straight to fullscreen")
+            self.webView.evaluateJavaScript("(()=>{const v=document.querySelector('video.html5-main-video')||document.querySelector('video');if(!v)return 0;try{if(\(t)>=0&&Math.abs(v.currentTime-\(t))>0.3)v.currentTime=\(t)}catch(_){}\(playing ? "v.play()?.catch(()=>{});" : "")try{if(v.webkitSetPresentationMode)v.webkitSetPresentationMode('fullscreen');else v.webkitEnterFullscreen()}catch(_){}return 1})()", completionHandler: nil)
+            return 0.35
         }
         nativePiP.onFailure = { [weak self] message in
             guard let self else { return }
@@ -1272,10 +1292,25 @@ final class WebSession: NSObject, ObservableObject {
     // MARK: V18 — tab-sync
     /// true = bij de eerste keer laden de video klaarzetten maar niet starten (tab van ander apparaat).
     var syncedStartPaused = false
+    #if os(iOS)
+    private var horizontalLock: NSKeyValueObservation?
+    #endif
     var hasLoadedContent: Bool { hasStarted }
+    /// V22: tot dit moment mag deze tab niet zelf gaan spelen (hij werd net door sync bijgewerkt).
+    private(set) var syncQuietUntil = Date.distantPast
+    func holdQuiet(_ seconds: Double = 15) {
+        syncQuietUntil = Date().addingTimeInterval(seconds)
+        webView.evaluateJavaScript("window.JoeToepMedia?.quiet(\(Int(seconds * 1000)))", completionHandler: nil)
+    }
+    func releaseQuiet() {
+        guard syncQuietUntil > Date() else { return }
+        syncQuietUntil = .distantPast
+        webView.evaluateJavaScript("window.JoeToepMedia?.quiet(0)", completionHandler: nil)
+    }
 
     /// Een ander apparaat opende hier een andere pagina: ga er ook heen, zonder af te spelen.
     func syncNavigate(to url: URL, time: Double?) {
+        if !isPlaying { holdQuiet() }
         guard hasStarted else {
             restoredURL = url; restoredTime = time; restoredPlaying = false; syncedStartPaused = true
             return
@@ -1293,6 +1328,7 @@ final class WebSession: NSObject, ObservableObject {
         guard time.isFinite, time >= 0 else { return }
         guard hasStarted else { restoredTime = time; return }
         guard !isPlaying else { return }
+        holdQuiet(8)
         let t = String(format: "%.2f", time)
         webView.evaluateJavaScript("""
         (()=>{const v=document.querySelector('video.html5-main-video')||document.querySelector('video');
@@ -1352,6 +1388,7 @@ final class WebSession: NSObject, ObservableObject {
     /// V21 — Neem het afspelen over van een ander apparaat: meteen naar `time` en spelen.
     /// Staat dezelfde video al klaar, dan zonder herladen (dus binnen ±50 ms speelt hij).
     func takeOverPlayback(url: URL, time: Double) {
+        releaseQuiet()
         let t = max(0, time)
         if hasStarted, let current = currentURL, SyncDiff.sameDestination(current, url) {
             let s = String(format: "%.3f", t)
@@ -1478,7 +1515,7 @@ final class WebSession: NSObject, ObservableObject {
         let firstWait = settings.animationsOff ? 0.2 : 0.5
         DispatchQueue.main.asyncAfter(deadline: .now() + (extraChecks == 0 ? firstWait : 0.15)) { [weak self] in
             guard let self, self.navigationSerial == serial, self.applicationActive,
-                  self.settings.automaticFullscreen, !self.pip.isActive, !self.pip.isRequesting else { return }
+                  self.settings.automaticFullscreen || self.settings.fullscreenOnPlay, !self.pip.isActive, !self.pip.isRequesting else { return }
             // V16.2.1: another tab is still closing its PiP window for a hand-over → check again
             // in 0.15 s (max. 12 times ≈ 1.8 s), so fullscreen only starts once PiP is gone.
             if Self.handOverClosingUntil > Date() && extraChecks < 12 {
@@ -1708,7 +1745,7 @@ final class WebSession: NSObject, ObservableObject {
         webView.evaluateJavaScript("window.JoeToepMedia?.configure({protect:\(settings.backgroundProtection),automatic:\(settings.automaticPiP),nativeFullscreen:\(settings.nativeFullscreen),macFullscreen:'\(settings.macFullscreenMode.rawValue)',fallback:\(settings.pipFallbackEnabled),elementFullscreen:\(usesElementFullscreen),returnTarget:'\(settings.pipReturnTarget.rawValue)',keepPlaying:\(settings.pipReturnKeepsPlaying)})", completionHandler: nil)
         // V19: gebaren-instellingen naar de toets/veeg-bediening.
         webView.evaluateJavaScript("window.JoeToepControls?.configure({swipeSeek:\(settings.swipeSeekSeconds),keySeek:5,volumeStep:\(settings.volumeStepPercent / 100),showControlsOnSwipe:\(settings.showControlsWhileScrubbing),scrubThumbnail:\(settings.scrubThumbnail),showControlsOnKeys:\(settings.arrowKeysShowControls),nativeWheel:\(Self.nativeWheel),exitFullscreenOnPause:\(settings.exitFullscreenOnPause),touchScrub:\(UserDefaults.standard.object(forKey: "touchScrubV192") as? Bool ?? true),touchSeekPerPx:\(UserDefaults.standard.object(forKey: "touchSeekPerPxV192") as? Double ?? 0.25),invertTouch:\(UserDefaults.standard.object(forKey: "invertTouchV192") as? Bool ?? false),seekThrottleMs:\(UserDefaults.standard.object(forKey: "seekThrottleMsV192") as? Double ?? 60)}); 0", completionHandler: nil)
-        webView.evaluateJavaScript("window.JoeToepPreferences?.configure({automaticFullscreen:\(settings.automaticFullscreen),disableCaptions:\(settings.disableCaptions),disablePreviewCaptions:\(settings.disablePreviewCaptions),theater:\(settings.theaterMode)})", completionHandler: nil)
+        webView.evaluateJavaScript("window.JoeToepPreferences?.configure({automaticFullscreen:\(settings.automaticFullscreen),fullscreenOnPlay:\(settings.fullscreenOnPlay),disableCaptions:\(settings.disableCaptions),disablePreviewCaptions:\(settings.disablePreviewCaptions),theater:\(settings.theaterMode)})", completionHandler: nil)
     }
 
     private func bridge(_ script: String, completion: ((Result<Any, Error>) -> Void)? = nil) {
@@ -2077,7 +2114,7 @@ final class WebSession: NSObject, ObservableObject {
         }
         guard event.documentID == documentID else { return }
         if event.name == .automaticFullscreen {
-            guard applicationActive, settings.automaticFullscreen, !pip.isActive, !pip.isRequesting else { return }
+            guard applicationActive, settings.automaticFullscreen || settings.fullscreenOnPlay, !pip.isActive, !pip.isRequesting else { return }
             // Native evaluation provides WebKit's gesture context for the page's
             // one-shot automatic request; an async media event alone cannot.
             fulfillAutomaticFullscreen()
@@ -2158,6 +2195,18 @@ final class WebSession: NSObject, ObservableObject {
                 recordLifecycle("hand-over: PiP closed, stay in background")
                 // PiP is gone: the new tab may go fullscreen 0.25 s from now (close animation).
                 Self.handOverClosingUntil = min(Self.handOverClosingUntil, Date().addingTimeInterval(0.25))
+            } else if !event.playing && !event.buffering {
+                // V22: PiP met ✕ gesloten (de video staat stil): stoppen, niets terughalen —
+                // geen fullscreen, geen venster naar voren, geen vangnet.
+                recordLifecycle("PiP closed with ✕: stay paused, no fullscreen")
+                fullscreenReturnDeadline = nil; fullscreenReturnTask?.cancel()
+                #if os(macOS)
+                macReturnTask?.cancel()
+                if isFloating { floating.restore() }
+                #else
+                pipReturnSafetyTask?.cancel(); returnFromPiPTask?.cancel()
+                #endif
+                webView.evaluateJavaScript("(()=>{const v=document.querySelector('video.html5-main-video')||document.querySelector('video');if(v&&!v.paused)v.pause();try{if(document.fullscreenElement||document.webkitFullscreenElement)(document.exitFullscreen||document.webkitExitFullscreen).call(document)}catch(_){}})()", completionHandler: nil)
             } else {
                 #if os(macOS)
                 restoreMacAfterPiP()
@@ -2362,6 +2411,8 @@ extension WebSession: WKNavigationDelegate {
         isLoading = false; failedNavigationURL = nil; networkRetryCount = 0
         refreshNavigationState(); configureCompatibility()
         scheduleHistoryRecord(delay: 0.3)
+        let quietLeft = syncQuietUntil.timeIntervalSinceNow
+        if quietLeft > 0 { webView.evaluateJavaScript("window.JoeToepMedia?.quiet(\(Int(quietLeft * 1000)))", completionHandler: nil) }
         MediaExtras.shared.reapply(to: self)      // V21: boost / alleen audio / herhalen blijven aan
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: Error) {

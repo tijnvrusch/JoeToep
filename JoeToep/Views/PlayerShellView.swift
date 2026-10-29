@@ -41,6 +41,7 @@ struct TabPlayerView: View {
                 PlayerControlBar(session: session, settings: settings, availableWidth: geometry.size.width, actions: actions) {
                     showingSettings = true
                 }
+                .frame(minWidth: 0, maxWidth: geometry.size.width, alignment: .center).clipped()
                 .onHover { chrome.setHovering($0) }
                 .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -85,7 +86,8 @@ struct TabPlayerView: View {
                     }
                 }
                 .padding(settings.edgeToEdge ? 0 : 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: geometry.size.width)
+                .frame(maxHeight: .infinity)
                 // .clipped() knipt alles wat buiten deze view valt weg, zodat
                 // er niks buiten de grenzen zichtbaar blijft.
                 .clipped()
@@ -95,6 +97,8 @@ struct TabPlayerView: View {
                 PlayerControlBar(session: session, settings: settings, availableWidth: geometry.size.width, actions: actions) {
                     showingSettings = true
                 }
+                // V22: nooit breder dan het scherm (anders schoof de hele pagina naar links).
+                .frame(minWidth: 0, maxWidth: geometry.size.width, alignment: .center).clipped()
                 .simultaneousGesture(TapGesture().onEnded { chrome.reveal() })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 }

@@ -25,6 +25,11 @@ struct TabBarView: View {
     var leadingInset: CGFloat = 0
     @State private var address = ""
     @FocusState private var addressFocused: Bool
+    // V22: live slepen (Mac).
+    @State private var dragID: UUID?
+    @State private var dragOffset: CGFloat = 0
+    @State private var dragLift: CGFloat = 0
+    @State private var dragConsumed: CGFloat = 0
     @Environment(\.joeToepTheme) private var theme
     @Environment(\.openWindow) private var openWindow
     // Op de Mac is er wat meer ruimte, dus mogen tabbladen iets breder minimaal zijn.
@@ -80,6 +85,29 @@ struct TabBarView: View {
         }
     }
 
+    #if os(macOS)
+    private func dragChanged(_ tab: BrowserTab, value: DragGesture.Value, stride: CGFloat) {
+        if dragID != tab.id { dragID = tab.id; dragConsumed = 0 }
+        var remaining = value.translation.width - dragConsumed
+        // Voorbij de helft van de buurtab → een plek opschuiven (ook meerdere bij snel slepen).
+        while abs(remaining) > stride * 0.5 {
+            let step = remaining > 0 ? 1 : -1
+            var moved = false
+            withAnimation(.snappy(duration: 0.18)) { moved = workspace.stepTab(id: tab.id, by: step) }
+            guard moved else { break }
+            dragConsumed += CGFloat(step) * stride
+            remaining = value.translation.width - dragConsumed
+        }
+        dragOffset = remaining
+        dragLift = max(-4, min(4, value.translation.height * 0.15))   // voelt mee, maar blijft in de balk
+    }
+    private func dragEnded() {
+        withAnimation(.snappy(duration: 0.2)) { dragOffset = 0; dragLift = 0; dragID = nil }
+        dragConsumed = 0
+        workspace.finishTabDrag()
+    }
+    #endif
+
     // De horizontale strook met alle tab-chips naast elkaar.
     private var strip: some View {
         GeometryReader { geometry in
@@ -106,7 +134,21 @@ struct TabBarView: View {
                             TabChip(tab: tab, session: tab.session, selected: workspace.selectedID == tab.id, width: width,
                                     select: { tapped(tab) }, close: { workspace.close(tab) })
                                 .contextMenu { menu(for: tab) }
-                                // V19.1: slepen om te herordenen (Mac, iPad en iPhone). Laat je een tab
+                                #if os(macOS)
+                                // V22 (Mac): de héle tab beweegt mee met de muis en de andere tabs schuiven
+                                // opzij. Heel vergevingsgezind: boven/onder de balk loslaten maakt niet uit —
+                                // alleen de horizontale positie telt en hij snapt naar de dichtstbijzijnde plek.
+                                .offset(x: dragID == tab.id ? dragOffset : 0, y: dragID == tab.id ? dragLift : 0)
+                                .scaleEffect(dragID == tab.id ? 1.03 : 1)
+                                .shadow(color: .black.opacity(dragID == tab.id ? 0.35 : 0), radius: 8, y: 3)
+                                .zIndex(dragID == tab.id ? 10 : 0)
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 5, coordinateSpace: .global)
+                                        .onChanged { value in dragChanged(tab, value: value, stride: width + spacing) }
+                                        .onEnded { _ in dragEnded() }
+                                )
+                                #else
+                                // V19.1: slepen om te herordenen (iPad en iPhone). Laat je een tab
                                 // op een andere tab los, dan komt hij op die plek te staan.
                                 .draggable(tab.id.uuidString) {
                                     Text(tab.title).font(.caption).padding(6)
@@ -116,6 +158,7 @@ struct TabBarView: View {
                                     guard let raw = items.first, let id = UUID(uuidString: raw) else { return false }
                                     return workspace.moveTab(id: id, before: tab.id)
                                 }
+                                #endif
                                 // .id() geeft deze view een uniek label, zodat
                                 // scrollTo(id) hem later kan terugvinden.
                                 .id(tab.id)
@@ -250,9 +293,15 @@ struct TabBarView: View {
     // Bepaalt wat een tik op een tabblad doet: is het al geselecteerd, ga dan
     // naar bewerkmodus (adresbalk); is het nog niet geselecteerd, selecteer het gewoon.
     private func tapped(_ tab: BrowserTab) {
-        if workspace.selectedID == tab.id {
-            if CommandBarPrefs.overlayForAddress { workspace.requestEditAddress() } else { editing = true }
-        } else { workspace.select(tab) }
+        // V22: een klik op het geluid-icoontje is geen klik op de tab zelf.
+        // (Eén beurt later beslissen: de knop en de tab-klik komen in willekeurige volgorde binnen.)
+        let wasSelected = workspace.selectedID == tab.id
+        DispatchQueue.main.async {
+            if Date().timeIntervalSince(TabAudioIcon.lastAction) < 0.4 { return }
+            if wasSelected {
+                if CommandBarPrefs.overlayForAddress { workspace.requestEditAddress() } else { editing = true }
+            } else { workspace.select(tab) }
+        }
     }
 
     // @ViewBuilder vertelt Swift dat deze functie meerdere views achter
@@ -334,6 +383,16 @@ struct TabChip: View {
                     // tonen we een draaiend laad-icoontje in plaats van het gewone icoon.
                     if session.isLoading && !session.isPlaying {
                         ProgressView().controlSize(.mini)
+                    } else if TabAudioIcon.isActionable(tab, session) {
+                        // V22: klik op het icoon = pauzeren / daar afspelen.
+                        Button { TabAudioIcon.perform(tab, session, select: select) } label: {
+                            Image(systemName: TabAudioIcon.symbol(tab, session, hovering: hovering, base: iconName))
+                                .themedIcon(theme, size: 11 * theme.density.scale, active: session.isPlaying || tab.pinned)
+                                .frame(width: 18, height: 18).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(session.isPlaying ? "Pause" : "Play in this tab")
+                        .accessibilityLabel(session.isPlaying ? "Pause this tab" : "Play this tab")
                     } else {
                         Image(systemName: iconName)
                             .themedIcon(theme, size: 11 * theme.density.scale, active: session.isPlaying || tab.pinned)

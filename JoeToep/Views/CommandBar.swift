@@ -16,6 +16,8 @@ struct CommandBarOverlay: View {
     @State private var text = ""
     @State private var token: MediaPlatform?
     @State private var selection = 0
+    @State private var customizing = false
+    @ObservedObject private var overlayStore = OverlayLayoutStore.shared
     @FocusState private var focused: Bool
     @Environment(\.joeToepTheme) private var theme
 
@@ -85,7 +87,7 @@ struct CommandBarOverlay: View {
                 .padding(.horizontal, 12)
         }
         .onAppear {
-            token = nil; selection = 0
+            token = workspace.commandBarToken; workspace.commandBarToken = nil; selection = 0
             text = editsCurrent ? (workspace.selected.currentURL?.absoluteString ?? "") : ""
             DispatchQueue.main.async { focused = true }
         }
@@ -144,8 +146,25 @@ struct CommandBarOverlay: View {
                     Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(theme.secondary) }
                         .buttonStyle(.plain)
                 }
+                if showsDashboard {
+                    // V22: dashboard aanpassen (slepen, aan/uit).
+                    Button { withAnimation(.snappy) { customizing.toggle() } } label: {
+                        Image(systemName: customizing ? "checkmark.circle.fill" : "slider.horizontal.3")
+                            .foregroundStyle(customizing ? theme.accent : theme.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Customize this overlay")
+                    .accessibilityIdentifier("commandBar.customize")
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
+            if showsDashboard {
+                Divider().opacity(0.4)
+                ScrollView {
+                    OverlayDashboard(workspace: workspace, token: $token, editing: $customizing, open: open, close: close)
+                }
+                .frame(maxHeight: dashboardMaxHeight)
+            } else {
             platformChips
             if !suggestions.isEmpty {
                 Divider().opacity(0.4)
@@ -163,12 +182,25 @@ struct CommandBarOverlay: View {
                 }
                 .frame(maxHeight: 360)
             }
+            }
             hintBar
         }
         .frame(maxWidth: 680)
         .joeToepGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.25), radius: 30, y: 12)
         .animation(.snappy(duration: 0.2), value: token)
+    }
+
+    /// V22: leeg zoekveld bij een nieuwe tab → het aanpasbare dashboard.
+    private var showsDashboard: Bool {
+        overlayStore.dashboardEnabled && !editsCurrent && text.isEmpty && token == nil || customizing
+    }
+    private var dashboardMaxHeight: CGFloat {
+        #if os(macOS)
+        560
+        #else
+        UIDevice.current.userInterfaceIdiom == .phone ? 520 : 620
+        #endif
     }
 
     private var placeholder: String {

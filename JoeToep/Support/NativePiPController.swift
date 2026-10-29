@@ -37,6 +37,8 @@ final class NativePiPController: NSObject {
     private var possibleObservation: NSKeyValueObservation?
     private var statusObservation: NSKeyValueObservation?
     private var restoreRequested = false
+    /// V22: vlak vóór de terugkeer uit PiP; geeft terug hoelang de animatie nog moet wachten.
+    var onRestoreRequested: ((Double, Bool) -> TimeInterval)?
     private var automaticAllowed = true
     private var pendingManualStart = false
     private static let shadowBitRate: Double = 900_000
@@ -197,8 +199,15 @@ extension NativePiPController: AVPictureInPictureControllerDelegate {
     }
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
                                                 restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        MainActor.assumeIsolated { restoreRequested = true }
-        completionHandler(true)
+        // V22: eerst de webvideo al fullscreen zetten (op het juiste tijdstip), pas daarna de
+        // PiP-animatie laten eindigen → geen flits van de inline YouTube-speler ertussen.
+        MainActor.assumeIsolated {
+            restoreRequested = true
+            guard let prepare = onRestoreRequested else { completionHandler(true); return }
+            let delay = prepare(player.currentTime().seconds, player.rate != 0)
+            if delay <= 0 { completionHandler(true) }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { completionHandler(true) } }
+        }
     }
     nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ controller: AVPictureInPictureController) {}
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {

@@ -247,6 +247,7 @@
     // Cancel every recovery budget BEFORE touching playback.
     handoffUntil = 0; systemHandoff = false; returnWantsPlay = false;
     recoveryUsed = true; returnRecoveryUsed = true;
+    if (action !== "pause") quietUntil = 0;
     if (action === "pause") {
       userPause = true; desiredPlaying = false; interruptionWantsPlay = false;
       native.pause.call(v);
@@ -318,6 +319,19 @@
       // De video komt terug uit PiP: bepaal of hij door moet spelen, en voor hoelang we
       // dat mogen "herstellen" als het systeem hem toch pauzeert.
       pipSince = 0;
+      // V22: ✕ in het PiP-venster = stoppen. WebKit pauzeert de video vóórdat PiP eindigt;
+      // de terugknop laat hem doorspelen. Gepauzeerd bij het verlaten → gesloten: niet hervatten,
+      // geen fullscreen terug (ook niet via JoeToep), en blijven staan.
+      if (v.paused && !v.ended) {
+        desiredPlaying = false; userPause = true; returnWantsPlay = false;
+        systemHandoff = false; handoffUntil = 0; externalRequestUntil = 0; requestUntil = 0;
+        noFullscreenReturnUntil = Date.now() + 5000;
+        window.__joetoepPiPClosedAt = Date.now();
+        lastStatus = "system-pip-closed";
+        try { if (v.webkitDisplayingFullscreen) v.webkitExitFullscreen(); } catch (_) {}
+        document.dispatchEvent(new Event("joetoep-presentation-state"));
+        return;
+      }
       lastStatus = "system-pip-returned";
       systemHandoff = false; handoffUntil = 0; externalRequestUntil = 0; requestUntil = 0;
       returnWantsPlay = (desiredPlaying || (config.keepPlaying && !userPause)) && !interrupted && !v.ended;
@@ -488,6 +502,21 @@
   ].join(", ");                         // one CSS selector string: "a, b, c, …"
   // Marks the next 1.2 s as "the user is in control": pauses in that window are respected.
   const markUserIntent = () => { allowPauseUntil = Date.now() + 1200; };
+  // V22: "stil" na een sync-wijziging: een video in een tab die van een ander apparaat komt,
+  // mag niet zelf gaan spelen (YouTube-autoplay, seekTo op een gepauzeerde speler). Alleen een
+  // echte klik/toets of een opdracht van JoeToep zelf (remoteAction) start hem.
+  let quietUntil = 0, lastGestureAt = 0;
+  for (const t of ["pointerdown", "touchstart", "keydown", "mousedown"])
+    window.addEventListener(t, e => { if (e.isTrusted) lastGestureAt = Date.now(); }, true);
+  const quietGuard = e => {
+    if (Date.now() >= quietUntil || Date.now() - lastGestureAt < 1500) return;
+    const v = e.target; if (!(v instanceof HTMLMediaElement)) return;
+    desiredPlaying = false; userPause = true; returnWantsPlay = false;
+    try { native.pause.call(v); } catch (_) {}
+    lastStatus = "sync-quiet-blocked-autoplay";
+  };
+  window.addEventListener("play", quietGuard, true);
+  window.addEventListener("playing", quietGuard, true);
   window.addEventListener("pointerdown", e => {  // fires on every mouse press / finger touch
     if (!e.isTrusted) return;                     // ignore clicks that scripts simulate
     // closest() walks up from the clicked element to its parents and returns the first one
@@ -654,7 +683,7 @@
     const v = pick();
     if (!v) return { status: "none" };
     return { status: "ok", url: isURLSource(v) ? v.currentSrc : null, blob: Boolean(v.currentSrc?.startsWith("blob:")),
-      time: v.currentTime || 0, playing: !v.paused && !v.ended, userPause, ended: v.ended,
+      time: v.currentTime || 0, duration: Number.isFinite(v.duration) ? v.duration : 0, rate: v.playbackRate || 1, playing: !v.paused && !v.ended, userPause, ended: v.ended,
       fullscreen: Boolean(platform && (v.webkitPresentationMode === "fullscreen" || v.webkitDisplayingFullscreen)),
       pip: isPiP(v), media: isMediaPage(), ready: v.readyState, width: v.videoWidth || 0,
       wireless: Boolean(v.webkitCurrentPlaybackTargetIsWireless), ua: navigator.userAgent };
@@ -675,6 +704,11 @@
     nativeActive = false;
     if (!v) return { status: "none" };
     try { if (Number.isFinite(time) && time >= 0 && Math.abs((v.currentTime || 0) - time) > 0.3) v.currentTime = time; } catch (_) {}
+    if (!restore) {  // V22: ✕ = stoppen, geen fullscreen terug
+      noFullscreenReturnUntil = Date.now() + 5000; window.__joetoepPiPClosedAt = Date.now();
+      returnWantsPlay = false; play = false;
+      try { if (!v.paused) native.pause.call(v); } catch (_) {}
+    }
     if (play) {
       userPause = false; desiredPlaying = true;
       native.play.call(v)?.catch(() => { lastStatus = "native-return-play-declined"; signal(); });
@@ -712,6 +746,7 @@
     // Past de instellingen aan met nieuwe waarden ("next"). De spread "..." kopieert eerst
     // alle bestaande instellingen, en overschrijft daarna alleen wat in "next" zit.
     configure(next) { config = { ...config, ...next }; if (!config.fallback && fallbackRoot) fallbackRoot.hidden = true; return true; },
+    quiet(ms) { quietUntil = ms > 0 ? Date.now() + ms : 0; return true; },
     prepareHandoff, beginAutomaticHandoff, returnToApp, remoteAction, sourceInfo, nativeHandoff, nativeReturn,
     // Record explicit user intent when the site's own player performs the action.
     noteIntent(action) {

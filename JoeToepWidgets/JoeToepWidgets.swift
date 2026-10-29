@@ -5,6 +5,9 @@
 import WidgetKit
 import SwiftUI
 import AppIntents
+#if os(iOS) && canImport(ActivityKit)
+import ActivityKit
+#endif
 
 // MARK: - Data
 
@@ -596,6 +599,528 @@ struct ShortcutsWidget: Widget {
     }
 }
 
+
+// MARK: - V22 · Afstandsbediening (groot, alle apparaten)
+
+private struct DeviceControlRow: View {
+    let device: WidgetDevice
+    let entry: JTEntry
+    var compact = false
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: device.symbol).font(.caption).frame(width: 16).foregroundStyle(device.playing ? accent : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(device.title ?? "Nothing playing").font(.caption.weight(.medium)).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(device.isThisDevice ? "This device" : device.name)
+                    if let p = device.livePosition(at: entry.date) { Text("· " + timeText(p) + (device.duration.map { " / " + timeText($0) } ?? "")) }
+                }
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 2)
+            if device.title != nil {
+                if !compact { SkipButton(device: device, forward: false).font(.caption) }
+                PlayPauseButton(device: device, size: .title3)
+                if !compact { SkipButton(device: device, forward: true).font(.caption) }
+                if !device.isThisDevice {
+                    Link(destination: WidgetShared.link("takeover", ["device": device.id])) {
+                        Image(systemName: "arrow.down.right.circle.fill").font(.title3).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct RemoteControlWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "RemoteControl", provider: JTProvider()) { entry in
+            RemoteView(entry: entry).containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Remote Control")
+        .description("Big controls for what plays, plus play/pause, skip and Continue here for every device.")
+        .supportedFamilies([.systemMedium, .systemLarge] + Families.extraLarge)
+    }
+    struct RemoteView: View {
+        let entry: JTEntry
+        @Environment(\.widgetFamily) private var family
+        var body: some View {
+            if let d = entry.nowPlaying, d.title != nil {
+                VStack(alignment: .leading, spacing: family == .systemMedium ? 6 : 10) {
+                    HStack(spacing: 10) {
+                        Thumb(image: entry.image(WidgetShared.thumbnail(for: d.url)), corner: 8)
+                            .frame(width: family == .systemMedium ? 88 : 120, height: family == .systemMedium ? 50 : 68)
+                        VStack(alignment: .leading, spacing: 2) {
+                            DeviceBadge(device: d)
+                            Text(d.title ?? "").font(.subheadline.weight(.semibold)).lineLimit(2)
+                        }
+                    }
+                    ProgressLine(device: d, date: entry.date)
+                    HStack(spacing: 0) {
+                        Button(intent: MediaCommandIntent(action: .skipBack30, deviceID: d.isThisDevice ? nil : d.id)) { Image(systemName: "gobackward.30") }
+                            .buttonStyle(.plain).frame(maxWidth: .infinity)
+                        SkipButton(device: d, forward: false).frame(maxWidth: .infinity)
+                        PlayPauseButton(device: d, size: .largeTitle).frame(maxWidth: .infinity)
+                        SkipButton(device: d, forward: true).frame(maxWidth: .infinity)
+                        Button(intent: MediaCommandIntent(action: .skipForward30, deviceID: d.isThisDevice ? nil : d.id)) { Image(systemName: "goforward.30") }
+                            .buttonStyle(.plain).frame(maxWidth: .infinity)
+                    }
+                    .font(.title3)
+                    if family != .systemMedium {
+                        Divider()
+                        ForEach((entry.snapshot?.devices ?? []).filter { $0.id != d.id }.prefix(family == .systemLarge ? 3 : 5)) { o in
+                            DeviceControlRow(device: o, entry: entry, compact: true)
+                        }
+                        Spacer(minLength: 0)
+                        HStack {
+                            Button(intent: MediaCommandIntent(action: .pauseAll, deviceID: nil)) {
+                                Label("Pause all", systemImage: "pause.circle").font(.caption2.weight(.semibold))
+                            }.buttonStyle(.plain)
+                            Spacer()
+                            Link(destination: WidgetShared.searchURL()) { Label("Search", systemImage: "magnifyingglass").font(.caption2.weight(.semibold)) }
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            } else { EmptyState(text: "Nothing playing on your devices") }
+        }
+    }
+}
+
+// MARK: - V22 · Apparaat wisselen
+
+struct DeviceSwitcherWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "DeviceSwitcher", provider: JTProvider()) { entry in
+            SwitcherView(entry: entry).containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Device Switcher")
+        .description("One tap to continue the video here, or send it to your other device.")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+    struct SwitcherView: View {
+        let entry: JTEntry
+        @Environment(\.widgetFamily) private var family
+        var body: some View {
+            let devices = entry.snapshot?.devices ?? []
+            let me = devices.first { $0.isThisDevice }
+            let others = devices.filter { !$0.isThisDevice }
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Switch", systemImage: "arrow.left.arrow.right").font(.caption.weight(.semibold)).foregroundStyle(accent)
+                if others.isEmpty { Spacer(); Text("No other devices yet").font(.caption).foregroundStyle(.secondary); Spacer() }
+                ForEach(others.prefix(family == .systemSmall ? 2 : 3)) { o in
+                    HStack(spacing: 6) {
+                        Image(systemName: o.symbol).frame(width: 16)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(o.name).font(.caption2.weight(.semibold)).lineLimit(1)
+                            if family != .systemSmall { Text(o.title ?? "—").font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                        }
+                        Spacer(minLength: 2)
+                        if o.title != nil {
+                            Link(destination: WidgetShared.link("takeover", ["device": o.id])) {
+                                Text("Here").font(.caption2.weight(.bold)).padding(.horizontal, 7).padding(.vertical, 3)
+                                    .background(Capsule().fill(accent)).foregroundStyle(.white)
+                            }
+                        }
+                        if family != .systemSmall, me?.title != nil {
+                            Button(intent: MediaCommandIntent(action: .continueOn, deviceID: o.id)) {
+                                Text("Send").font(.caption2.weight(.bold)).padding(.horizontal, 7).padding(.vertical, 3)
+                                    .background(Capsule().stroke(accent)).foregroundStyle(accent)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+}
+
+// MARK: - V22 · Voortgang (ring)
+
+struct ProgressRingWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "ProgressRing", provider: JTProvider()) { entry in
+            RingView(entry: entry).containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Progress Ring")
+        .description("How far along the video is, time left and a play/pause button.")
+        .supportedFamilies(Families.smallAndAccessories)
+    }
+    struct RingView: View {
+        let entry: JTEntry
+        @Environment(\.widgetFamily) private var family
+        var body: some View {
+            if let d = entry.nowPlaying, d.title != nil {
+                let pos = d.livePosition(at: entry.date) ?? 0
+                let dur = d.duration ?? 0
+                let fraction = dur > 0 ? min(1, pos / dur) : 0
+                #if os(iOS)
+                if family == .accessoryCircular {
+                    Gauge(value: fraction) { Image(systemName: d.symbol) } currentValueLabel: {
+                        Image(systemName: d.playing ? "pause.fill" : "play.fill")
+                    }.gaugeStyle(.accessoryCircularCapacity)
+                } else if family == .accessoryRectangular {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(d.title ?? "").font(.headline).lineLimit(1)
+                        Gauge(value: fraction) { EmptyView() }.gaugeStyle(.accessoryLinearCapacity)
+                        Text(dur > 0 ? "\(timeText(max(0, dur - pos))) left · \(d.name)" : d.name).font(.caption2)
+                    }
+                } else { ring(d, fraction: fraction, pos: pos, dur: dur) }
+                #else
+                ring(d, fraction: fraction, pos: pos, dur: dur)
+                #endif
+            } else { EmptyState(text: "Nothing playing") }
+        }
+        private func ring(_ d: WidgetDevice, fraction: Double, pos: Double, dur: Double) -> some View {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().stroke(Color.primary.opacity(0.1), lineWidth: 7)
+                    Circle().trim(from: 0, to: fraction).stroke(accent, style: StrokeStyle(lineWidth: 7, lineCap: .round)).rotationEffect(.degrees(-90))
+                    PlayPauseButton(device: d, size: .title2)
+                }
+                .frame(width: 70, height: 70)
+                if family != .systemSmall {
+                    VStack(alignment: .leading, spacing: 3) {
+                        DeviceBadge(device: d)
+                        Text(d.title ?? "").font(.caption.weight(.semibold)).lineLimit(2)
+                        Text(dur > 0 ? "\(timeText(pos)) · \(timeText(max(0, dur - pos))) left" : timeText(pos))
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .widgetURL(d.url.map(WidgetShared.openURL))
+        }
+    }
+}
+
+// MARK: - V22 · Spotify (compact + groot)
+
+private struct SpotifyControls: View {
+    let s: WidgetSpotify
+    var big = false
+    var body: some View {
+        HStack(spacing: big ? 22 : 14) {
+            Button(intent: MediaCommandIntent(action: .spotifyPrevious, deviceID: nil)) { Image(systemName: "backward.fill") }.buttonStyle(.plain)
+            Button(intent: MediaCommandIntent(action: .spotifyPlayPause, deviceID: nil)) {
+                Image(systemName: s.playing ? "pause.circle.fill" : "play.circle.fill").font(big ? .largeTitle : .title2).foregroundStyle(.green)
+            }.buttonStyle(.plain)
+            Button(intent: MediaCommandIntent(action: .spotifyNext, deviceID: nil)) { Image(systemName: "forward.fill") }.buttonStyle(.plain)
+        }
+    }
+}
+
+struct SpotifyMiniWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "SpotifyMini", provider: JTProvider()) { entry in
+            MiniView(entry: entry).containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Spotify · Compact")
+        .description("Song and controls in the smallest space — also on the Lock Screen.")
+        .supportedFamilies(Families.smallAndAccessories)
+    }
+    struct MiniView: View {
+        let entry: JTEntry
+        @Environment(\.widgetFamily) private var family
+        var body: some View {
+            if let s = entry.snapshot?.spotify {
+                #if os(iOS)
+                if family == .accessoryCircular {
+                    ZStack { AccessoryWidgetBackground()
+                        Button(intent: MediaCommandIntent(action: .spotifyPlayPause, deviceID: nil)) { Image(systemName: s.playing ? "pause.fill" : "play.fill").font(.title3) }.buttonStyle(.plain)
+                    }
+                } else if family == .accessoryRectangular {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Label("Spotify", systemImage: "music.note").font(.caption2)
+                        Text(s.track).font(.headline).lineLimit(1)
+                        Text(s.artist).font(.caption2).lineLimit(1)
+                    }
+                } else { content(s) }
+                #else
+                content(s)
+                #endif
+            } else { EmptyState(text: "Spotify is quiet") }
+        }
+        private func content(_ s: WidgetSpotify) -> some View {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .top) {
+                    Thumb(image: entry.image(s.artworkURL), corner: 8).frame(width: 44, height: 44)
+                    Spacer()
+                    Image(systemName: "music.note").foregroundStyle(.green)
+                }
+                Text(s.track).font(.caption.weight(.semibold)).lineLimit(1)
+                Text(s.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                if s.duration > 0 {
+                    ProgressView(value: min(s.livePosition(at: entry.date), s.duration), total: s.duration).tint(.green)
+                }
+                Spacer(minLength: 0)
+                if family == .systemMedium {
+                    HStack { SpotifyControls(s: s); Spacer()
+                        Button(intent: MediaCommandIntent(action: .spotifyVolumeDown, deviceID: nil)) { Image(systemName: "speaker.minus") }.buttonStyle(.plain)
+                        Button(intent: MediaCommandIntent(action: .spotifyVolumeUp, deviceID: nil)) { Image(systemName: "speaker.plus") }.buttonStyle(.plain)
+                    }
+                } else { SpotifyControls(s: s).frame(maxWidth: .infinity) }
+            }
+        }
+    }
+}
+
+struct SpotifyLargeWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "SpotifyLarge", provider: JTProvider()) { entry in
+            LargeView(entry: entry).containerBackground(for: .widget) {
+                ZStack {
+                    if let img = entry.image(entry.snapshot?.spotify?.artworkURL) { img.resizable().scaledToFill().blur(radius: 30).opacity(0.5) }
+                    Color.black.opacity(0.35)
+                }
+            }
+        }
+        .configurationDisplayName("Spotify · Large")
+        .description("Big artwork, progress, volume and controls for Spotify on your Mac.")
+        .supportedFamilies([.systemLarge])
+    }
+    struct LargeView: View {
+        let entry: JTEntry
+        var body: some View {
+            if let s = entry.snapshot?.spotify {
+                VStack(spacing: 10) {
+                    Thumb(image: entry.image(s.artworkURL), corner: 16).frame(width: 150, height: 150)
+                    VStack(spacing: 2) {
+                        Text(s.track).font(.headline).lineLimit(1)
+                        Text([s.artist, s.album ?? ""].filter { !$0.isEmpty }.joined(separator: " — ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if s.duration > 0 {
+                        VStack(spacing: 2) {
+                            ProgressView(value: min(s.livePosition(at: entry.date), s.duration), total: s.duration).tint(.green)
+                            HStack { Text(timeText(s.livePosition(at: entry.date))); Spacer(); Text(timeText(s.duration)) }
+                                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                    }
+                    SpotifyControls(s: s, big: true)
+                    HStack {
+                        Button(intent: MediaCommandIntent(action: .spotifyVolumeDown, deviceID: nil)) { Image(systemName: "speaker.wave.1.fill") }.buttonStyle(.plain)
+                        if let v = s.volume { ProgressView(value: v, total: 100).tint(.white.opacity(0.8)) }
+                        Button(intent: MediaCommandIntent(action: .spotifyVolumeUp, deviceID: nil)) { Image(systemName: "speaker.wave.3.fill") }.buttonStyle(.plain)
+                    }
+                    .font(.caption)
+                    Text("on \(s.deviceName)").font(.caption2).foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.white)
+            } else { EmptyState(text: "Play something in Spotify on your Mac") }
+        }
+    }
+}
+
+// MARK: - V22 · Overzicht (alles in één)
+
+struct DashboardWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "Dashboard", provider: JTProvider()) { entry in
+            DashView(entry: entry).containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Dashboard")
+        .description("Video, Spotify, devices and search in one compact widget.")
+        .supportedFamilies([.systemMedium, .systemLarge] + Families.extraLarge)
+    }
+    struct DashView: View {
+        let entry: JTEntry
+        @Environment(\.widgetFamily) private var family
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                if let d = entry.nowPlaying, d.title != nil { DeviceControlRow(device: d, entry: entry) }
+                else { Text("No video playing").font(.caption).foregroundStyle(.secondary) }
+                if let s = entry.snapshot?.spotify {
+                    HStack(spacing: 8) {
+                        Thumb(image: entry.image(s.artworkURL), corner: 4).frame(width: 22, height: 22)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(s.track).font(.caption.weight(.medium)).lineLimit(1)
+                            Text(s.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 2)
+                        SpotifyControls(s: s).font(.caption)
+                    }
+                }
+                if family != .systemMedium {
+                    Divider()
+                    ForEach((entry.snapshot?.devices ?? []).filter { $0.id != entry.nowPlaying?.id }.prefix(3)) { o in
+                        DeviceControlRow(device: o, entry: entry, compact: true)
+                    }
+                    Divider()
+                    LinkList(title: "Continue watching", symbol: "play.circle.fill", links: Array((entry.snapshot?.continueWatching ?? []).prefix(3)), entry: entry, thumbnails: true)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 6) {
+                    Link(destination: WidgetShared.searchURL()) {
+                        HStack { Image(systemName: "magnifyingglass"); Text("Search").foregroundStyle(.secondary); Spacer() }
+                            .font(.caption).padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(Color.primary.opacity(0.08)))
+                    }
+                    Link(destination: WidgetShared.link("newtab")) { Image(systemName: "plus").font(.caption.weight(.bold)).padding(7).background(Circle().fill(Color.primary.opacity(0.08))) }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - V22 · Vergrendelscherm-extra's
+
+#if os(iOS)
+struct LockScreenDevicesWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "LockDevices", provider: JTProvider()) { entry in
+            LockView(entry: entry).containerBackground(.clear, for: .widget)
+        }
+        .configurationDisplayName("Devices · Lock Screen")
+        .description("Which device plays, at a glance.")
+        .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
+    }
+    struct LockView: View {
+        let entry: JTEntry
+        @Environment(\.widgetFamily) private var family
+        var body: some View {
+            let devices = entry.snapshot?.devices ?? []
+            let playing = devices.first { $0.playing }
+            switch family {
+            case .accessoryInline:
+                Label(playing.map { "\($0.name): \($0.title ?? "")" } ?? "Nothing playing", systemImage: playing?.symbol ?? "pause")
+            case .accessoryCircular:
+                ZStack { AccessoryWidgetBackground()
+                    VStack(spacing: 0) {
+                        Image(systemName: playing?.symbol ?? "play.slash").font(.title3)
+                        Text("\(devices.filter { $0.title != nil }.count)").font(.caption2)
+                    }
+                }
+                .widgetURL(playing.map { WidgetShared.link("takeover", ["device": $0.id]) })
+            default:
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(devices.prefix(3)) { d in
+                        HStack(spacing: 4) {
+                            Image(systemName: d.playing ? "play.fill" : "pause.fill").font(.system(size: 8))
+                            Image(systemName: d.symbol).font(.caption2)
+                            Text(d.title ?? "—").font(.caption2).lineLimit(1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
+// MARK: - V22 · Live Activity (vergrendelscherm, Dynamic Island, Watch Smart Stack)
+
+#if os(iOS) && canImport(ActivityKit)
+struct NowPlayingLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: NowPlayingActivityAttributes.self) { context in
+            LockScreenView(state: context.state)
+                .padding(14)
+                .activityBackgroundTint(Color.black.opacity(0.55))
+                .activitySystemActionForegroundColor(.white)
+                .widgetURL(WidgetShared.link("nowplaying"))
+        } dynamicIsland: { context in
+            let s = context.state
+            return DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    Label(s.isThisDevice ? "Here" : s.deviceName, systemImage: s.symbol).font(.caption2).foregroundStyle(.secondary)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    if !s.isThisDevice {
+                        Link(destination: WidgetShared.link("takeover", ["device": s.deviceID])) {
+                            Label("Here", systemImage: "arrow.down.right.circle.fill").font(.caption2.weight(.semibold))
+                        }
+                    }
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    VStack(spacing: 6) {
+                        ActivityProgress(state: s)
+                        ActivityButtons(state: s)
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: s.symbol).foregroundStyle(accent)
+            } compactTrailing: {
+                if let interval = s.interval {
+                    ProgressView(timerInterval: interval, countsDown: false) { EmptyView() } currentValueLabel: { EmptyView() }
+                        .progressViewStyle(.circular).tint(accent).frame(width: 18)
+                } else {
+                    Image(systemName: s.playing ? "waveform" : "pause.fill").foregroundStyle(accent)
+                }
+            } minimal: {
+                Image(systemName: s.playing ? "play.fill" : "pause.fill").foregroundStyle(accent)
+            }
+            .widgetURL(WidgetShared.link("nowplaying"))
+        }
+    }
+
+    struct LockScreenView: View {
+        let state: NowPlayingActivityAttributes.ContentState
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: state.symbol).foregroundStyle(accent)
+                    Text(state.isThisDevice ? "Playing here" : "On \(state.deviceName)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    if !state.isThisDevice {
+                        Link(destination: WidgetShared.link("takeover", ["device": state.deviceID])) {
+                            Text("Continue here").font(.caption.weight(.bold)).padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(Capsule().fill(accent)).foregroundStyle(.white)
+                        }
+                    }
+                }
+                Text(state.title).font(.headline).foregroundStyle(.white).lineLimit(2)
+                ActivityProgress(state: state)
+                ActivityButtons(state: state)
+                if let track = state.spotifyTrack, !track.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "music.note").foregroundStyle(.green)
+                        Text("\(track) · \(state.spotifyArtist ?? "")").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        Button(intent: MediaCommandIntent(action: .spotifyPlayPause, deviceID: nil)) {
+                            Image(systemName: state.spotifyPlaying == true ? "pause.fill" : "play.fill").font(.caption)
+                        }.buttonStyle(.plain).foregroundStyle(.green)
+                    }
+                }
+            }
+        }
+    }
+
+    struct ActivityProgress: View {
+        let state: NowPlayingActivityAttributes.ContentState
+        var body: some View {
+            if let interval = state.interval {
+                ProgressView(timerInterval: interval, countsDown: false).tint(accent).foregroundStyle(.secondary).font(.caption2.monospacedDigit())
+            } else if state.duration > 0 {
+                ProgressView(value: min(state.time, state.duration), total: state.duration).tint(accent)
+            }
+        }
+    }
+
+    struct ActivityButtons: View {
+        let state: NowPlayingActivityAttributes.ContentState
+        var body: some View {
+            let target: String? = state.isThisDevice ? nil : state.deviceID
+            HStack(spacing: 0) {
+                Button(intent: MediaCommandIntent(action: .skipBack30, deviceID: target)) { Image(systemName: "gobackward.30") }.frame(maxWidth: .infinity)
+                Button(intent: MediaCommandIntent(action: .skipBack, deviceID: target)) { Image(systemName: "gobackward.10") }.frame(maxWidth: .infinity)
+                Button(intent: MediaCommandIntent(action: .playPause, deviceID: target)) {
+                    Image(systemName: state.playing ? "pause.circle.fill" : "play.circle.fill").font(.title).foregroundStyle(accent)
+                }.frame(maxWidth: .infinity)
+                Button(intent: MediaCommandIntent(action: .skipForward, deviceID: target)) { Image(systemName: "goforward.10") }.frame(maxWidth: .infinity)
+                Button(intent: MediaCommandIntent(action: .skipForward30, deviceID: target)) { Image(systemName: "goforward.30") }.frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .font(.title3)
+        }
+    }
+}
+#endif
+
 // MARK: - Formaten
 
 enum Families {
@@ -635,16 +1160,46 @@ enum Families {
 @main
 struct JoeToepWidgetsBundle: WidgetBundle {
     var body: some Widget {
+        NowPlayingBundle().body
+        LibraryBundle().body
+        ControlBundle().body
+    }
+}
+
+struct NowPlayingBundle: WidgetBundle {
+    var body: some Widget {
         NowPlayingWidget()
         NowPlayingArtWidget()
         NowPlayingMinimalWidget()
-        DevicesWidget()
+        ProgressRingWidget()
+        RemoteControlWidget()
+        DashboardWidget()
+        #if os(iOS) && canImport(ActivityKit)
+        NowPlayingLiveActivity()
+        #endif
+    }
+}
+
+struct LibraryBundle: WidgetBundle {
+    var body: some Widget {
         SearchWidget()
         LibraryWidget()
         ContinueWatchingWidget()
         HistoryWidget()
         TabsWidget()
-        SpotifyHomeWidget()
         ShortcutsWidget()
+    }
+}
+
+struct ControlBundle: WidgetBundle {
+    var body: some Widget {
+        DevicesWidget()
+        DeviceSwitcherWidget()
+        SpotifyHomeWidget()
+        SpotifyMiniWidget()
+        SpotifyLargeWidget()
+        #if os(iOS)
+        LockScreenDevicesWidget()
+        #endif
     }
 }

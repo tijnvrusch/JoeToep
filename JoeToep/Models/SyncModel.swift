@@ -14,9 +14,12 @@ struct SyncTab: Codable, Equatable, Identifiable, Sendable {
     var pinned: Bool = false
     /// Afspeelpositie van de video in deze tab (seconden), als bekend.
     var time: Double?
+    /// V22: lengte van de video (voor voortgang in widgets / Watch).
+    var duration: Double?
 
-    init(id: UUID, url: URL?, title: String? = nil, pinned: Bool = false, time: Double? = nil) {
+    init(id: UUID, url: URL?, title: String? = nil, pinned: Bool = false, time: Double? = nil, duration: Double? = nil) {
         self.id = id; self.url = url.map(SyncTab.canonical); self.title = title; self.pinned = pinned; self.time = time
+        self.duration = duration
     }
 
     /// Mac gebruikt www.youtube.com, iPhone m.youtube.com: in de sync altijd dezelfde vorm,
@@ -41,9 +44,13 @@ struct SyncSnapshot: Codable, Equatable, Sendable {
     /// Tab waarvan de video NU speelt op het apparaat `origin` (nil = niets speelt daar).
     var playingID: UUID?
     var sentAt: Date = Date()
+    /// V22: deze tab speelde tot dit apparaat naar de achtergrond ging (iPhone pauzeert dan).
+    /// Het volgende apparaat dat je pakt, speelt hem verder op precies `handoffTime`.
+    var handoffID: UUID?
+    var handoffTime: Double?
 
     /// Inhoud zonder versie/afzender/tijd: om te zien of er echt iets veranderde.
-    var content: SyncContent { SyncContent(tabs: tabs, selectedID: selectedID, playingID: playingID) }
+    var content: SyncContent { SyncContent(tabs: tabs, selectedID: selectedID, playingID: playingID, handoffID: handoffID) }
 
     /// true als `self` nieuwer is dan `other` (totale ordening → iedereen kiest hetzelfde).
     func supersedes(_ other: SyncSnapshot?) -> Bool {
@@ -57,15 +64,18 @@ struct SyncContent: Equatable, Sendable {
     var tabs: [SyncTab]
     var selectedID: UUID
     var playingID: UUID?
+    var handoffID: UUID? = nil
 
     /// Gelijk genoeg om niets te versturen: afspeeltijden die < 2 s verschillen tellen niet
     /// (die lopen tijdens het afspelen vanzelf; elke seconde versturen is zinloos).
     func matches(_ other: SyncContent?) -> Bool {
-        guard let other, selectedID == other.selectedID, playingID == other.playingID,
+        guard let other, selectedID == other.selectedID, playingID == other.playingID, handoffID == other.handoffID,
               tabs.count == other.tabs.count else { return false }
         for (a, b) in zip(tabs, other.tabs) {
-            guard a.id == b.id, a.url == b.url, a.pinned == b.pinned else { return false }
-            if abs((a.time ?? 0) - (b.time ?? 0)) >= 2 { return false }
+            guard a.id == b.id, a.url == b.url, a.pinned == b.pinned, a.title == b.title else { return false }
+            // V22: de spelende tab telt al vanaf 1 s verschil (live positie), de rest vanaf 2 s.
+            let limit = a.id == playingID ? 1.0 : 2.0
+            if abs((a.time ?? 0) - (b.time ?? 0)) >= limit { return false }
         }
         return true
     }
@@ -117,14 +127,16 @@ struct SyncLedger: Sendable {
     init(deviceID: String) { self.deviceID = deviceID }
 
     /// Maakt een nieuwe lokale snapshot, of nil als de inhoud gelijk is aan wat al gedeeld is.
-    mutating func makeLocal(name: String, tabs: [SyncTab], selectedID: UUID, playingID: UUID?, force: Bool = false, now: Date = Date()) -> SyncSnapshot? {
-        let content = SyncContent(tabs: tabs, selectedID: selectedID, playingID: playingID)
+    mutating func makeLocal(name: String, tabs: [SyncTab], selectedID: UUID, playingID: UUID?, handoff: (id: UUID, time: Double)? = nil,
+                            force: Bool = false, now: Date = Date()) -> SyncSnapshot? {
+        let content = SyncContent(tabs: tabs, selectedID: selectedID, playingID: playingID, handoffID: handoff?.id)
         if !force, content.matches(current?.content) { return nil }
         // Hybride klok: minstens "nu" in milliseconden, en altijd hoger dan alles wat we zagen.
         // Zo wint na een herstart de écht nieuwste wijziging, en blijft de volgorde kloppen.
         clock = max(clock + 1, UInt64(max(0, now.timeIntervalSince1970 * 1000)))
         let snapshot = SyncSnapshot(version: clock, origin: deviceID, originName: name, tabs: tabs,
-                                    selectedID: selectedID, playingID: playingID)
+                                    selectedID: selectedID, playingID: playingID, sentAt: now,
+                                    handoffID: handoff?.id, handoffTime: handoff?.time)
         current = snapshot
         return snapshot
     }

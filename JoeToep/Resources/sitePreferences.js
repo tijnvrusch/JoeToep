@@ -8,7 +8,7 @@
   // De instellingen die de app kan aanpassen via configure(); dit zijn de standaardwaarden.
   // JOETOEP_NATIVE_HOST geeft aan of we in de native app draaien (dan regelt de app zelf
   // de automatische fullscreen, dus die staat hier standaard uit).
-  let config = {automaticFullscreen: !window.JOETOEP_NATIVE_HOST, disableCaptions: true, disablePreviewCaptions: true, theater: true};
+  let config = {automaticFullscreen: !window.JOETOEP_NATIVE_HOST, fullscreenOnPlay: false, disableCaptions: true, disablePreviewCaptions: true, theater: true};
   // Onthoudt voor welke video (key) we theatermodus al hebben aangezet, zodat we dat niet
   // telkens opnieuw proberen te doen (en de gebruiker de knop niet kan uitzetten).
   let theaterKey = '';
@@ -25,6 +25,7 @@
   // pendingFullscreenKey: een fullscreen-verzoek dat wacht op bevestiging van de native app.
   // queued: voorkomt dat we apply() meerdere keren inplannen binnen dezelfde "tick".
   let lastFullscreenKey = '', pendingFullscreenKey = '', queued = false;
+  let startedKey = '', resumeRequested = false, wasPausedInline = false;
   let configured = !window.JOETOEP_NATIVE_HOST;
   // WeakMap: een soort Map (sleutel/waarde-opslag), maar de sleutels (hier: video-elementen)
   // mogen door de browser opgeruimd worden uit het geheugen zodra ze nergens anders meer
@@ -91,10 +92,14 @@
     // het moet een kijkpagina zijn met een video die al speelt en genoeg geladen is
     // (readyState >= 2), we mogen dit nog niet gedaan hebben voor déze video, en er mag
     // geen Picture-in-Picture actief zijn.
-    if (window.JoeToepMedia.diagnostics().rawVisibility !== "visible" || !config.automaticFullscreen || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||
+    // V22: twee aparte opties — "bij laden" (eerste start van een video) en "bij afspelen"
+    // (weer op play drukken terwijl hij inline stond).
+    const firstStart = startedKey !== key();
+    const allowed = firstStart ? config.automaticFullscreen : (config.fullscreenOnPlay && resumeRequested);
+    if (window.JoeToepMedia.diagnostics().rawVisibility !== "visible" || !allowed || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||
         lastFullscreenKey === key() || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
     // Only one attempt per video; exiting fullscreen never immediately reopens it.
-    lastFullscreenKey = key();
+    lastFullscreenKey = key(); startedKey = key(); resumeRequested = false;
     if (window.JOETOEP_NATIVE_HOST) {
       // In de native app kunnen we niet zomaar zelf fullscreen aanzetten (dat vereist vaak
       // een echte gebruikersactie); we sturen een event en wachten tot de app het bevestigt
@@ -110,7 +115,7 @@
     const v = video();
     // Nog steeds dezelfde checks als bij het oorspronkelijke verzoek — intussen kan er
     // van alles veranderd zijn (video gepauzeerd, andere video geopend, enzovoort).
-    if (!pending || pending !== key() || !config.automaticFullscreen || !watchPage() || !v || v.paused || v.ended ||
+    if (!pending || pending !== key() || !(config.automaticFullscreen || config.fullscreenOnPlay) || !watchPage() || !v || v.paused || v.ended ||
         window.JoeToepMedia.diagnostics().rawVisibility !== 'visible' ||
         v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return false;
     // Op desktop kan het richten van het toetsenbord op de speler ('focus') soms als
@@ -134,7 +139,16 @@
   for (const event of ['playing', 'loadedmetadata', 'canplay']) window.addEventListener(event, schedule, true);
   // V19.2: pauze haalde de video uit fullscreen → bij verder spelen weer fullscreen (één keer).
   window.addEventListener('playing', () => {
-    if (window.__joetoepExitedByPause) { window.__joetoepExitedByPause = false; lastFullscreenKey = ''; schedule(); }
+    if (window.__joetoepExitedByPause) { window.__joetoepExitedByPause = false; lastFullscreenKey = ''; resumeRequested = true; schedule(); return; }
+    // V22: "fullscreen bij afspelen": inline gepauzeerd → weer play → fullscreen.
+    if (config.fullscreenOnPlay && wasPausedInline && startedKey === key() && Date.now() > (window.__jtSkipFSUntil || 0)) { lastFullscreenKey = ''; resumeRequested = true; schedule(); }
+    wasPausedInline = false;
+    if (startedKey !== key() && !config.automaticFullscreen) startedKey = key();
+  }, true);
+  window.addEventListener('pause', e => {
+    const v = video();
+    if (e.target !== v || v.ended) return;
+    wasPausedInline = !(document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen);
   }, true);
   // V19.3: na het VERLATEN van fullscreen altijd weer theatermodus (als die instelling aan staat).
   // YouTube zet theater soms uit bij het verlaten van fullscreen; dan zie je een kleine speler.

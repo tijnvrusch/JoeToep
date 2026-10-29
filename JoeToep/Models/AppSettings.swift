@@ -29,6 +29,8 @@ final class AppSettings: ObservableObject {
     // zodat UserDefaults (het kleine opslagsysteem van de app) weet onder
     // welke naam de waarde bewaard moet worden.
     @Published var automaticFullscreen: Bool { didSet { save(automaticFullscreen, "automaticFullscreenV8") } }
+    /// V22: fullscreen zodra je (weer) op play drukt terwijl de video inline staat.
+    @Published var fullscreenOnPlay: Bool { didSet { save(fullscreenOnPlay, "fullscreenOnPlayV22") } }
     // Simpele aan/uit-instellingen (Bool = true/false), telkens met hetzelfde
     // patroon: bij wijziging opslaan onder hun eigen sleutel.
     @Published var disableCaptions: Bool { didSet { save(disableCaptions, "disableCaptionsV8") } }
@@ -172,7 +174,7 @@ final class AppSettings: ObservableObject {
     /// YouTube-bediening ook tonen bij de pijltjestoetsen (standaard onzichtbaar).
     @Published var arrowKeysShowControls: Bool { didSet { save(arrowKeysShowControls, "arrowKeysShowControlsV19") } }
     /// V19.2: gepauzeerd → uit fullscreen; verder spelen → weer fullscreen.
-    @Published var exitFullscreenOnPause: Bool { didSet { save(exitFullscreenOnPause, "exitFullscreenOnPauseV192") } }
+    @Published var exitFullscreenOnPause: Bool { didSet { save(exitFullscreenOnPause, "exitFullscreenOnPauseV22") } }
     // MARK: V19.1 snelheid
     @Published var speedStepSmall: Double { didSet { save(speedStepSmall, "speedStepSmallV191") } }
     @Published var speedStepMedium: Double { didSet { save(speedStepMedium, "speedStepMediumV191") } }
@@ -277,6 +279,7 @@ final class AppSettings: ObservableObject {
             defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
         }
         automaticFullscreen = flag("automaticFullscreenV8", true)
+        fullscreenOnPlay = flag("fullscreenOnPlayV22", true)
         disableCaptions = flag("disableCaptionsV8", true)
         disablePreviewCaptions = flag("disablePreviewCaptionsV8", true)
         // Voor enums werkt het net iets anders dan bij flag(): eerst wordt de
@@ -378,7 +381,7 @@ final class AppSettings: ObservableObject {
         showControlsWhileScrubbing = flag("showControlsWhileScrubbingV19", true)
         scrubThumbnail = flag("scrubThumbnailV19", true)
         arrowKeysShowControls = flag("arrowKeysShowControlsV19", false)
-        exitFullscreenOnPause = flag("exitFullscreenOnPauseV192", true)
+        exitFullscreenOnPause = flag("exitFullscreenOnPauseV22", false)
         speedStepSmall = min(max((defaults.object(forKey: "speedStepSmallV191") as? Double) ?? 0.05, 0.01), 0.5)
         speedStepMedium = min(max((defaults.object(forKey: "speedStepMediumV191") as? Double) ?? 0.25, 0.05), 1)
         speedStepLarge = min(max((defaults.object(forKey: "speedStepLargeV191") as? Double) ?? 0.5, 0.1), 2)
@@ -484,7 +487,7 @@ final class AppSettings: ObservableObject {
             smartMultiMonitorPiP: smartMultiMonitorPiP,
             swipeSeekSeconds: swipeSeekSeconds, volumeStepPercent: volumeStepPercent,
             showControlsWhileScrubbing: showControlsWhileScrubbing, scrubThumbnail: scrubThumbnail,
-            arrowKeysShowControls: arrowKeysShowControls, exitFullscreenOnPause: exitFullscreenOnPause)
+            arrowKeysShowControls: arrowKeysShowControls, exitFullscreenOnPause: exitFullscreenOnPause, fullscreenOnPlay: fullscreenOnPlay)
     }
     // Een gewone functie (geen property): wordt aangeroepen als de
     // gebruiker de servicemelding accepteert, en zet de bijbehorende
@@ -523,7 +526,7 @@ final class AppSettings: ObservableObject {
         switchToNewTabs = true; pipOnAllSites = true; showCreatorTools = true
         smartMultiMonitorPiP = true; tabSync = true; showSpeedControl = true; showDownloadButton = true
         swipeSeekSeconds = 5; volumeStepPercent = 1; showControlsWhileScrubbing = true; scrubThumbnail = true; arrowKeysShowControls = false
-        speedStepSmall = 0.05; speedStepMedium = 0.25; speedStepLarge = 0.5; exitFullscreenOnPause = true
+        speedStepSmall = 0.05; speedStepMedium = 0.25; speedStepLarge = 0.5; exitFullscreenOnPause = false; fullscreenOnPlay = true
         showMoreMenu = true; showBookmarkButton = false
         aiTabSummary = true; tabSummaryLength = .short; useAppleIntelligence = true; openNewTabsNextToCurrent = true
         openWebLinksInApp = true; searchEngine = .youtube; recordHistory = true

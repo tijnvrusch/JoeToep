@@ -245,11 +245,16 @@ struct HandoffSettingsSection: View {
     @AppStorage("handoffLatencyV21") private var latency = 0.08
     @AppStorage("handoffMaxAgeV21") private var maxAge = 900.0
     @AppStorage("resumeOnLaunchV21") private var resumeOnLaunch = false
+    @AppStorage("advancedModeV22") private var advanced = false
+    @AppStorage("liveActivityV22") private var liveActivity = true
     var body: some View {
         Section {
             Toggle("Keep playing when JoeToep reopens", isOn: $resumeOnLaunch)
             Toggle("Continue playing when you switch devices", isOn: $autoResume)
-            if autoResume {
+            #if os(iOS)
+            Toggle("Live Activity on the Lock Screen", isOn: $liveActivity)
+            #endif
+            if autoResume && advanced {
                 VStack(alignment: .leading) {
                     Text("Count a click or tap as switching after \(Int(idle)) s away")
                     Slider(value: $idle, in: 1...30, step: 1)
@@ -298,6 +303,7 @@ struct SidebarAndCommandBarSettings: View {
 
     var body: some View {
         Form {
+            TabAudioIconSettings()
             if sidebarAvailable {
                 Section {
                     Picker("Tabs", selection: $sidebar) {
@@ -329,6 +335,9 @@ struct SidebarAndCommandBarSettings: View {
                     ForEach(MediaPlatform.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Toggle("Platform name + Tab searches there", isOn: $tabToSearch)
+                Toggle("Dashboard in the new tab overlay", isOn: Binding(get: { OverlayLayoutStore.shared.dashboardEnabled },
+                                                                          set: { OverlayLayoutStore.shared.dashboardEnabled = $0 }))
+                Button("Reset overlay layout") { OverlayLayoutStore.shared.reset() }
                 Toggle("Suggest open tabs", isOn: $showTabs)
                 Toggle("Suggest favourites & history", isOn: $showHistory)
                 Stepper("Suggestions: \(suggestions)", value: $suggestions, in: 3...15)

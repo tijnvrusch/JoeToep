@@ -102,7 +102,7 @@ struct SidebarView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: max(2, pinnedColumns)), spacing: 6) {
             ForEach(workspace.pinnedTabs) { tab in
                 PinnedTile(tab: tab, session: tab.session, selected: tab.id == workspace.selectedID)
-                    .onTapGesture { workspace.select(tab) }
+                    .onTapGesture { DispatchQueue.main.async { if Date().timeIntervalSince(TabAudioIcon.lastAction) > 0.4 { workspace.select(tab) } } }
                     .contextMenu { tabMenu(tab) }
                     .draggable(tab.id.uuidString)
             }
@@ -186,7 +186,7 @@ struct SidebarView: View {
 
     private func row(_ tab: BrowserTab, accent: Color?) -> some View {
         SidebarTabRow(tab: tab, session: tab.session, selected: tab.id == workspace.selectedID, compact: compactRows,
-                      accent: accent, close: { workspace.close(tab) })
+                      accent: accent, close: { workspace.close(tab) }, select: { workspace.select(tab) })
             .onTapGesture { workspace.select(tab) }
             .contextMenu { tabMenu(tab) }
             .draggable(tab.id.uuidString) { Text(tab.title).padding(6) }
@@ -260,6 +260,8 @@ struct SidebarTabRow: View {
     var compact = false
     var accent: Color?
     let close: () -> Void
+    /// V22: naar deze tab wisselen (voor het geluid-icoontje).
+    var select: (() -> Void)? = nil
     @State private var hovering = false
     @Environment(\.joeToepTheme) private var theme
 
@@ -267,6 +269,12 @@ struct SidebarTabRow: View {
         HStack(spacing: 8) {
             Group {
                 if session.isLoading && !session.isPlaying { ProgressView().controlSize(.mini) }
+                else if TabAudioIcon.isActionable(tab, session) {
+                    Button { TabAudioIcon.perform(tab, session, select: { select?() }) } label: {
+                        Image(systemName: TabAudioIcon.symbol(tab, session, hovering: hovering, base: icon))
+                            .themedIcon(theme, size: 12, active: session.isPlaying).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
                 else { Image(systemName: icon).themedIcon(theme, size: 12, active: session.isPlaying) }
             }
             .frame(width: 18)

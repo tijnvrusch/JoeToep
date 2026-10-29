@@ -82,6 +82,8 @@ final class DownloadManager: NSObject, ObservableObject {
     static let shared = DownloadManager()
     /// Vraagt het venster een download offline af te spelen (bijv. vanaf de Apple Watch).
     static let playOffline = Notification.Name("JoeToepPlayOffline")
+    /// V22: een download is klaar (object = id) — bijv. om hem automatisch naar de Watch te sturen.
+    static let didComplete = Notification.Name("JoeToepDownloadCompleted")
 
     @Published private(set) var items: [DownloadItem] = []
     /// Downloads op andere apparaten (per apparaat-id), via de tab-sync.
@@ -231,6 +233,7 @@ final class DownloadManager: NSObject, ObservableObject {
         let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
         update(id) { $0.state = .done; $0.progress = 1; $0.fileName = file.lastPathComponent; $0.bytes = size; $0.error = nil }
         save()
+        NotificationCenter.default.post(name: Self.didComplete, object: id)
     }
 
     fileprivate func fail(_ id: UUID, _ message: String) {

@@ -241,12 +241,40 @@ final class BrowserWorkspace: ObservableObject {
             guard !kept.isEmpty else { return }
             let tabs = kept.map { tab -> SyncTab in
                 let saved = Self.saved(tab)
-                return SyncTab(id: tab.id, url: saved.url, title: tab.fullTitle, pinned: tab.pinned, time: saved.time)
+                return SyncTab(id: tab.id, url: saved.url, title: tab.fullTitle, pinned: tab.pinned, time: saved.time,
+                              duration: tab.session.resumePoint?.duration)
             }
             let selection = kept.contains(where: { $0.id == self.selectedID }) ? self.selectedID : kept[0].id
             let playing = kept.first { $0.session.isPlaying }?.id
-            TabSyncService.shared.publish(tabs: tabs, selectedID: selection, playingID: playing)
+            let handoff = self.localHandoff.flatMap { h in kept.contains { $0.id == h.id } ? h : nil }
+            TabSyncService.shared.publish(tabs: tabs, selectedID: selection, playingID: playing, handoff: handoff,
+                                          force: self.forceNextPublish)
+            self.forceNextPublish = false
         }
+    }
+
+    /// V22: speelde hier iets toen dit apparaat naar de achtergrond ging? Dan geven we die tab + exacte
+    /// tijd door, zodat het apparaat dat je nu pakt precies daar verder speelt (iPhone pauzeert zelf).
+    private var localHandoff: (id: UUID, time: Double)?
+    private var forceNextPublish = false
+    func prepareDeviceSwitch() {
+        guard let tab = tabs.first(where: { !$0.isPrivate && ($0.session.isPlaying || $0.session.isInPictureInPicture) }) else { return }
+        let fallback = tab.session.resumePoint?.time ?? 0
+        localHandoff = (tab.id, fallback)
+        forceNextPublish = true; publishSync()
+        // Exacte tijd uit de pagina (binnen enkele ms) en meteen nog een keer versturen.
+        tab.session.webView.evaluateJavaScript("(()=>{const p=document.getElementById('movie_player');const v=document.querySelector('video.html5-main-video')||document.querySelector('video');return p&&p.getCurrentTime?Number(p.getCurrentTime()):(v?v.currentTime:-1)})()") { [weak self] value, _ in
+            Task { @MainActor in
+                guard let self, let t = value as? Double, t >= 0, self.localHandoff?.id == tab.id else { return }
+                self.localHandoff = (tab.id, t)
+                self.forceNextPublish = true; self.publishSync()
+            }
+        }
+    }
+    /// Dit apparaat wordt weer gebruikt: de open overdracht vervalt.
+    func clearDeviceSwitch() {
+        guard localHandoff != nil else { return }
+        localHandoff = nil; forceNextPublish = true; publishSync()
     }
 
     /// Past de tabs van een ander apparaat hier toe: nieuwe tabs erbij, gesloten tabs weg,
@@ -262,6 +290,12 @@ final class BrowserWorkspace: ObservableObject {
         // V21: onthoud wat het andere apparaat NU speelt (voor automatisch overnemen bij wisselen).
         if let playing = snapshot.playingID, let remote = snapshot.tabs.first(where: { $0.id == playing }), let url = remote.url {
             remotePlayback = RemotePlayback(device: snapshot.origin, tabID: playing, url: url, time: remote.time ?? 0, receivedAt: Date())
+        } else if let hid = snapshot.handoffID, let remote = snapshot.tabs.first(where: { $0.id == hid }), let url = remote.url,
+                  !Self.consumedHandoffs.contains("\(snapshot.origin):\(hid):\(Int(snapshot.handoffTime ?? 0))") {
+            // V22: het andere apparaat ging naar de achtergrond terwijl dit speelde → hier verder, exact op die tijd.
+            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: hid, url: url,
+                                            time: snapshot.handoffTime ?? remote.time ?? 0, receivedAt: Date(), paused: true,
+                                            handoffKey: "\(snapshot.origin):\(hid):\(Int(snapshot.handoffTime ?? 0))")
         } else if remotePlayback?.device == snapshot.origin {
             remotePlayback = nil          // daar gepauzeerd/gestopt → niets over te nemen
             if sentAway?.device == snapshot.origin { sentAway = nil }
@@ -277,6 +311,7 @@ final class BrowserWorkspace: ObservableObject {
             let tab = BrowserTab(saved: SavedBrowserTab(id: remote.id, url: remote.url, time: remote.time, playing: false,
                                                         lastActive: Date(), pinned: remote.pinned ? true : nil, title: remote.title))
             tab.session.syncedStartPaused = true
+            tab.session.holdQuiet(20)
             tabs.append(tab); observe(tab)
         }
         // 3. Andere pagina in een bestaande tab: NIET meteen laden (je kijkt nu op het andere
@@ -311,8 +346,12 @@ final class BrowserWorkspace: ObservableObject {
     enum SwitchTrigger { case appActivated, interaction, tabSelection }
     struct RemotePlayback: Equatable {
         var device: String, tabID: UUID, url: URL, time: Double, receivedAt: Date
+        /// V22: daar staat hij stil (overdracht na achtergrond) → exact deze tijd, niet doorrekenen.
+        var paused = false
+        /// V22: sleutel van de overdracht (één keer overnemen, ook niet opnieuw na een herstart).
+        var handoffKey: String? = nil
         /// Geschatte positie nu: laatste bekende tijd + hoe lang geleden (de video liep door).
-        func estimatedTime(at now: Date = Date()) -> Double { time + max(0, now.timeIntervalSince(receivedAt)) }
+        func estimatedTime(at now: Date = Date()) -> Double { paused ? time : time + max(0, now.timeIntervalSince(receivedAt)) }
     }
     private(set) var remotePlayback: RemotePlayback?
     private var lastLocalInteraction = Date.distantPast
@@ -357,8 +396,14 @@ final class BrowserWorkspace: ObservableObject {
 
     /// Pak de video over: tab kiezen, meteen spelen op de geschatte tijd, het andere apparaat laten
     /// pauzeren en zijn exacte tijd sturen (dan corrigeren we tot op ±0,3 s).
+    /// V22: overdrachten die al zijn overgenomen.
+    static var consumedHandoffs: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "consumedHandoffsV22") ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.suffix(20)), forKey: "consumedHandoffsV22") }
+    }
     private func takeOver(_ remote: RemotePlayback) {
         remotePlayback = nil
+        if let key = remote.handoffKey { Self.consumedHandoffs.append(key) }
         ignoreRemoteSelectionUntil = Date().addingTimeInterval(6)
         let tab = tabs.first(where: { $0.id == remote.tabID })
             ?? tabs.first(where: { SyncDiff.sameDestination($0.currentURL, remote.url) })
@@ -368,7 +413,7 @@ final class BrowserWorkspace: ObservableObject {
         }
         if target.id != selectedID { selected.session.leaveFullscreenForTabSwitch(); select(target) }
         pendingNavigation[target.id] = nil; pendingPosition[target.id] = nil
-        let estimate = remote.estimatedTime() + HandoffPrefs.latencyCompensation
+        let estimate = remote.estimatedTime() + (remote.paused ? 0 : HandoffPrefs.latencyCompensation)
         target.session.takeOverPlayback(url: remote.url, time: estimate)
         awaitingHandoff[remote.url.absoluteString] = Date().addingTimeInterval(4)
         TabSyncService.shared.send(SyncCommand(kind: .handoffRequest, target: remote.device, url: remote.url, value: nil,
@@ -394,6 +439,7 @@ final class BrowserWorkspace: ObservableObject {
         let now = Date()
         let idle = now.timeIntervalSince(lastLocalInteraction)
         lastLocalInteraction = now
+        clearDeviceSwitch()
         let localPlaying = tabs.contains { $0.session.isPlaying || $0.session.isInPictureInPicture }
         // V21: net terug uit de achtergrond en (nog) niet verbonden? Eerst even wachten op verse
         // info van het andere apparaat, anders beslissen we op verouderde gegevens.
@@ -507,6 +553,11 @@ final class BrowserWorkspace: ObservableObject {
             if playing {                              // this tab's video just STARTED playing
                 tab.lastActive = Date()               // for "close inactive tabs" and Ctrl+Tab order
                 self.handOver(to: tab)                // pause / close PiP of every other tab
+                #if os(iOS)
+                if UIApplication.shared.applicationState == .active { self.localHandoff = nil }
+                #else
+                self.localHandoff = nil
+                #endif
                 self.requestDeviceHandoff(for: tab)   // V19.1: ander apparaat speelt dezelfde video? → exacte tijd
             }
             // Keep the screen awake while any tab plays (iPhone/iPad setting). `async` runs it
@@ -712,6 +763,8 @@ final class BrowserWorkspace: ObservableObject {
     @Published var showCommandBar = false
     /// true = de overlay past het adres van de huidige tab aan (⌘L); false = nieuwe tab (⌘T).
     @Published var commandBarEditsCurrent = false
+    /// V22: eenmalig platform voor de volgende zoekbalk (bijv. vanuit een widget).
+    var commandBarToken: MediaPlatform?
 
     /// "+" / ⌘T: Arc-stijl overlay (standaard), of meteen een lege tab (instelbaar).
     func requestNewTab() {
@@ -845,6 +898,17 @@ final class BrowserWorkspace: ObservableObject {
         persist()
         return from != end
     }
+    /// V22: live herordenen tijdens het slepen (Mac): één plek naar links/rechts, binnen de eigen
+    /// groep (vastgezet of gewoon). Geeft true als er echt iets verschoof.
+    @discardableResult
+    func stepTab(id: UUID, by offset: Int) -> Bool {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        let target = index + offset
+        guard target >= 0, target < tabs.count, tabs[target].pinned == tabs[index].pinned else { return false }
+        tabs.swapAt(index, target)
+        return true
+    }
+    func finishTabDrag() { persist() }
     func move(_ tab: BrowserTab, by offset: Int) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         let target = min(max(index + offset, 0), tabs.count - 1)
@@ -992,6 +1056,10 @@ struct PlayerShellView: View {
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 TabSyncService.shared.resume(); workspace.publishSync()
             }
+            // V22: vlak vóór de achtergrond de exacte positie doorgeven (de verbinding valt daarna weg).
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                workspace.prepareDeviceSwitch()
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 workspace.resumeFromOtherDevice(trigger: .appActivated)
             }
@@ -1027,6 +1095,9 @@ struct PlayerShellView: View {
                            leading: oneBar && !chrome.buttonsHidden ? AnyView(oneBarPart(.leading)) : nil,
                            trailing: oneBar && !chrome.buttonsHidden ? AnyView(oneBarPart(.trailing)) : nil,
                            leadingInset: oneBarInTitlebar && !windowIsFullscreen ? 70 : 0)
+                    // V22: een te brede balk mag nooit de hele layout breder dan het scherm maken
+                    // (dan schoof de pagina op de iPhone naar links en viel de linkerrand weg).
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).clipped()
                     #if os(macOS)
                     .onHover { chrome.setHovering($0) }
                     #endif
@@ -1041,6 +1112,7 @@ struct PlayerShellView: View {
                         .allowsHitTesting(workspace.selectedID == tab.id)
                         .accessibilityHidden(workspace.selectedID != tab.id)
                         .zIndex(workspace.selectedID == tab.id ? 1 : 0)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 }
                 if editingAddress {
                     // V16: tapping/clicking anywhere else closes the address bar.
@@ -1059,6 +1131,7 @@ struct PlayerShellView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity).clipped()
             .animation(theme.anim(.tabs), value: workspace.selectedID)
             .animation(theme.anim(.findBar), value: findVisible)
             .overlay(alignment: .top) {
@@ -1117,15 +1190,17 @@ struct PlayerShellView: View {
         .onOpenURL { url in
             // V21: links uit widgets: joetoep://search?p=…, joetoep://open?url=…, joetoep://newtab, joetoep://takeover?device=…
             if url.scheme?.lowercased() == WidgetShared.urlScheme, let host = url.host?.lowercased(),
-               ["search", "newtab", "open", "takeover", "library"].contains(host) {
+               ["search", "newtab", "open", "takeover", "library", "nowplaying"].contains(host) {
                 let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
                 func value(_ n: String) -> String? { items.first { $0.name == n }?.value }
                 switch host {
                 case "search":
-                    if let p = value("p"), MediaPlatform(rawValue: p) != nil { UserDefaults.standard.set(p, forKey: "newTabPlatformV192") }
+                    // V22: platform alleen voor deze zoekopdracht (je standaard blijft YouTube).
+                    workspace.commandBarToken = value("p").flatMap(MediaPlatform.init(rawValue:))
                     workspace.commandBarEditsCurrent = false; workspace.showCommandBar = true
                 case "newtab": workspace.requestNewTab()
                 case "library": showingLibrary = true
+                case "nowplaying": workspace.select(workspace.mediaTab)
                 case "takeover": if let d = value("device") { workspace.takeOverFrom(device: d) }
                 default:
                     if let raw = value("url"), let target = URL(string: raw) {

@@ -128,7 +128,7 @@ def check_setting_help():
     require(not dup, "SettingHelp duplicate keys: " + ", ".join(dup))
 
 def main() -> int:
-    checks = [check_required_files, check_plists, check_assets, check_sources, check_project_file, check_v2, check_v3, check_v4, check_v5, check_v6, check_v7, check_setting_help, check_v21]
+    checks = [check_required_files, check_plists, check_assets, check_sources, check_project_file, check_v2, check_v3, check_v4, check_v5, check_v6, check_v7, check_setting_help, check_v21, check_v22]
     for check in checks:
         check()
         print(f"PASS {check.__name__}")
@@ -156,7 +156,7 @@ def check_v2() -> None:
     definitions = re.findall(r"^\t\t([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", project, re.M)
     require(len(definitions) == len(set(definitions)), "Duplicate Xcode object id")
     require(set(re.findall(r"\b[A-F0-9]{24}\b", project)) <= set(definitions), "Dangling Xcode object reference")
-    require("MARKETING_VERSION = 21.0.0;" in project, "V3 version missing")
+    require("MARKETING_VERSION = 22.0.0;" in project, "V3 version missing")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     require({item.get("BlueprintName") for item in scheme.findall(".//TestableReference/BuildableReference")}
             == {"JoeToepTests", "JoeToepUITests"}, "Scheme omits a test target")
@@ -208,7 +208,7 @@ def check_v4() -> None:
     project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
     require(project.count("PRODUCT_NAME = JoeToep;") == 2, "Product name differs across configurations")
     require(project.count("PRODUCT_MODULE_NAME = JoeToep;") == 2, "Stable module name lost")
-    require(project.count("CURRENT_PROJECT_VERSION = 29;") >= 2, "Build version mismatch")
+    require(project.count("CURRENT_PROJECT_VERSION = 30;") >= 2, "Build version mismatch")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     for item in scheme.findall(".//BuildableReference"):
         require(item.get("ReferencedContainer") == "container:JoeToep.xcodeproj", "Old scheme project path")
@@ -294,6 +294,26 @@ def check_v21() -> None:
         require("group.nl.tijn.JoeToep" in (ROOT / ent).read_text(), f"App group missing in {ent}")
     shared = (ROOT / "JoeToep/Support/WidgetShared.swift").read_text()
     require('"group.nl.tijn.JoeToep"' in shared and "37WRZNSADT.nl.tijn.JoeToep.shared" in shared, "App group ids out of sync")
+
+
+def check_v22() -> None:
+    shared = (ROOT / "JoeToep/Support/WatchShared.swift").read_text()
+    for copy in ("JoeToepWatch/WatchShared.swift", "JoeToepWatchWidgets/WatchShared.swift"):
+        require((ROOT / copy).read_text() == shared, f"{copy} differs from JoeToep/Support/WatchShared.swift")
+    project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
+    require("JoeToepWatchWidgets.appex in Embed Foundation Extensions" in project, "Watch widgets are not embedded in the Watch app")
+    require("nl.tijn.JoeToep.watchkitapp.widgets" in project, "Watch widget bundle id missing")
+    for ent in ("JoeToepWatch/JoeToepWatch.entitlements", "JoeToepWatchWidgets/JoeToepWatchWidgets.entitlements"):
+        require("group.nl.tijn.JoeToep" in (ROOT / ent).read_text(), f"App group missing in {ent}")
+    plist = (ROOT / "JoeToep/Info.plist").read_text()
+    require("NSSupportsLiveActivities" in plist, "Live Activities not enabled")
+    session = (ROOT / "JoeToep/Browser/WebSession.swift").read_text()
+    require("PiP closed with ✕" in session, "PiP close must stop playback")
+    require("horizontalLock" in session, "iPhone horizontal offset lock missing")
+    media = (ROOT / "JoeToep/Resources/mediaCompatibility.js").read_text()
+    require("system-pip-closed" in media and "quiet(ms)" in media, "PiP close / sync quiet guard missing in JS")
+    model = (ROOT / "JoeToep/Models/SyncModel.swift").read_text()
+    require("handoffID" in model and "handoffTime" in model, "Background handoff marker missing")
 
 
 if __name__ == "__main__":

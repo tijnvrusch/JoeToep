@@ -31,6 +31,7 @@ struct SettingsView: View {
     // hiermee onthoudt SwiftUI of een bevestigingsvenstertje open moet staan.
     @State private var confirmClear = false
     @State private var confirmReset = false
+    @AppStorage("advancedModeV22") private var advancedMode = false
     /// V19.2: zoeken in de instellingen.
     @State private var search = ""
 
@@ -123,9 +124,17 @@ struct SettingsView: View {
                         }.formStyle(.grouped)
                     }
                 }
+                // V22: geen losse "advanced"-hoek meer voor iedereen: één schakelaar. Uit = alleen wat een
+                // gewone gebruiker nodig heeft; aan = élke optie (ook de nerd-opties) op zijn eigen pagina.
                 Section {
-                    link("Advanced settings", "exclamationmark.triangle", .gray, "For tech nerds: internals, curves, diagnostics") { AdvancedSettings(settings: settings, session: session) }
-                }
+                    Toggle(isOn: $advancedMode.animation(.snappy)) {
+                        VStack(alignment: .leading, spacing: 2) { Text("Advanced mode"); Text("Show every option, including the technical ones").font(.caption).foregroundStyle(.secondary) }
+                    }
+                    .accessibilityIdentifier("settings.advancedMode")
+                    if advancedMode {
+                        link("Internals & diagnostics", "wrench.and.screwdriver.fill", .gray, "Curves, WebKit tweaks, logs, experiments") { AdvancedSettings(settings: settings, session: session) }
+                    }
+                } footer: { Text(advancedMode ? "All options are visible. Technical options are marked with a wrench." : "Only the everyday options are shown. Turn on Advanced mode to see everything.") }
                 // Deze losse Section bevat de "gevaarlijke" reset-knop.
                 // role: .destructive geeft de knop een rode/waarschuwende
                 // kleur, en tikken zet alleen confirmReset op true (de echte
@@ -304,7 +313,7 @@ private struct AppearanceSettings: View {
                 }
                 detail("The theme colours JoeToep's menu bar, tabs and settings. YouTube itself stays in its dark theme.")
             }
-            Section("Icons in the app") {
+            AdvancedSection("Icons in the app") {
                 // "$0" is de kortere schrijfwijze voor het eerste (en hier
                 // enige) argument van de closure: in plaats van "{ item in
                 // Text(item.title) }" mag je "{ Text($0.title) }" schrijven.
@@ -371,7 +380,7 @@ private struct AppearanceSettings: View {
                 // Bool-instelling.
                 SettingToggle("Show tab icons", isOn: $settings.showTabIcons)
             }
-            Section("Motion") {
+            AdvancedSection("Motion") {
                 SettingPicker("Animations", selection: $settings.animationStyle) {
                     ForEach(AnimationStyle.allCases) { Text($0.title).tag($0) }
                 }
@@ -430,7 +439,7 @@ private struct TabSettings: View {
     @ObservedObject var settings: AppSettings
     var body: some View {
         Form {
-            Section("Automatic tab summary") {
+            AdvancedSection("Automatic tab summary") {
                 SettingToggle("Summarise video titles in tabs", isOn: $settings.aiTabSummary)
                     .accessibilityIdentifier("settings.aiTabSummary")
                 // "!settings.aiTabSummary" betekent "niet aiTabSummary": als
@@ -502,7 +511,7 @@ private struct PlaybackSettings: View {
             // iPad): rotatie-naar-fullscreen is een iPhone-specifiek gedrag.
             #if os(iOS)
             if UIDevice.current.userInterfaceIdiom == .phone {
-                Section("Rotation (iPhone)") {
+                AdvancedSection("Rotation (iPhone)") {
                     SettingToggle("Fullscreen when rotating to landscape", isOn: $settings.fullscreenOnLandscape)
                     SettingToggle("Leave fullscreen when rotating back to portrait", isOn: $settings.exitFullscreenOnPortrait)
                     SettingToggle("Instant rotation (keep the page in portrait)", isOn: $settings.portraitLockForRotation)
@@ -524,7 +533,7 @@ private struct PlaybackSettings: View {
                 detail("Fullscreen: swipe sideways with two fingers (or Mac Mouse Fix) to scrub, up/down for volume. Arrow keys: ←/→ 5 s, ⌥ 30 s, ⌥⌘ 60 s; ↑/↓ five volume steps.")
             }
             #if os(macOS)
-            AdvancedGestureSettings()
+            if UserDefaults.standard.bool(forKey: "advancedModeV22") { AdvancedGestureSettings() }
             #else
             TouchGestureSettings()
             #endif
@@ -547,7 +556,7 @@ private struct PlaybackSettings: View {
                     set: { UserDefaults.standard.set($0, forKey: "backSwipeV192") }))
                 detail("Horizontal swipes scrub the video by default, so swiping back is off. The Back button is always in the menu bar. Changes to swiping back apply to new tabs.")
             }
-            Section("Playback speed steps") {
+            AdvancedSection("Playback speed steps") {
                 Stepper(value: $settings.speedStepSmall, in: 0.01...0.5, step: 0.01) {
                     SettingLabel(title: String(format: "Small step: %.2f×", settings.speedStepSmall))
                 }
@@ -561,8 +570,12 @@ private struct PlaybackSettings: View {
             }
             Section("Watching") {
                 SettingToggle("Theater mode (full width)", isOn: $settings.theaterMode)
-                SettingToggle("Open videos in fullscreen automatically", isOn: $settings.automaticFullscreen)
+                SettingToggle("Fullscreen when a video loads and starts", isOn: $settings.automaticFullscreen)
                     .accessibilityIdentifier("settings.automaticFullscreen")
+                SettingToggle("Fullscreen when you press play", isOn: $settings.fullscreenOnPlay)
+                    .accessibilityIdentifier("settings.fullscreenOnPlay")
+                SettingToggle("Leave fullscreen when paused", isOn: $settings.exitFullscreenOnPause)
+                detail("Click a video and it starts in fullscreen; press play on a paused video and it goes fullscreen again. Leaving fullscreen on pause is off by default.")
                 SettingToggle("Keep the screen on while a video plays", isOn: $settings.keepScreenAwake)
                 SettingToggle("Turn off video captions", isOn: $settings.disableCaptions)
                 SettingToggle("Turn off thumbnail preview captions", isOn: $settings.disablePreviewCaptions)
@@ -582,7 +595,7 @@ private struct PlaybackSettings: View {
                 }
                 detail("Off by default: the normal quality is used everywhere, also on mobile data or a personal hotspot such as “eiFoon”. On: JoeToep switches to the quality above whenever the connection is cellular, a hotspot or Low Data Mode.")
             }
-            Section("Media controls") {
+            AdvancedSection("Media controls") {
                 detail("Control Center, the Lock Screen and the ⏯ key control the video through Now Playing. When another app (Spotify, Podcasts) starts playing afterwards, the system hands the controls to that app until JoeToep plays again.")
             }
         }
@@ -730,7 +743,7 @@ private struct AdBlockSettings: View {
                 SettingToggle("Block ads", isOn: $settings.blockAds)
                 SettingToggle("Hide ad cards and promoted tiles", isOn: $settings.hideAdCards)
             }
-            Section("Strictness") {
+            AdvancedSection("Strictness") {
                 ForEach(AdBlockLevel.allCases) { level in
                     Button { settings.adBlockLevel = level } label: {
                         HStack(alignment: .top, spacing: 10) {
@@ -785,7 +798,7 @@ private struct SponsorBlockSettingsView: View {
                     }
                 }
             }.disabled(!settings.sponsorBlock.enabled)
-            Section("Behaviour") {
+            AdvancedSection("Behaviour") {
                 SettingToggle("Show a notice with Undo after skipping", isOn: $settings.sponsorBlock.showNotice)
                 Stepper("Notice duration: \(Int(settings.sponsorBlock.noticeSeconds)) s", value: $settings.sponsorBlock.noticeSeconds, in: 2...10, step: 1)
                 SettingToggle("Show segments in the progress bar", isOn: $settings.sponsorBlock.showMarkers)
@@ -857,7 +870,7 @@ private struct LayoutSettings: View {
                 } footer: { Text("Like Safari on iPad: all buttons sit in the tab bar at the top, so the page gets the most room.") }
             }
             #endif
-            Section("Size") {
+            AdvancedSection("Size") {
                 SettingPicker("Menu bar buttons", selection: $settings.toolbarDensity) {
                     ForEach(ToolbarDensity.allCases) { Text($0.title).tag($0) }
                 }
@@ -1070,7 +1083,7 @@ private struct VisualizerSettings: View {
             } footer: {
                 Text("Off by default. It moves while a video plays and stops when paused. WebKit does not let apps read a video's sound without risking silence in Picture in Picture, so it follows the playback (and your BPM) instead of the exact audio.")
             }
-            Section("Colour") {
+            AdvancedSection("Colour") {
                 SettingPicker("Colours", selection: $settings.visualizerConfig.colorMode) {
                     ForEach(VisualizerColorMode.allCases) { Text($0.title).tag($0) }
                 }
@@ -1082,7 +1095,7 @@ private struct VisualizerSettings: View {
                 slider("Opacity", $settings.visualizerConfig.opacity, 0.1...1, "%.0f %%", scale: 100)
                 SettingToggle("Glow", isOn: $settings.visualizerConfig.glow)
             }.disabled(!on)
-            Section("Shape") {
+            AdvancedSection("Shape") {
                 Stepper("Bars: \(settings.visualizerConfig.bars)", value: $settings.visualizerConfig.bars, in: 8...160, step: 4)
                 slider("Height", $settings.visualizerConfig.height, 0.2...1, "%.0f %%", scale: 100)
                 slider("Intensity", $settings.visualizerIntensity, 0.1...1, "%.0f %%", scale: 100)
@@ -1092,7 +1105,7 @@ private struct VisualizerSettings: View {
                 SettingToggle("Mirror (symmetric)", isOn: $settings.visualizerConfig.mirror)
                 SettingToggle("Rounded bars", isOn: $settings.visualizerConfig.roundedCaps)
             }.disabled(!on)
-            Section("Motion") {
+            AdvancedSection("Motion") {
                 slider("Speed", $settings.visualizerConfig.speed, 0.25...3, "%.2f×")
                 slider("Smoothing", $settings.visualizerConfig.smoothing, 0...1, "%.0f %%", scale: 100)
                 HStack {
@@ -1201,7 +1214,7 @@ private struct SyncSettings: View {
                 }
             }
             if !sync.log.isEmpty {
-                Section("Activity") {
+                AdvancedSection("Activity") {
                     ForEach(Array(sync.log.prefix(12).enumerated()), id: \.offset) { _, line in
                         Text(line).font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
@@ -1247,14 +1260,14 @@ private struct AdvancedGestureSettings: View {
             }
             detail("Continuous follows your fingers exactly; Steps jumps by the swipe/volume step above.")
         }
-        Section("Trackpad (MacBook)") {
+        AdvancedSection("Trackpad (MacBook)") {
             Toggle("Flip scrub direction", isOn: $invertTrackpadX)
             Toggle("Flip volume direction", isOn: $invertTrackpadY)
             slider("Scrub speed", $seekTrackpad, 0.005...0.5, "%.3f s/pt")
             slider("Volume speed", $volumeTrackpad, 0.02...2, "%.2f %%/pt")
             Toggle("Ignore momentum after lifting fingers", isOn: $ignoreMomentum)
         }
-        Section("Mouse (e.g. Razer + Mac Mouse Fix)") {
+        AdvancedSection("Mouse (e.g. Razer + Mac Mouse Fix)") {
             Toggle("Flip scrub direction", isOn: $invertMouseX)
             Toggle("Flip volume direction", isOn: $invertMouseY)
             slider("Scrub speed", $seekMouse, 0.01...2, "%.2f s/pt")
@@ -1290,7 +1303,7 @@ private struct TouchGestureSettings: View {
     @AppStorage("touchSeekPerPxV192") private var perPx = 0.25
     @AppStorage("invertTouchV192") private var invert = false
     var body: some View {
-        Section("Touch scrubbing (inline player)") {
+        AdvancedSection("Touch scrubbing (inline player)") {
             Toggle("Swipe over the video to scrub", isOn: $touchScrub)
             HStack {
                 Text("Speed")
@@ -1306,7 +1319,7 @@ private struct TouchGestureSettings: View {
 /// V19.2 — Voorinstellingen voor alle gebaren + terug naar standaard.
 private struct GesturePresetSection: View {
     var body: some View {
-        Section("Gesture presets") {
+        AdvancedSection("Gesture presets") {
             Button("Precise (small steps)") { Self.apply(seek: 0.02, mouseSeek: 0.08, volume: 0.15, touch: 0.1) }
             Button("Balanced (default)") { Self.reset() }
             Button("Fast (big jumps)") { Self.apply(seek: 0.15, mouseSeek: 0.6, volume: 0.8, touch: 0.8) }
@@ -1373,4 +1386,18 @@ enum SettingsCloseMetrics {
     static var top: CGFloat { if #available(iOS 26.0, *) { return 4 } else { return 6 } }
     static let trailing: CGFloat = 16
     #endif
+}
+
+
+/// V22: sectie die alleen zichtbaar is met "Advanced mode" aan (Instellingen, bovenaan de lijst).
+struct AdvancedSection<Content: View>: View {
+    let title: String
+    let content: Content
+    @AppStorage("advancedModeV22") private var advanced = false
+    init(_ title: String, @ViewBuilder content: () -> Content) { self.title = title; self.content = content() }
+    var body: some View {
+        if advanced {
+            Section { content } header: { Label(title, systemImage: "wrench.and.screwdriver").labelStyle(.titleAndIcon) }
+        }
+    }
 }
