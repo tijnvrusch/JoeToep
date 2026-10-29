@@ -19,7 +19,7 @@ Persoonlijke YouTube-browser/-speler (SwiftUI + WKWebView) van Tijn, één multi
 ## Swift-compiler = GitHub Actions (macOS-runner)
 Een Linux-Swift-toolchain helpt niet (geen SwiftUI/AppKit/UIKit) en download.swift.org is hier geblokkeerd. De compiler is daarom `.github/workflows/build.yml`: bij **elke push** bouwt GitHub de app met de nieuwste Xcode voor macOS én iOS Simulator (zonder ondertekenen), plus alle `Scripts/test_*.cjs` en `validate_project.py`.
 - Werkwijze: wijzig → commit → push (eigen branch, bijv. `werk/<onderwerp>`, of `main`) → wacht ~5–10 min → `Scripts/ci_status.sh [branch]` toont de status en bij een fout de `error:`-regels. Herhaal tot alle jobs groen zijn vóórdat je een versie oplevert.
-- Zonder `gh`: `curl -s https://api.github.com/repos/tijnvrusch/joetoep/actions/runs?branch=<branch>&per_page=1` (status/conclusion); volledige logs staan als artifact `build-log-macOS`/`build-log-iOS` bij de run.
+- Zonder `gh`: `curl -s https://api.github.com/repos/tijnvrusch/JoeToep/actions/runs?branch=<branch>&per_page=1` (status/conclusion); volledige logs staan als artifact `build-log-macOS`/`build-log-iOS` bij de run.
 - Groen in CI = compileert; gedrag testen blijft op Tijns apparaten.
 
 ## Werken op Tijns Mac (alleen als die gekoppeld is)
