@@ -308,7 +308,7 @@ struct SpaceSwitcherBar: View {
                 .contextMenu { SpaceMenuItems(workspace: workspace, space: space) }
                 .accessibilityIdentifier("space.\(index)")
             }
-            Button { withAnimation(Motion.quick()) { workspace.addSpace() } } label: {
+            Button { withAnimation(Motion.quick()) { _ = workspace.addSpace() } } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold)).frame(width: 24, height: 24)
                     .background(Circle().fill(theme.foreground.opacity(0.08)))
             }
@@ -364,7 +364,7 @@ struct SpaceTitleRow: View {
             Menu {
                 SpaceMenuItems(workspace: workspace, space: space)
                 Divider()
-                Button { workspace.addSpace() } label: { Label("New Space", systemImage: "plus") }
+                Button { _ = workspace.addSpace() } label: { Label("New Space", systemImage: "plus") }
             } label: {
                 Image(systemName: "ellipsis").font(.caption.weight(.bold)).frame(width: 22, height: 22).contentShape(Rectangle())
             }
@@ -398,7 +398,7 @@ struct SpaceMenuChip: View {
                 }
             }
             Divider()
-            Button { workspace.addSpace() } label: { Label("New Space", systemImage: "plus") }
+            Button { _ = workspace.addSpace() } label: { Label("New Space", systemImage: "plus") }
             Button { workspace.editingSpaceID = space.id } label: { Label("Edit \(space.name)…", systemImage: "pencil") }
         } label: {
             HStack(spacing: 5) {

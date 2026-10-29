@@ -1690,7 +1690,7 @@ struct PlayerShellView: View {
             toggleAssistant: { if V26Prefs.assistantEnabled() { withAnimation(Motion.quick()) { workspace.showAssistant.toggle() } } },
             editBoost: { if workspace.selected.session.boostSite != nil { workspace.showBoostEditor = true } },
             zap: { workspace.selected.session.isZapping ? workspace.selected.session.stopZap() : workspace.selected.session.startZap() },
-            newSpace: { if V26Prefs.spacesEnabled() { withAnimation(Motion.quick()) { workspace.addSpace() } } },
+            newSpace: { if V26Prefs.spacesEnabled() { withAnimation(Motion.quick()) { _ = workspace.addSpace() } } },
             nextSpace: { if V26Prefs.spaceShortcuts() { withAnimation(Motion.quick()) { workspace.switchToNeighbourSpace(1) } } },
             previousSpace: { if V26Prefs.spaceShortcuts() { withAnimation(Motion.quick()) { workspace.switchToNeighbourSpace(-1) } } },
             selectSpace: { index in if V26Prefs.spaceShortcuts() { withAnimation(Motion.quick()) { workspace.switchSpace(index: index) } } })

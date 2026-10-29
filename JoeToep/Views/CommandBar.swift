@@ -384,7 +384,7 @@ struct PaletteCommand {
                 $0.selected.session.startZap() })
         }
         if V26Prefs.spacesEnabled() {
-            list.append(PaletteCommand(title: "New Space", symbol: "plus.square.on.square", keywords: ["space", "new space", "ruimte"]) { $0.addSpace() })
+            list.append(PaletteCommand(title: "New Space", symbol: "plus.square.on.square", keywords: ["space", "new space", "ruimte"]) { _ = $0.addSpace() })
             for space in SpaceStore.load() {
                 let symbol = space.symbolIsEmoji ? "square.stack" : space.symbol
                 list.append(PaletteCommand(title: "Switch to Space “\(space.name)”", symbol: symbol, keywords: ["space", space.name.lowercased()]) {
