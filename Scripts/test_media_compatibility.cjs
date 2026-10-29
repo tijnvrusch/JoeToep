@@ -511,14 +511,29 @@ test('V8 fullscreen default enters once per video and does not reopen after exit
   assert.equal(h.nativeCalls.fullscreen,1);h.setMode(h.v,'inline');h.fire(h.v,'playing');await Promise.resolve();
   assert.equal(h.nativeCalls.fullscreen,1);assert.equal(h.d.documentElement.hasAttribute('dark'),true);h.close();
 });
+test('V16 Mac: pause from the PiP window stays paused (no automatic resume)', () => {
+  const h=harness({mobile:false,standard:true});h.api.beginAutomaticHandoff();h.hide();h.advance(1000);
+  h.rawPause(h.v);assert.equal(h.nativeCalls.play,0);assert.equal(h.v.paused,true);
+  h.advance(2000);assert.equal(h.v.paused,true);h.close();
+});
+test('V16 iOS: pause in settled PiP is user intent; the first handoff moments may still recover', () => {
+  const h=harness();h.api.enterPiP();h.hide();h.advance(900);h.rawPause(h.v);
+  assert.equal(h.nativeCalls.play,0);assert.equal(h.v.paused,true);h.close();
+});
+test('V16 another tab starts a video: PiP closes to inline, paused, never fullscreen', () => {
+  const h=harness();h.api.enterPiP();h.advance(900);h.api.remoteAction('pause');assert.equal(h.api.closePiPInline(),true);
+  assert.equal(h.v.webkitPresentationMode,'inline');assert.equal(h.v.paused,true);assert.equal(h.api.restoreFullscreen(),false);h.close();
+});
 test('V10 desktop theater does not race automatic fullscreen or unconfigured native preferences', async () => {
   const h=harness({mobile:false});h.w.JOETOEP_NATIVE_HOST=true;
   const watch=h.d.createElement('ytd-watch-flexy');h.d.body.append(watch);
   const button=h.d.createElement('button');button.className='ytp-size-button';watch.append(button);
   let clicks=0;button.addEventListener('click',()=>{clicks++;watch.setAttribute('theater','');});
-  h.w.eval(preferencesSource);await Promise.resolve();assert.equal(clicks,0);
-  h.w.JoeToepPreferences.configure({automaticFullscreen:true});await Promise.resolve();assert.equal(clicks,0);
-  h.w.JoeToepPreferences.configure({automaticFullscreen:false});await Promise.resolve();assert.equal(clicks,1);
+  h.w.eval(preferencesSource);await Promise.resolve();assert.equal(clicks,0,'not before native configuration');
+  h.w.JoeToepPreferences.configure({automaticFullscreen:true,theater:false});await Promise.resolve();assert.equal(clicks,0);
+  h.w.JoeToepPreferences.configure({automaticFullscreen:true,theater:true});await Promise.resolve();assert.equal(clicks,1,'V16 theater by default');
+  watch.removeAttribute('theater');h.w.JoeToepPreferences.configure({theater:true});await Promise.resolve();
+  assert.equal(clicks,1,'once per video: a user leaving theater mode is respected');
   h.close();
 });
 test('V10 native automatic fullscreen waits for preferences and consumes exactly one request', async () => {

@@ -191,3 +191,15 @@ void JTAllowProgrammaticFocus(WKWebView *webView, NSTimeInterval seconds) {
     delegate.allowUntil = CFAbsoluteTimeGetCurrent() + seconds;
 #endif
 }
+
+BOOL JTRestartWebContent(WKWebView *webView) {
+    for (NSString *name in @[@"_killWebContentProcessAndResetState", @"_killWebContentProcess"]) {
+        SEL selector = NSSelectorFromString(name);
+        if ([webView respondsToSelector:selector]) {
+            ((void (*)(id, SEL))objc_msgSend)(webView, selector);
+            JTNote(@"ForceRefresh=kill");
+            return YES;
+        }
+    }
+    return NO;
+}

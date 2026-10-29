@@ -33,6 +33,11 @@ struct TabPlayerView: View {
                             .font(.system(size: 8)).opacity(0.02).allowsHitTesting(false)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .accessibilityIdentifier("debug.state")
+                        Text(session.lifecycleTail.isEmpty ? "-" : session.lifecycleTail)
+                            .font(.system(size: 4)).opacity(0.02).allowsHitTesting(false).lineLimit(1)
+                            .frame(maxWidth: 40, maxHeight: .infinity, alignment: .bottomLeading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("debug.lifecycle")
                     }
                     if session.isFloating {
                         VStack(spacing: 12) {

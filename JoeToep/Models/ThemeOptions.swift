@@ -42,11 +42,18 @@ enum ThemeStyle: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum AccentChoice: String, CaseIterable, Identifiable, Sendable {
-    case red, orange, amber, yellow, lime, green, mint, teal, cyan, blue, indigo, purple, pink, rose, white, custom
+    case youtubeRed, red, orange, amber, yellow, lime, green, mint, teal, cyan, blue, indigo, purple, pink, rose, white, custom
     var id: String { rawValue }
-    var title: String { self == .custom ? "Custom" : rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .custom: "Custom"
+        case .youtubeRed: "YouTube Red (Tjoep)"
+        default: rawValue.capitalized
+        }
+    }
     func color(custom: String) -> Color {
         switch self {
+        case .youtubeRed: Color(hex: 0xFF0033)
         case .red: Color(hex: 0xFF3B30)
         case .orange: Color(hex: 0xFF8A00)
         case .amber: Color(hex: 0xFFB300)
@@ -130,8 +137,8 @@ enum IconRendering: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum AnimationStyle: String, CaseIterable, Identifiable, Sendable {
-    case off, snappy, smooth, bouncy, relaxed
+enum AnimationStyle: String, CaseIterable, Identifiable, Codable, Sendable {
+    case off, snappy, smooth, bouncy, relaxed, spring, easeOut, linear
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -140,15 +147,59 @@ enum AnimationStyle: String, CaseIterable, Identifiable, Sendable {
         case .smooth: "Smooth"
         case .bouncy: "Bouncy"
         case .relaxed: "Relaxed"
+        case .spring: "Spring"
+        case .easeOut: "Ease out"
+        case .linear: "Linear"
         }
     }
-    var animation: Animation? {
+    var animation: Animation? { animation(speed: 1) }
+    /// `speed` > 1 is faster (shorter), < 1 slower.
+    func animation(speed: Double) -> Animation? {
+        let s = max(0.2, min(speed, 5))
         switch self {
-        case .off: nil
-        case .snappy: .snappy(duration: 0.22)
-        case .smooth: .smooth(duration: 0.3)
-        case .bouncy: .bouncy(duration: 0.38, extraBounce: 0.08)
-        case .relaxed: .easeInOut(duration: 0.45)
+        case .off: return nil
+        case .snappy: return .snappy(duration: 0.2 / s)
+        case .smooth: return .smooth(duration: 0.26 / s)
+        case .bouncy: return .bouncy(duration: 0.34 / s, extraBounce: 0.08)
+        case .relaxed: return .easeInOut(duration: 0.42 / s)
+        case .spring: return .spring(response: 0.3 / s, dampingFraction: 0.82)
+        case .easeOut: return .easeOut(duration: 0.2 / s)
+        case .linear: return .linear(duration: 0.18 / s)
+        }
+    }
+}
+
+/// V16: every animated part of the app can have its own curve and speed (Advanced settings).
+enum AnimationKind: String, CaseIterable, Identifiable, Codable, Sendable {
+    case tabs, addressBar, toolbar, notices, sheets, findBar, visualizer
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .tabs: "Tabs (open, close, switch)"
+        case .addressBar: "Address bar"
+        case .toolbar: "Menu bar & buttons"
+        case .notices: "Notices"
+        case .sheets: "Pages & panels"
+        case .findBar: "Find bar"
+        case .visualizer: "Audio visualizer"
+        }
+    }
+}
+struct AnimationProfile: Codable, Equatable, Sendable {
+    var style: AnimationStyle? = nil   // nil = follow the global style
+    var speed: Double = 1
+}
+
+/// V16: menu-bar audio visualizer.
+enum VisualizerStyle: String, CaseIterable, Identifiable, Sendable {
+    case bars, wave, glow, off
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .bars: "Bars"
+        case .wave: "Wave"
+        case .glow: "Glow"
+        case .off: "Off"
         }
     }
 }

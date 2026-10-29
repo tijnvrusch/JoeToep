@@ -13,8 +13,12 @@ struct JoeToepTheme: Equatable {
     var tabText: TabTextSize = .regular
     var showTabIcons = true
     var density: ToolbarDensity = .compact
+    var animations: [AnimationKind: Animation] = [:]
+    var visualizer: VisualizerStyle = .bars
+    var visualizerIntensity: Double = 0.6
 
-    var animation: Animation? { animationStyle.animation }
+    var animation: Animation? { anim(.tabs) }
+    func anim(_ kind: AnimationKind) -> Animation? { animations[kind] }
     var background: Color { style.background }
     var foreground: Color { style.foreground }
     var secondary: Color { style.secondary }
@@ -40,7 +44,9 @@ extension AppSettings {
     var theme: JoeToepTheme {
         JoeToepTheme(style: themeStyle, accent: accentColor, iconVariant: iconVariant, iconWeight: iconWeight,
                      rendering: iconRendering, animationStyle: animationStyle, tabShape: tabShape,
-                     tabClose: tabCloseButtons, tabText: tabTextSize, showTabIcons: showTabIcons, density: toolbarDensity)
+                     tabClose: tabCloseButtons, tabText: tabTextSize, showTabIcons: showTabIcons, density: toolbarDensity,
+                     animations: Dictionary(uniqueKeysWithValues: AnimationKind.allCases.compactMap { kind in animation(kind).map { (kind, $0) } }),
+                     visualizer: visualizerStyle, visualizerIntensity: visualizerIntensity)
     }
 }
 

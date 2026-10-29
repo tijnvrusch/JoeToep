@@ -2,7 +2,8 @@
 (() => {
   'use strict';
   if (!window.JoeToepMedia || window.JoeToepPreferences) return;
-  let config = {automaticFullscreen: !window.JOETOEP_NATIVE_HOST, disableCaptions: true, disablePreviewCaptions: true};
+  let config = {automaticFullscreen: !window.JOETOEP_NATIVE_HOST, disableCaptions: true, disablePreviewCaptions: true, theater: true};
+  let theaterKey = '';
   let lastFullscreenKey = '', pendingFullscreenKey = '', queued = false;
   let configured = !window.JOETOEP_NATIVE_HOST;
   const volumeInitialized = new WeakMap();
@@ -29,11 +30,12 @@
       const player = document.querySelector('#movie_player');
       try { if (player?.getOption?.('captions', 'track')?.languageCode) player.setOption?.('captions', 'track', {}); } catch (_) {}
     }
-    if (configured && !config.automaticFullscreen && !document.fullscreenElement && watchPage() && (!window.JOETOEP_MOBILE || window.JOETOEP_IPAD)) {
+    // V16: theater mode by default (YouTube's T) so the video uses the full width before fullscreen.
+    if (configured && config.theater && !document.fullscreenElement && watchPage() && theaterKey !== key()) {
       const watch = document.querySelector('ytd-watch-flexy');
-      if (watch && !watch.hasAttribute('theater') && !watch.hasAttribute('fullscreen')) {
-        const button = document.querySelector('.ytp-size-button');
-        button?.click();
+      if (watch && !watch.hasAttribute('fullscreen')) {
+        theaterKey = key();
+        if (!watch.hasAttribute('theater')) document.querySelector('.ytp-size-button')?.click();
       }
     }
     if (window.JoeToepMedia.diagnostics().rawVisibility !== "visible" || !config.automaticFullscreen || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||

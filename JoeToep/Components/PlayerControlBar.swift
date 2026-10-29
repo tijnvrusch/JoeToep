@@ -30,58 +30,87 @@ struct PlayerControlBar: View {
     }
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    #if os(iOS)
-                    if settings.showBrand {
-                        Button(action: session.goHome) { BrandMark(compact: true).frame(width: buttonSize, height: 44) }
-                            .buttonStyle(.plain).accessibilityIdentifier("toolbar.brandHome")
-                    }
-                    #endif
-                    if settings.showNavigationControls {
-                        control("chevron.backward", "Back", enabled: session.canGoBack, action: session.goBack).accessibilityIdentifier("toolbar.back")
-                        control("chevron.forward", "Forward", enabled: session.canGoForward, action: session.goForward).accessibilityIdentifier("toolbar.forward")
-                    }
-                    control("arrow.clockwise", "Refresh", action: session.reload).accessibilityIdentifier("toolbar.refresh")
-                    ForEach(StartPage.allCases.filter { ($0 != .history || settings.showHistoryButton) && ($0 != .watchLater || settings.showPlaylistButton) }) { page in
-                        control(page.symbolName, page.title) {
-                            session.load(page.url)
-                        }
-                        .accessibilityIdentifier("toolbar." + page.rawValue)
-                    }
-                    if settings.showBookmarkButton {
-                        control("bookmark", library.isBookmarked(session.currentURL) ? "Remove bookmark" : "Add bookmark",
-                                active: library.isBookmarked(session.currentURL)) { actions?.toggleBookmark() }
-                            .accessibilityIdentifier("toolbar.bookmark")
-                    }
-                    if settings.showConnectionStatus {
-                        ConnectionPill(state: session.networkMonitor.state, isLoading: session.isLoading,
-                                       isBuffering: session.isBuffering, resolution: session.mediaResolution)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, minHeight: buttonSize)
             #if os(iOS)
-            control("airplay.video", "AirPlay video", action: session.showVideoAirPlay)
-                .accessibilityIdentifier("toolbar.airplay")
+            // V16: scroll only when the buttons would not fit otherwise.
+            ViewThatFits(in: .horizontal) {
+                leadingButtons.frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView(.horizontal) { leadingButtons }.scrollIndicators(.hidden)
+            }
+            .frame(maxWidth: .infinity, minHeight: buttonSize)
+            #else
+            ScrollView(.horizontal) { leadingButtons }
+                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, minHeight: buttonSize)
             #endif
-            qualityMenu
+            #if os(iOS)
+            if settings.showAirPlayButton {
+                control("airplay.video", "AirPlay video", action: session.showVideoAirPlay)
+                    .accessibilityIdentifier("toolbar.airplay")
+            }
+            #endif
+            if settings.showQualityButton { qualityMenu }
             if settings.showPiPButton {
                 PiPButton(session: session, size: buttonSize, iconSize: iconSize)
             }
             if settings.showMoreMenu { moreMenu }
-            control("gearshape", "Settings", action: showSettings)
-                .accessibilityIdentifier("toolbar.settings")
+            if settings.showSettingsButton {
+                control("gearshape", "Settings", action: showSettings)
+                    .accessibilityIdentifier("toolbar.settings")
+            }
         }
         .padding(.horizontal, 4)
         .frame(height: settings.toolbarDensity.height)
-        .background(theme.background)
-        .animation(theme.animation, value: settings.toolbarDensity)
+        .background { ZStack { theme.background; AudioVisualizer(playing: session.isPlaying && !session.isFullscreen && !session.isInPictureInPicture) } }
+        .animation(theme.anim(.toolbar), value: settings.toolbarDensity)
         #if os(macOS)
         .overlay(alignment: .top) { theme.style.separator.frame(height: 1).allowsHitTesting(false) }
         .overlay(alignment: .bottom) { theme.style.separator.frame(height: 1).allowsHitTesting(false) }
         #endif
+    }
+
+    @ViewBuilder
+    private var leadingButtons: some View {
+        HStack(spacing: 0) {
+            #if os(iOS)
+            if settings.showBrand {
+                Button(action: session.goHome) { BrandMark(compact: true).frame(width: buttonSize, height: 44) }
+                    .buttonStyle(.plain).accessibilityIdentifier("toolbar.brandHome")
+            }
+            #endif
+            if settings.showNavigationControls {
+                control("chevron.backward", "Back", enabled: session.canGoBack, action: session.goBack).accessibilityIdentifier("toolbar.back")
+                control("chevron.forward", "Forward", enabled: session.canGoForward, action: session.goForward).accessibilityIdentifier("toolbar.forward")
+            }
+            if settings.showRefreshButton {
+                // V16: hold / middle-click = force refresh (restarts the player when PiP or YouTube is stuck).
+                control("arrow.clockwise", "Refresh · hold for force refresh", action: session.reload,
+                        secondary: { session.forceRefresh() }).accessibilityIdentifier("toolbar.refresh")
+            }
+            ForEach(StartPage.allCases.filter(isVisible)) { page in
+                // V16: hold / middle-click opens the page in a new tab.
+                control(page.symbolName, page.title + " · hold for new tab", action: { session.load(page.url) },
+                        secondary: { session.onOpenInNewTab?(page.url, true) })
+                    .accessibilityIdentifier("toolbar." + page.rawValue)
+            }
+            if settings.showBookmarkButton {
+                control("bookmark", library.isBookmarked(session.currentURL) ? "Remove bookmark" : "Add bookmark",
+                        active: library.isBookmarked(session.currentURL)) { actions?.toggleBookmark() }
+                    .accessibilityIdentifier("toolbar.bookmark")
+            }
+            if settings.showConnectionStatus {
+                ConnectionPill(state: session.networkMonitor.state, isLoading: session.isLoading,
+                               isBuffering: session.isBuffering, resolution: session.mediaResolution)
+            }
+        }
+    }
+    private func isVisible(_ page: StartPage) -> Bool {
+        switch page {
+        case .home: settings.showHomeButton
+        case .subscriptions: settings.showSubscriptionsButton
+        case .library: settings.showLibraryButton
+        case .history: settings.showHistoryButton
+        case .watchLater: settings.showPlaylistButton
+        }
     }
 
     /// V15: browser menu (tabs, library, page tools).
@@ -92,6 +121,7 @@ struct PlayerControlBar: View {
                 Button { actions?.newPrivateTab() } label: { Label("New Private Tab", systemImage: "eyeglasses") }
                 Button { actions?.reopenClosedTab() } label: { Label("Reopen Closed Tab", systemImage: "arrow.uturn.backward") }
                 Button { actions?.togglePin() } label: { Label("Pin / Unpin Tab", systemImage: "pin") }
+                Button { actions?.duplicateTab() } label: { Label("Duplicate Tab", systemImage: "plus.square.on.square") }
             }
             Section {
                 Button { actions?.toggleBookmark() } label: {
@@ -120,6 +150,11 @@ struct PlayerControlBar: View {
                 Button { session.zoom(by: 0.1) } label: { Label("Zoom In", systemImage: "plus.magnifyingglass") }
                 Button { session.zoom(by: -0.1) } label: { Label("Zoom Out", systemImage: "minus.magnifyingglass") }
                 Button { session.resetZoom() } label: { Label("Actual Size (\(Int((session.effectiveZoom * 100).rounded()))%)", systemImage: "1.magnifyingglass") }
+                Button { session.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                Button { session.forceRefresh() } label: { Label("Force Refresh (restart player)", systemImage: "arrow.triangle.2.circlepath") }
+            }
+            Section {
+                Button(action: showSettings) { Label("Settings…", systemImage: "gearshape") }
             }
         } label: {
             Image(systemName: "ellipsis.circle").themedIcon(theme, size: iconSize)
@@ -180,14 +215,24 @@ struct PlayerControlBar: View {
         .accessibilityIdentifier("toolbar.quality")
     }
 
+    /// Button with an optional secondary action: long-press (touch) or middle-click / long-press (Mac).
     private func control(_ symbol: String, _ title: String, enabled: Bool = true, active: Bool = false,
-                         action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).themedIcon(theme, size: iconSize, active: active, enabled: enabled)
-                .frame(width: buttonSize, height: buttonSize).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(title)
-        .accessibilityLabel(title)
+                         action: @escaping () -> Void, secondary: (() -> Void)? = nil) -> some View {
+        Image(systemName: symbol).themedIcon(theme, size: iconSize, active: active, enabled: enabled)
+            .frame(width: buttonSize, height: buttonSize).contentShape(Rectangle())
+            .gesture(LongPressGesture(minimumDuration: 0.45, maximumDistance: 18)
+                .exclusively(before: TapGesture()).onEnded { value in
+                    switch value {
+                    case .first(true): if let secondary { secondary() } else { action() }
+                    case .second: action()
+                    default: break
+                    }
+                })
+            .middleClick(secondary ?? action)
+            .help(title)
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(title)
+            .accessibilityAction { action() }
     }
 }

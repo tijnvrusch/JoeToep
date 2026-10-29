@@ -47,6 +47,12 @@ final class WebSession: NSObject, ObservableObject {
     private var lastRecordedURL: URL?
     private var installedScriptKey = ""
     private var fullscreenVerifyTask: Task<Void, Never>?
+    private var onExpensiveNetwork = false
+    private var forceRefreshing = false
+    /// V16: quality to request right now (data saver only when enabled and on cellular/hotspot).
+    var effectiveQuality: PlaybackQualityPreference {
+        settings.dataSaverOnCellular && onExpensiveNetwork ? settings.cellularQuality : settings.quality
+    }
     let webView: WKWebView
     let networkMonitor = NetworkMonitor()
     private let playbackSession: PlaybackSessionController
@@ -97,9 +103,12 @@ final class WebSession: NSObject, ObservableObject {
     private var macReturnTask: Task<Void, Never>?
     private var handoffReleaseTask: Task<Void, Never>?
     private var lifecycleEvents: [String] = []
+    /// UI-test probe only (published in test mode, so normal use pays nothing).
+    @Published private(set) var lifecycleTail = ""
     private var foregroundReturn = ForegroundReturnGate()
     private var fullscreenReturnDeadline: Date?
     private var fullscreenReturnTask: Task<Void, Never>?
+    private var pipReturnSafetyTask: Task<Void, Never>?
     #if os(iOS)
     private var handoffTaskID: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -213,6 +222,14 @@ final class WebSession: NSObject, ObservableObject {
         networkObservation = networkMonitor.$state.removeDuplicates().sink { [weak self] state in
             guard let self else { return }
             self.objectWillChange.send()
+            // V16: optional data saver on cellular / personal hotspot (e.g. "eiFoon"); off by default.
+            let expensive: Bool = { if case let .online(e, c) = state { return e || c }; return false }()
+            if expensive != self.onExpensiveNetwork {
+                self.onExpensiveNetwork = expensive
+                if self.settings.dataSaverOnCellular && self.videoID != 0 {
+                    DispatchQueue.main.async { self.requestQuality(self.effectiveQuality, userInitiated: false) }
+                }
+            }
             // A real offline -> online transition earns a fresh retry budget.
             if state.isOnline && self.failedNavigationURL != nil {
                 self.networkRetryCount = 0
@@ -225,6 +242,7 @@ final class WebSession: NSObject, ObservableObject {
         guard !hasStarted else { return }
         hasStarted = true; settings = initial
         installUserScripts()
+        applyTheaterCookie()
         applyNativeSettings()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -280,7 +298,10 @@ final class WebSession: NSObject, ObservableObject {
             configureCompatibility()
             updateBackgroundProtection()
         }
-        if old.quality != updated.quality { requestQuality(updated.quality, userInitiated: true) }
+        if old.quality != updated.quality || old.dataSaverOnCellular != updated.dataSaverOnCellular || old.cellularQuality != updated.cellularQuality {
+            requestQuality(effectiveQuality, userInitiated: old.quality != updated.quality)
+        }
+        if old.theaterMode != updated.theaterMode { applyTheaterCookie() }
         if old.sitePresentation != updated.sitePresentation && hasStarted {
             if pip.isActive || pip.isRequesting || isPlaying {
                 pendingPresentationReload = true
@@ -464,6 +485,12 @@ final class WebSession: NSObject, ObservableObject {
                 if native { if self.pip.state != .native && !self.nativePiPActive { self.pip.confirmNative() }; return }
                 if !jsPiP {
                     if self.pip.state == .native { self.pip.exitNative(); self.recordLifecycle("reconcile: stale PiP button cleared") }
+                    // V16.2: a repaired stale PiP lands inline; the user asked to come back fullscreen.
+                    if attempt > 0 && self.applicationActive && self.isPlaying && !self.isFullscreen &&
+                        self.settings.pipReturnTarget != .inline {
+                        self.recordLifecycle("reconcile: repaired, continue fullscreen")
+                        _ = try? await self.webView.evaluateJavaScript("window.JoeToepMedia?.restoreFullscreen(true)")
+                    }
                     return
                 }
                 // Page says PiP, WebKit shows no window: ask for inline, then re-check.
@@ -581,6 +608,7 @@ final class WebSession: NSObject, ObservableObject {
         #endif
         lifecycleEvents.append("\(Int(Date().timeIntervalSince1970 * 1000)) \(event)")
         if lifecycleEvents.count > 16 { lifecycleEvents.removeFirst(lifecycleEvents.count - 16) }
+        if isTestMode { lifecycleTail = lifecycleEvents.suffix(12).joined(separator: " | ") }
     }
 
     func applicationWillDeactivate() {
@@ -656,7 +684,7 @@ final class WebSession: NSObject, ObservableObject {
         attemptedAutomaticInEpisode = false
         #if os(iOS)
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(1600))
+            try? await Task.sleep(for: .milliseconds(2200))
             self?.reconcilePictureInPicture(repairStuck: false)
         }
         nativeSuspendTask?.cancel()
@@ -680,13 +708,21 @@ final class WebSession: NSObject, ObservableObject {
             // V12: when the PiP window's own return button was used, AVKit is already animating
             // back into fullscreen; a second request made the video jump. Only if PiP is still
             // showing after that animation (return via the app icon) do we bring it back.
+            // V16.2: the system's restore animation (PiP window button) takes ~1 s and the page
+            // reports PiP until it ends; stepping in during it left WebKit in a stale PiP state
+            // (then inline). Watch the page: if PiP ends by itself, the system is restoring and we
+            // stay out. Only if PiP is still showing after 1.2 s (return via the app icon) do we
+            // bring the video back ourselves.
             returnFromPiPTask?.cancel()
-            let settle = settings.instantTransitions ? 450 : 750
             returnFromPiPTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(settle))
+                var waited = 0
+                while waited < 1200 {
+                    try? await Task.sleep(for: .milliseconds(150)); waited += 150
+                    guard !Task.isCancelled, let self, self.applicationActive else { return }
+                    let mode = (try? await self.webView.evaluateJavaScript("window.JoeToepMedia?.actualPresentation()")) as? String
+                    guard mode == "picture-in-picture" || JTNativePiPIsActive(self.webView) else { return }
+                }
                 guard !Task.isCancelled, let self, self.applicationActive else { return }
-                let mode = (try? await self.webView.evaluateJavaScript("window.JoeToepMedia?.actualPresentation()")) as? String
-                guard mode == "picture-in-picture" || JTNativePiPIsActive(self.webView) else { return }
                 self.recordLifecycle("return via app icon: bring video back from PiP")
                 _ = try? await self.webView.evaluateJavaScript("window.JoeToepMedia?.returnToApp('origin')")
             }
@@ -1034,6 +1070,30 @@ final class WebSession: NSObject, ObservableObject {
         #endif
     }
 
+    #if os(iOS)
+    /// V16.2: the PiP window's return button must end in fullscreen. If the system lands the
+    /// still-playing video inline (seen on iOS 27 under load), bring it to fullscreen once.
+    /// Closing PiP with ✕ pauses the video, so that never qualifies; JS also checks the
+    /// return target and a tab hand-over.
+    private func schedulePiPReturnSafetyNet() {
+        pipReturnSafetyTask?.cancel()
+        let expectedVideo = videoID
+        pipReturnSafetyTask = Task { @MainActor [weak self] in
+            for delay in [700, 1500] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                guard UIApplication.shared.applicationState == .active, !self.navigatingAway,
+                      self.videoID == expectedVideo, expectedVideo != 0, self.isPlaying,
+                      !self.isFullscreen, !self.pip.isActive, !self.pip.isRequesting,
+                      !self.nativePiPActive else { continue }
+                self.recordLifecycle("PiP return landed inline: fullscreen safety net")
+                self.webView.evaluateJavaScript("window.JoeToepMedia?.restoreFullscreen(true)", completionHandler: nil)
+                return
+            }
+        }
+    }
+    #endif
+
     private func restoreFullscreenAfterPiPIfNeeded() {
         guard applicationActive, let deadline = fullscreenReturnDeadline,
               deadline > Date(), !pip.isActive, !pip.isRequesting else { return }
@@ -1253,7 +1313,7 @@ final class WebSession: NSObject, ObservableObject {
 
     private func configureCompatibility() {
         webView.evaluateJavaScript("window.JoeToepMedia?.configure({protect:\(settings.backgroundProtection),automatic:\(settings.automaticPiP),nativeFullscreen:\(settings.nativeFullscreen),macFullscreen:'\(settings.macFullscreenMode.rawValue)',fallback:\(settings.pipFallbackEnabled),elementFullscreen:\(usesElementFullscreen),returnTarget:'\(settings.pipReturnTarget.rawValue)',keepPlaying:\(settings.pipReturnKeepsPlaying)})", completionHandler: nil)
-        webView.evaluateJavaScript("window.JoeToepPreferences?.configure({automaticFullscreen:\(settings.automaticFullscreen),disableCaptions:\(settings.disableCaptions),disablePreviewCaptions:\(settings.disablePreviewCaptions)})", completionHandler: nil)
+        webView.evaluateJavaScript("window.JoeToepPreferences?.configure({automaticFullscreen:\(settings.automaticFullscreen),disableCaptions:\(settings.disableCaptions),disablePreviewCaptions:\(settings.disablePreviewCaptions),theater:\(settings.theaterMode)})", completionHandler: nil)
     }
 
     private func bridge(_ script: String, completion: ((Result<Any, Error>) -> Void)? = nil) {
@@ -1292,6 +1352,7 @@ final class WebSession: NSObject, ObservableObject {
         installScript("playbackControls", world: .page)
         installScript("sitePreferences", world: .page, prefix: flags)
         installScript("sponsorBlock", world: .page)
+        installScript("findInPage", world: Self.bridgeWorld)
     }
 
     // MARK: - V15 titles, history
@@ -1396,17 +1457,77 @@ final class WebSession: NSObject, ObservableObject {
     #if os(iOS)
     func presentFind() { webView.findInteraction?.presentFindNavigator(showingReplace: false) }
     #endif
-    /// Mac find bar (iOS uses the system find navigator).
-    func find(_ text: String, backwards: Bool, completion: @escaping (Bool) -> Void) {
-        guard !text.isEmpty else { completion(false); return }
-        let configuration = WKFindConfiguration()
-        configuration.backwards = backwards
-        configuration.caseSensitive = false
-        configuration.wraps = true
-        webView.find(text, configuration: configuration) { result in completion(result.matchFound) }
+    /// V16: Chrome-style find on every platform: all matches highlighted, current one scrolled into view.
+    struct FindState: Equatable { var count = 0; var index = 0 }
+    func find(_ text: String, completion: @escaping (FindState) -> Void) { findCall("find(\(Self.jsString(text)))", completion) }
+    func findNext(_ completion: @escaping (FindState) -> Void) { findCall("next()", completion) }
+    func findPrevious(_ completion: @escaping (FindState) -> Void) { findCall("previous()", completion) }
+    func clearFindHighlights() { bridge("window.JoeToepFind?.clear()") }
+    private func findCall(_ call: String, _ completion: @escaping (FindState) -> Void) {
+        bridge("window.JoeToepFind?.\(call)") { result in
+            guard case let .success(value) = result, let d = value as? [String: Any] else { completion(FindState()); return }
+            completion(FindState(count: (d["count"] as? Int) ?? 0, index: (d["index"] as? Int) ?? 0))
+        }
     }
-    func clearFindHighlights() {
-        webView.evaluateJavaScript("window.getSelection()?.removeAllRanges()", completionHandler: nil)
+    static func jsString(_ text: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [text]), let json = String(data: data, encoding: .utf8) else { return "''" }
+        return String(json.dropFirst().dropLast())
+    }
+
+    private func applyTheaterCookie() {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        if settings.theaterMode {
+            guard let cookie = HTTPCookie(properties: [.domain: ".youtube.com", .path: "/", .name: "wide", .value: "1",
+                                                        .secure: "TRUE", .expires: Date().addingTimeInterval(3600 * 24 * 365)]) else { return }
+            store.setCookie(cookie)
+        } else {
+            store.getAllCookies { cookies in
+                for cookie in cookies where cookie.name == "wide" && cookie.domain.hasSuffix("youtube.com") { store.delete(cookie) }
+            }
+        }
+    }
+
+    // MARK: - V16 PiP across tabs, force refresh
+
+    /// Opening/switching tabs while this video plays: keep it playing in PiP.
+    func enterPiPForTabSwitch() {
+        guard isPlaying, !pip.isActive, !pip.isRequesting, !isFloating else { return }
+        recordLifecycle("tab switch: continue in PiP")
+        requestPictureInPicture(reason: .manual)
+    }
+    /// Another tab started a video: pause this one and close its PiP window (inline, no fullscreen).
+    func stopPiPAndPause() {
+        suppressExitPiP = true
+        fullscreenReturnDeadline = nil
+        #if os(iOS)
+        pipReturnSafetyTask?.cancel()
+        #endif
+        webView.evaluateJavaScript("window.JoeToepMedia?.remoteAction('pause'); window.JoeToepMedia?.closePiPInline()", completionHandler: nil)
+        #if os(macOS)
+        floating.restore()
+        #endif
+    }
+    /// Emergency fix (long-press / middle-click Refresh): restart the web process and PiP state,
+    /// then continue the same video at the same moment. No need to force-quit the app.
+    func forceRefresh() {
+        recordLifecycle("force refresh")
+        let point = resumePoint
+        pipWatchdog?.cancel(); automaticHandoffTask?.cancel(); exitTask?.cancel(); fullscreenReturnTask?.cancel()
+        returnFromPiPTask?.cancel(); resetPiPTask?.cancel(); reconcileTask?.cancel()
+        systemFullscreenHandoff = false; endHandoff(); pip.reset()
+        #if os(iOS)
+        nativePiP.stop(); nativePiP.disarm(); nativePiPActive = false
+        OrientationCoordinator.refreshSupportedOrientations()
+        #else
+        floating.restore()
+        #endif
+        if let point, point.time >= 1, NavigationPolicy.isPlaybackPage(point.url) { pendingResume = (point.time, point.playing) }
+        forceRefreshing = true
+        if !JTRestartWebContent(webView) {
+            forceRefreshing = false
+            reload()
+        }
+        showNotice(.information, "Force refresh", "The player was restarted.")
     }
 
     /// Mac: YouTube fullscreen after PiP must actually happen; verify and retry twice.
@@ -1514,6 +1635,9 @@ final class WebSession: NSObject, ObservableObject {
             // window, never turn a much later app launch into fullscreen.
             fullscreenReturnDeadline = resettingPiP ? nil : Date().addingTimeInterval(2)
             restoreFullscreenAfterPiPIfNeeded()
+            #if os(iOS)
+            if !resettingPiP { schedulePiPReturnSafetyNet() }
+            #endif
         }
         if !wasFullscreen && event.fullscreen {
             suppressExitPiP = false
@@ -1524,8 +1648,9 @@ final class WebSession: NSObject, ObservableObject {
             #if os(iOS)
             if settings.rotateOnFullscreen && !pip.isActive && !pip.isRequesting {
                 orientationTask?.cancel()
+                let rotateDelay = settings.instantTransitions ? 120 : 350
                 orientationTask = Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .milliseconds(350))
+                    try? await Task.sleep(for: .milliseconds(rotateDelay))
                     guard !Task.isCancelled, let self, self.isFullscreen, self.applicationActive,
                           !self.pip.isActive, !self.pip.isRequesting else { return }
                     OrientationCoordinator.requestLandscape()
@@ -1558,12 +1683,12 @@ final class WebSession: NSObject, ObservableObject {
         if previousVideo != event.videoID && event.videoID != 0 {
             refreshQuality()
             // One bounded attempt on a new player; never poll or fight adaptive streaming.
-            if settings.quality != .automatic {
+            if effectiveQuality != .automatic {
                 qualityTask?.cancel()
                 qualityTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(1))
                     guard !Task.isCancelled, let self else { return }
-                    self.requestQuality(self.settings.quality, userInitiated: false)
+                    self.requestQuality(self.effectiveQuality, userInitiated: false)
                 }
             }
         }
@@ -1751,6 +1876,13 @@ extension WebSession: WKNavigationDelegate {
         return true
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        if forceRefreshing {
+            forceRefreshing = false
+            documentID = nil; videoID = 0; isPlaying = false; isFullscreen = false; pip.reset()
+            let target = resumePoint.map { Self.url($0.url, at: $0.time) } ?? currentURL ?? lastRequestedURL ?? settings.startPage.url
+            load(target)
+            return
+        }
         automaticHandoffTask?.cancel(); systemFullscreenHandoff = false; isVideoStage = false
         endHandoff(); orientationTask?.cancel()
         exitTask?.cancel(); qualityTask?.cancel(); pipWatchdog?.cancel()

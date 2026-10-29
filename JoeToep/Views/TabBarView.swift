@@ -33,7 +33,7 @@ struct TabBarView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            if !editing {
+            if !editing && settings.showNewTabButton {
                 Button(action: workspace.addTab) {
                     Image(systemName: "plus").themedIcon(theme, size: 15 * theme.density.scale)
                         .frame(width: 36, height: theme.tabHeight + 4).contentShape(Rectangle())
@@ -66,7 +66,10 @@ struct TabBarView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .animation(theme.animation, value: editing)
+        .background {
+            if settings.visualizerInTabBar { SessionVisualizer(session: workspace.selected.session) }
+        }
+        .animation(theme.anim(.addressBar), value: editing)
         .onChange(of: editing) { _, now in
             if now {
                 address = workspace.selected.currentURL?.absoluteString ?? ""
@@ -254,6 +257,7 @@ struct TabChip: View {
         #if os(macOS)
         .onHover { hovering = $0 }
         #endif
+        .middleClick(close)   // V16: middle mouse button closes the tab (Mac)
         .help(tab.fullTitle)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)

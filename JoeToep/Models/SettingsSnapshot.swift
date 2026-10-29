@@ -56,5 +56,8 @@ struct SettingsSnapshot: Equatable, Sendable {
     var recordHistory = true
     var instantTransitions = true
     var sponsorBlock = SponsorBlockSettings()
+    var theaterMode = true
+    var dataSaverOnCellular = false
+    var cellularQuality: PlaybackQualityPreference = .p720
     static let standard = SettingsSnapshot()
 }

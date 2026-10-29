@@ -40,7 +40,11 @@ struct SettingsView: View {
                     }
                     link("Menu bar & layout", "menubar.rectangle", .indigo) { LayoutSettings(settings: settings) }
                     link("Focus filters", "line.3.horizontal.decrease.circle", .purple) { FocusSettings(settings: settings) }
-                    link("Diagnostics", "stethoscope", .gray) { DiagnosticsSettings(settings: settings, session: session) }
+                }
+                Section {
+                    link("Advanced settings", "exclamationmark.triangle", .gray) { AdvancedSettings(settings: settings, session: session) }
+                } footer: {
+                    Text("For tech nerds: internals, animation curves, fallbacks and diagnostics.")
                 }
                 Section {
                     Button("Reset all preferences…", role: .destructive) { confirmReset = true }
@@ -147,7 +151,24 @@ private struct AppearanceSettings: View {
                 Picker("Animations", selection: $settings.animationStyle) {
                     ForEach(AnimationStyle.allCases) { Text($0.title).tag($0) }
                 }
-                detail("Tabs, menus and sheets animate with this curve. JoeToep never lowers animation quality to save battery.")
+                HStack {
+                    Text("Speed")
+                    Slider(value: $settings.animationSpeed, in: 0.25...3, step: 0.05)
+                    Text(String(format: "%.2f×", settings.animationSpeed)).monospacedDigit().frame(width: 52)
+                }
+                detail("Fast and smooth by default. Every animation can get its own curve and speed in Advanced settings.")
+            }
+            Section("Audio visualizer") {
+                Picker("Style", selection: $settings.visualizerStyle) {
+                    ForEach(VisualizerStyle.allCases) { Text($0.title).tag($0) }
+                }
+                HStack {
+                    Text("Intensity")
+                    Slider(value: $settings.visualizerIntensity, in: 0.1...1)
+                }.disabled(settings.visualizerStyle == .off)
+                Toggle("Also behind the tabs", isOn: $settings.visualizerInTabBar)
+                    .disabled(settings.visualizerStyle == .off)
+                detail("An animated equalizer across the full width of the tab and menu bars while a video plays, in your accent colour.")
             }
             Section("App icon") {
                 IconPickerGrid()
@@ -226,18 +247,10 @@ private struct PlaybackSettings: View {
                     ForEach(PiPReturnTarget.allCases) { Text($0.title).tag($0) }
                 }
                 Toggle("Keep playing when returning from PiP", isOn: $settings.pipReturnKeepsPlaying)
-                Toggle("Start PiP after leaving fullscreen", isOn: $settings.pipOnFullscreenExit)
-                Toggle("Keep PiP when returning to JoeToep", isOn: $settings.keepPiPOnReturn)
-                Toggle("Protect background playback", isOn: $settings.backgroundProtection)
-                Toggle("Enable direct PiP fallback", isOn: $settings.pipFallbackEnabled)
-                    .accessibilityIdentifier("settings.pipFallback")
-                detail("The PiP window's return button (top right) takes the video straight to fullscreen and keeps it playing. Hold the PiP button for 0.3 s to reset PiP.")
-                #if os(macOS)
-                Toggle("Bring JoeToep forward when native PiP ends", isOn: $settings.activateMacOnPiPExit)
-                Toggle("Automatic floating video fallback", isOn: $settings.macFloatingFallback)
-                #else
-                detail("Also keep “Start PiP Automatically” enabled in iOS Settings › General › Picture in Picture.")
-                #endif
+                Toggle("Keep playing in PiP when opening another tab", isOn: $settings.pipOnTabSwitch)
+                Toggle("New video takes over in fullscreen", isOn: $settings.fullscreenNewVideoFromPiP)
+                    .disabled(!settings.pipOnTabSwitch)
+                detail("Open a new tab while a video plays: it continues in PiP. When you start a video in the new tab, the PiP video pauses and the new one plays fullscreen. Hold the PiP button for 0.3 s to reset PiP.")
             }
             #if os(iOS)
             if UIDevice.current.userInterfaceIdiom == .phone {
@@ -246,25 +259,13 @@ private struct PlaybackSettings: View {
                     Toggle("Leave fullscreen when rotating back to portrait", isOn: $settings.exitFullscreenOnPortrait)
                     Toggle("Instant rotation (keep the page in portrait)", isOn: $settings.portraitLockForRotation)
                         .disabled(!settings.fullscreenOnLandscape)
-                    Toggle("YouTube fullscreen instead of Apple player", isOn: $settings.phoneElementFullscreen)
-                    detail("Instant rotation keeps the page itself in portrait, so turning the phone goes straight into landscape fullscreen in one smooth movement.")
                 }
             }
             #endif
-            Section("Fullscreen & video") {
-                #if os(macOS)
-                Picker("Fullscreen player", selection: $settings.macFullscreenMode) {
-                    ForEach(MacFullscreenMode.allCases) { Text($0.title).tag($0) }
-                }
-                #else
-                Toggle("Use Apple player (disable to use Safe Fullscreen)", isOn: $settings.nativeFullscreen)
-                    .accessibilityIdentifier("settings.nativeFullscreen")
-                Toggle("Rotate fullscreen to landscape", isOn: $settings.rotateOnFullscreen)
-                Toggle("Return to portrait after fullscreen", isOn: $settings.returnToPortrait)
-                #endif
+            Section("Watching") {
+                Toggle("Theater mode (full width)", isOn: $settings.theaterMode)
                 Toggle("Open videos in fullscreen automatically", isOn: $settings.automaticFullscreen)
                     .accessibilityIdentifier("settings.automaticFullscreen")
-                Toggle("Fastest transitions", isOn: $settings.instantTransitions)
                 Toggle("Keep the screen on while a video plays", isOn: $settings.keepScreenAwake)
                 Toggle("Turn off video captions", isOn: $settings.disableCaptions)
                 Toggle("Turn off thumbnail preview captions", isOn: $settings.disablePreviewCaptions)
@@ -273,6 +274,89 @@ private struct PlaybackSettings: View {
                 Picker("Resolution preference", selection: $settings.quality) {
                     ForEach(PlaybackQualityPreference.allCases) { Text($0.title).tag($0) }
                 }
+                Toggle("Save data on cellular & hotspot", isOn: $settings.dataSaverOnCellular)
+                if settings.dataSaverOnCellular {
+                    Picker("Quality on cellular / hotspot", selection: $settings.cellularQuality) {
+                        ForEach(PlaybackQualityPreference.allCases) { Text($0.title).tag($0) }
+                    }
+                }
+                detail("Off by default: the normal quality is used everywhere, also on mobile data or a personal hotspot such as “eiFoon”. On: JoeToep switches to the quality above whenever the connection is cellular, a hotspot or Low Data Mode.")
+            }
+            Section("Media controls") {
+                detail("Control Center, the Lock Screen and the ⏯ key control the video through Now Playing. When another app (Spotify, Podcasts) starts playing afterwards, the system hands the controls to that app until JoeToep plays again.")
+            }
+        }
+    }
+}
+
+// MARK: - Advanced
+
+private struct AdvancedSettings: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var session: WebSession
+    private func profile(_ kind: AnimationKind) -> Binding<AnimationProfile> {
+        Binding(get: { settings.animationProfiles[kind.rawValue] ?? AnimationProfile() },
+                set: { settings.animationProfiles[kind.rawValue] = $0 })
+    }
+    var body: some View {
+        Form {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Careful: for tech nerds").font(.headline)
+                        Text("These settings change how JoeToep works internally. Wrong values can make PiP, fullscreen or playback unreliable. If something breaks, use “Reset all preferences” on the main settings page.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                .padding(.vertical, 4)
+            }
+            Section("Animations") {
+                Picker("Style for everything", selection: $settings.animationStyle) {
+                    ForEach(AnimationStyle.allCases) { Text($0.title).tag($0) }
+                }
+                speedRow("Speed for everything", $settings.animationSpeed)
+                ForEach(AnimationKind.allCases) { kind in
+                    DisclosureGroup(kind.title) {
+                        Picker("Style", selection: Binding(get: { profile(kind).wrappedValue.style },
+                                                           set: { profile(kind).wrappedValue.style = $0 })) {
+                            Text("Same as everything").tag(AnimationStyle?.none)
+                            ForEach(AnimationStyle.allCases) { Text($0.title).tag(AnimationStyle?.some($0)) }
+                        }
+                        speedRow("Relative speed", Binding(get: { profile(kind).wrappedValue.speed },
+                                                          set: { profile(kind).wrappedValue.speed = $0 }))
+                    }
+                }
+                Button("Reset animations") { settings.animationProfiles = [:]; settings.animationSpeed = 1.25; settings.animationStyle = .smooth }
+                detail("System transitions (Apple's fullscreen and PiP windows) are animated by iOS/macOS itself; JoeToep starts them as early as possible.")
+            }
+            Section("Picture in Picture internals") {
+                Toggle("Start PiP after leaving fullscreen", isOn: $settings.pipOnFullscreenExit)
+                Toggle("Keep PiP when returning to JoeToep", isOn: $settings.keepPiPOnReturn)
+                Toggle("Protect background playback", isOn: $settings.backgroundProtection)
+                Toggle("Enable direct PiP fallback", isOn: $settings.pipFallbackEnabled)
+                    .accessibilityIdentifier("settings.pipFallback")
+                Toggle("Fastest transitions", isOn: $settings.instantTransitions)
+                #if os(macOS)
+                Toggle("Bring JoeToep forward when native PiP ends", isOn: $settings.activateMacOnPiPExit)
+                Toggle("Automatic floating video fallback", isOn: $settings.macFloatingFallback)
+                #endif
+            }
+            Section("Fullscreen & player") {
+                #if os(macOS)
+                Picker("Fullscreen player", selection: $settings.macFullscreenMode) {
+                    ForEach(MacFullscreenMode.allCases) { Text($0.title).tag($0) }
+                }
+                #else
+                Toggle("Use Apple player (off = Safe Fullscreen)", isOn: $settings.nativeFullscreen)
+                    .accessibilityIdentifier("settings.nativeFullscreen")
+                Toggle("Rotate fullscreen to landscape", isOn: $settings.rotateOnFullscreen)
+                Toggle("Return to portrait after fullscreen", isOn: $settings.returnToPortrait)
+                if UIDevice.current.userInterfaceIdiom == .phone {
+                    Toggle("YouTube fullscreen instead of Apple player", isOn: $settings.phoneElementFullscreen)
+                }
+                Toggle("Apple streaming engine (360p, video AirPlay, inline auto-PiP)", isOn: $settings.appleStreamingEngine)
+                    .accessibilityIdentifier("settings.appleEngine")
+                #endif
                 Picker("Video sizing", selection: $settings.videoFit) {
                     ForEach(VideoFit.allCases) { Text($0.title).tag($0) }
                 }
@@ -280,15 +364,42 @@ private struct PlaybackSettings: View {
                     ForEach(PinchMode.allCases) { Text($0.title).tag($0) }
                 }
                 Button("Reset video zoom", action: session.resetVideoZoom)
-                #if os(iOS)
-                Toggle("Apple streaming engine (360p: video AirPlay + inline auto-PiP)", isOn: $settings.appleStreamingEngine)
-                    .accessibilityIdentifier("settings.appleEngine")
-                detail("Off (default): MediaSource up to 1080p/4K. On: a single 360p Apple HLS stream with video AirPlay and native inline PiP. Applies to new tabs. Engine now: \(session.appleStreamingEngine ? "Apple HLS" : "MediaSource").")
-                #endif
             }
-            Section("Media controls") {
-                detail("Control Center, the Lock Screen and the ⏯ key (F8 on Mac) control the video through the system's Now Playing. JoeToep becomes the Now Playing app whenever its video plays or was the last thing playing; when another app (Spotify, Podcasts) starts playing afterwards, iOS and macOS hand the controls to that app until JoeToep plays again. No app can take the controls back without starting playback itself.")
+            Section("Website") {
+                Picker("Website layout", selection: $settings.sitePresentation) {
+                    ForEach(SitePresentation.allCases) { Text($0.title).tag($0) }
+                }
+                HStack {
+                    Text("Page scale")
+                    Slider(value: $settings.pageZoom, in: 0.75...1.5, step: 0.05)
+                    Text("\(Int(settings.pageZoom * 100))%").monospacedDigit().frame(width: 46)
+                }
+                Toggle("Recover a terminated web process", isOn: $settings.recoverWebProcess)
             }
+            Section("Ad blocking internals") {
+                Toggle("Latest compatible EasyList rules", isOn: $settings.experimentalFilters)
+                    .accessibilityIdentifier("settings.experimentalFilters")
+                Button(session.isUpdatingFilters ? "Checking source…" : "Check for latest experimental rules", action: session.updateExperimentalFilters)
+                    .disabled(session.isUpdatingFilters)
+                Text(session.experimentalFilterStatus).font(.caption).textSelection(.enabled)
+            }
+            Section("SponsorBlock server") {
+                TextField("Server", text: $settings.sponsorBlock.serverURL).autocorrectionDisabled()
+                Button("Use the official server") { settings.sponsorBlock.serverURL = "https://sponsor.ajay.app" }
+            }
+            Section("Diagnostics") {
+                NavigationLink("Diagnostics & PiP log") {
+                    DiagnosticsSettings(settings: settings, session: session).formStyle(.grouped).navigationTitle("Diagnostics")
+                }
+                Button("Force refresh the player now") { session.forceRefresh() }
+            }
+        }
+    }
+    private func speedRow(_ title: String, _ value: Binding<Double>) -> some View {
+        HStack {
+            Text(title)
+            Slider(value: value, in: 0.25...3, step: 0.05)
+            Text(String(format: "%.2f×", value.wrappedValue)).monospacedDigit().frame(width: 52)
         }
     }
 }
@@ -323,14 +434,6 @@ private struct AdBlockSettings: View {
                     .accessibilityAddTraits(settings.adBlockLevel == level ? .isSelected : [])
                 }
                 detail("Changes apply on the next page load (tap Refresh). If a video stops working or YouTube shows a warning, go one level lower; if ads come back, go one level higher.")
-            }
-            Section("Experimental rules") {
-                Toggle("Latest compatible EasyList rules", isOn: $settings.experimentalFilters)
-                    .accessibilityIdentifier("settings.experimentalFilters")
-                Button(session.isUpdatingFilters ? "Checking source…" : "Check for latest experimental rules", action: session.updateExperimentalFilters)
-                    .disabled(session.isUpdatingFilters)
-                Text(session.experimentalFilterStatus).font(.caption).textSelection(.enabled)
-                detail("Imports only supported YouTube ad-container selectors from EasyList (The EasyList authors · CC BY-SA 3.0).")
             }
         }
     }
@@ -376,14 +479,6 @@ private struct SponsorBlockSettingsView: View {
                     ForEach([0.0, 1, 2, 3, 5, 10], id: \.self) { Text($0 == 0 ? "Never" : "\(Int($0)) s").tag($0) }
                 }
             }.disabled(!settings.sponsorBlock.enabled)
-            Section("Server") {
-                TextField("Server", text: $settings.sponsorBlock.serverURL)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never).keyboardType(.URL)
-                    #endif
-                Button("Use the official server") { settings.sponsorBlock.serverURL = "https://sponsor.ajay.app" }
-            }.disabled(!settings.sponsorBlock.enabled)
         }
     }
     static func duration(_ seconds: Double) -> String {
@@ -405,18 +500,10 @@ private struct BrowserSettings: View {
         Form {
             Section("Browsing") {
                 Toggle("Open other websites in JoeToep", isOn: $settings.openWebLinksInApp)
-                Picker("Search with", selection: $settings.searchEngine) {
+                Picker("Address bar searches with", selection: $settings.searchEngine) {
                     ForEach(SearchEngine.allCases) { Text($0.title).tag($0) }
                 }
-                Picker("Website layout", selection: $settings.sitePresentation) {
-                    ForEach(SitePresentation.allCases) { Text($0.title).tag($0) }
-                }
-                HStack {
-                    Text("Page scale")
-                    Slider(value: $settings.pageZoom, in: 0.75...1.5, step: 0.05)
-                    Text("\(Int(settings.pageZoom * 100))%").monospacedDigit().frame(width: 46)
-                }
-                detail("Type in the address bar (tap the selected tab): a web address opens directly, anything else searches with the engine above. Per tab: ⋯ › Request Desktop/Mobile Website and zoom.")
+                detail("Choose Google here to search the web instead of YouTube when you type something that is not a web address. Type in the address bar (tap the selected tab): a web address opens directly, anything else searches with the engine above. Per tab: ⋯ › Request Desktop/Mobile Website and zoom.")
             }
             Section("History & privacy") {
                 Toggle("Remember browsing history", isOn: $settings.recordHistory)
@@ -442,13 +529,23 @@ private struct LayoutSettings: View {
                 Picker("Menu bar buttons", selection: $settings.toolbarDensity) {
                     ForEach(ToolbarDensity.allCases) { Text($0.title).tag($0) }
                 }
-                detail("Eight sizes. Cozy, Medium and Roomy sit just below Large.")
+                detail("Eight sizes. Cozy, Medium and Roomy sit just below Large. Hold or middle-click Home, Subscriptions or Library to open them in a new tab; hold Refresh to force-refresh the player. Settings stays reachable with ⌘, and the ⋯ menu when its button is hidden.")
             }
             Section("Buttons") {
                 #if os(iOS)
                 Toggle("Show JoeToep / #yolo", isOn: $settings.showBrand)
                 #endif
                 Toggle("Show Back and Forward buttons", isOn: $settings.showNavigationControls)
+                Toggle("Show Refresh button", isOn: $settings.showRefreshButton)
+                Toggle("Show Home button", isOn: $settings.showHomeButton)
+                Toggle("Show Subscriptions button", isOn: $settings.showSubscriptionsButton)
+                Toggle("Show Library button", isOn: $settings.showLibraryButton)
+                Toggle("Show resolution (4K) button", isOn: $settings.showQualityButton)
+                #if os(iOS)
+                Toggle("Show AirPlay button", isOn: $settings.showAirPlayButton)
+                #endif
+                Toggle("Show Settings button", isOn: $settings.showSettingsButton)
+                Toggle("Show New Tab (+) button", isOn: $settings.showNewTabButton)
                 Toggle("Show History button", isOn: $settings.showHistoryButton)
                 Toggle("Show Playlist / Watch later button", isOn: $settings.showPlaylistButton)
                 Toggle("Show Bookmark button", isOn: $settings.showBookmarkButton)
@@ -470,7 +567,6 @@ private struct FocusSettings: View {
                 Toggle("Hide Shorts", isOn: $settings.blockShortsNavigation)
                 Toggle("Hide posts and announcements", isOn: $settings.blockPostsNavigation)
                 Toggle("Hide Premium / members-only cards", isOn: $settings.blockPremiumDestinations)
-                Toggle("Recover a terminated web process", isOn: $settings.recoverWebProcess)
                 detail("Filters apply on the next page load; playback is not reloaded.")
             }
         }

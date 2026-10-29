@@ -147,7 +147,7 @@ def check_v2() -> None:
     definitions = re.findall(r"^\t\t([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", project, re.M)
     require(len(definitions) == len(set(definitions)), "Duplicate Xcode object id")
     require(set(re.findall(r"\b[A-F0-9]{24}\b", project)) <= set(definitions), "Dangling Xcode object reference")
-    require("MARKETING_VERSION = 15.0.0;" in project, "V3 version missing")
+    require("MARKETING_VERSION = 16.2.0;" in project, "V3 version missing")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     require({item.get("BlueprintName") for item in scheme.findall(".//TestableReference/BuildableReference")}
             == {"JoeToepTests", "JoeToepUITests"}, "Scheme omits a test target")
@@ -187,7 +187,7 @@ def check_v3() -> None:
     bar = (ROOT / "JoeToep/Components/PlayerControlBar.swift").read_text()
     require("Divider()" not in bar and "joeToepGlass" not in bar, "Toolbar is not minimal black")
     # V15: themeable; the default theme is YouTube's #0F0F0F.
-    require('.background(theme.background)' in bar, "Themed toolbar missing")
+    require('theme.background' in bar, "Themed toolbar missing")
     theme = (ROOT / "JoeToep/Models/ThemeOptions.swift").read_text()
     require('case .youtube: Color(hex: 0x0F0F0F)' in theme, "YouTube dark default missing")
     require((ROOT / "Scripts/test_media_compatibility.cjs").is_file(), "Missing V3 regressions")
@@ -199,7 +199,7 @@ def check_v4() -> None:
     project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
     require(project.count("PRODUCT_NAME = JoeToep;") == 2, "Product name differs across configurations")
     require(project.count("PRODUCT_MODULE_NAME = JoeToep;") == 2, "Stable module name lost")
-    require(project.count("CURRENT_PROJECT_VERSION = 15;") == 2, "Build version mismatch")
+    require(project.count("CURRENT_PROJECT_VERSION = 18;") == 2, "Build version mismatch")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     for item in scheme.findall(".//BuildableReference"):
         require(item.get("ReferencedContainer") == "container:JoeToep.xcodeproj", "Old scheme project path")

@@ -41,9 +41,11 @@ struct BrowserCommands: Commands {
         }
         CommandGroup(after: .newItem) {
             Button("Reload Page") { actions?.reload() }.keyboardShortcut("r", modifiers: .command).disabled(actions == nil)
+            Button("Force Refresh (restart player)") { actions?.forceRefresh() }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(actions == nil)
         }
         CommandGroup(replacing: .textEditing) {
             Button("Find on Page…") { actions?.find() }.keyboardShortcut("f", modifiers: .command).disabled(actions == nil)
+            Button("Open Location…") { actions?.editAddress() }.keyboardShortcut("k", modifiers: .command).disabled(actions == nil)
         }
         CommandMenu("History") {
             Button("Back") { actions?.goBack() }.keyboardShortcut("[", modifiers: .command).disabled(actions == nil)
@@ -55,8 +57,9 @@ struct BrowserCommands: Commands {
         CommandMenu("Tabs") {
             Button("Show Next Tab") { actions?.nextTab() }.keyboardShortcut("]", modifiers: [.command, .shift]).disabled(actions == nil)
             Button("Show Previous Tab") { actions?.previousTab() }.keyboardShortcut("[", modifiers: [.command, .shift]).disabled(actions == nil)
-            Button("Next Tab") { actions?.nextTab() }.keyboardShortcut(.tab, modifiers: .control).disabled(actions == nil)
-            Button("Previous Tab") { actions?.previousTab() }.keyboardShortcut(.tab, modifiers: [.control, .shift]).disabled(actions == nil)
+            Button("Switch to Recent Tab") { actions?.recentTab() }.keyboardShortcut(.tab, modifiers: .control).disabled(actions == nil)
+            Button("Duplicate Tab") { actions?.duplicateTab() }.keyboardShortcut("d", modifiers: [.command, .shift]).disabled(actions == nil)
+            Button("Copy Link") { actions?.copyLink() }.keyboardShortcut("c", modifiers: [.command, .shift]).disabled(actions == nil)
             Button("Pin / Unpin Tab") { actions?.togglePin() }.disabled(actions == nil)
             Divider()
             ForEach(1..<10) { number in

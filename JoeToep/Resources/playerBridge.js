@@ -54,6 +54,12 @@
       }
       return;
     }
+    // V16 (iPad): no inline styles at all in the default "fit" mode without zoom. Toggling
+    // object-fit around PiP/fullscreen made the PiP window start zoomed in, and fullscreen too small.
+    if (options.fit !== "fill" && zoom === 1) {
+      if (originalStyle.has(video)) for (const key of ["object-fit", "transform", "transform-origin"]) restoreProperty(video, key);
+      return;
+    }
     rememberStyle(video);
     video.style.setProperty("object-fit", options.fit === "fill" ? "cover" : "contain", "important");
     if (zoom === 1) {

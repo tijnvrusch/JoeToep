@@ -110,9 +110,23 @@ test('SponsorBlock draws markers and ignores segments of another video', () => {
   p.time = 11; p.fire('timeupdate'); assert.equal(p.time, 11, 'segments for a different video are not applied'); p.close();
 });
 
+const findSource = read('findInPage.js');
+test('V16 find on page highlights all matches, Enter-style next wraps, clear restores the text', () => {
+  const dom = new JSDOM('<!doctype html><body><p>Lofi beats and lofi girl</p><div>LOFI radio</div><script>lofi</script></body>', { runScripts: 'outside-only', pretendToBeVisual: true });
+  const w = dom.window; w.Element.prototype.scrollIntoView = function () {};
+  w.eval(findSource);
+  let s = w.JoeToepFind.find('lofi');
+  assert.equal(s.count, 3); assert.equal(s.index, 1);
+  assert.equal(w.document.querySelectorAll('mark.joetoep-find').length, 3);
+  assert.equal(w.JoeToepFind.next().index, 2); w.JoeToepFind.next(); assert.equal(w.JoeToepFind.next().index, 1, 'wraps');
+  assert.equal(w.JoeToepFind.previous().index, 3);
+  assert.equal(w.JoeToepFind.find('nothing-here').count, 0);
+  w.JoeToepFind.clear(); assert.equal(w.document.body.textContent.includes('Lofi beats and lofi girl'), true);
+  assert.equal(w.document.querySelectorAll('mark').length, 0); w.close();
+});
 let failed = 0;
 for (const [name, body] of tests) {
   try { body(); console.log('PASS ' + name); } catch (error) { failed++; console.error('FAIL ' + name); console.error(error); }
 }
 if (failed) { console.error(failed + ' failed'); process.exit(1); }
-console.log(`PASS ${tests.length} V15 ad-shield and SponsorBlock scenarios (jsdom; media simulated)`);
+console.log(`PASS ${tests.length} V15/V16 ad-shield, SponsorBlock and find scenarios (jsdom; media simulated)`);

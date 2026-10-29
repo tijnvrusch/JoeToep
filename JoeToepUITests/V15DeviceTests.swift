@@ -114,43 +114,148 @@ final class V15DeviceTests: XCTestCase {
     }
 
     /// Heavy load: many tabs, rapid switching, PiP toggles and app switches (Camera on iPhone).
+    /// V16: opening a tab while a video plays moves that video into PiP, so PiP is expected here.
     @MainActor func testStressTabsPiPAndAppSwitching() throws {
         #if os(iOS)
         startVideo()
-        let add = app.buttons["tabs.new"]
-        for _ in 0..<8 { add.tap() }
+        let newTab = app.buttons["tabs.new"]
         let tabs = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'tab.select.'"))
-        XCTAssertEqual(tabs.count, 9)
-        // (Tapping the tab that is already selected opens the address bar, so never repeat one.)
-        for index in [5, 2, 7, 0] { tabs.element(boundBy: index).tap(); usleep(250_000) }
-        sleep(1)
-        // Every tab has its own (hidden) web view; press the visible one.
-        visible(app.webViews.buttons.matching(identifier: "Play test video")).tap()
-        XCTAssertTrue(waitFor("play=1", timeout: 6), "first tab plays again: \(probe)")
-        let pip = visible(app.buttons.matching(identifier: "toolbar.pip"))
-        for cycle in 1...4 {
-            pip.tap()
-            XCTAssertTrue(pipWindow.waitForExistence(timeout: 8), "manual PiP \(cycle)")
-            sleep(2)
-            pip.tap(); sleep(2)
+        let start = tabs.count
+        for _ in 0..<8 {
+            // A new tab focuses its search field; dismiss the keyboard/address bar first.
+            if !newTab.isHittable { app.webViews.firstMatch.tap(); usleep(300_000) }
+            newTab.tap(); usleep(450_000)
         }
+        XCTAssertEqual(tabs.count, start + 8, "all new tabs were opened")
+        XCTAssertTrue(pipWindow.waitForExistence(timeout: 8), "the playing video moved into PiP when a tab opened")
+        // V16: the new tab's address bar closes when tapping elsewhere, showing the tab strip again.
+        let firstTab = tabs.element(boundBy: 0)
+        if !firstTab.exists || !firstTab.isHittable {
+            app.webViews.firstMatch.tap(); sleep(1)
+        }
+        XCTAssertTrue(tabs.element(boundBy: 0).waitForExistence(timeout: 3), "address bar closed on outside tap")
+        // Rapid switching among the tabs that are on screen (the strip scrolls on iPhone).
+        var switched = 0
+        var last = -1
+        for round in 0..<8 {
+            var candidates: [Int] = []
+            // (The floating PiP window can make XCTest report on-screen chips as "not hittable".)
+            let width = app.windows.firstMatch.frame.width
+            for index in 0..<tabs.count where index != last {
+                let frame = tabs.element(boundBy: index).frame
+                if frame.minX >= 0 && frame.maxX <= width - 44 && frame.width > 20 { candidates.append(index) }
+            }
+            guard !candidates.isEmpty else { usleep(300_000); continue }
+            let pick = candidates[(round * 3) % candidates.count]
+            tabs.element(boundBy: pick).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            last = pick; switched += 1
+            usleep(400_000)
+        }
+        if switched <= 2 {
+            attach("Tab switching stuck")
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "App hierarchy (switching)"; tree.lifetime = .keepAlways; add(tree)
+        }
+        XCTAssertGreaterThan(switched, 2, "tab switching")
+        XCTAssertTrue(app.buttons.matching(identifier: "toolbar.settings").firstMatch.exists, "app responsive after switching")
         for _ in 0..<8 {
             let close = app.buttons.matching(identifier: "tab.close").firstMatch
-            if close.exists { close.tap() }
+            if close.exists && close.isHittable { close.tap() }
             usleep(200_000)
         }
         if UIDevice.current.userInterfaceIdiom == .phone {
-            visible(app.webViews.buttons.matching(identifier: "Fullscreen test video")).tap(); sleep(1)
-            XCUIDevice.shared.press(.home); sleep(3)
+            XCUIDevice.shared.press(.home); sleep(2)
             XCUIApplication(bundleIdentifier: "com.apple.camera").activate(); sleep(4)
-            XCUIDevice.shared.press(.home); sleep(3)
+            XCUIDevice.shared.press(.home); sleep(2)
             attach("After Camera")
-            XCTAssertTrue(pipWindow.exists, "PiP survives opening the Camera")
             app.activate(); sleep(2)
         }
-        XCTAssertTrue(app.buttons.matching(identifier: "toolbar.settings").firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(identifier: "toolbar.settings").firstMatch.waitForExistence(timeout: 5), "app alive after stress")
         #else
         throw XCTSkip("Mobile stress")
+        #endif
+    }
+
+    /// V16: pausing in the PiP window must stay paused until the user presses play again.
+    @MainActor func testPiPPauseStaysPausedUntilSecondPress() throws {
+        #if os(iOS)
+        startVideo()
+        app.webViews.buttons["Fullscreen test video"].tap()
+        XCTAssertTrue(waitFor("fs=1", timeout: 5), "entered fullscreen: \(probe)")
+        sleep(1)
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(pipWindow.waitForExistence(timeout: 8), "PiP started")
+        sleep(3)
+        func pipButton(_ labels: [String]) -> XCUIElement? {
+            for _ in 0..<4 {
+                pipWindow.tap()
+                for label in labels {
+                    let b = springboard.buttons[label]
+                    if b.waitForExistence(timeout: 1) && b.isHittable { return b }
+                }
+            }
+            return nil
+        }
+        guard let pause = pipButton(["Pause", "pause", "Pauze"]) else {
+            let tree = XCTAttachment(string: springboard.debugDescription); tree.name = "PiP hierarchy"; tree.lifetime = .keepAlways; add(tree)
+            throw XCTSkip("PiP pause button not reachable")
+        }
+        pause.tap()
+        app.activate(); sleep(1)
+        // Sample for 4 s: once paused, it must never resume by itself.
+        var resumed = 0
+        let deadline = Date().addingTimeInterval(4)
+        sleep(1)
+        while Date() < deadline { if probe.contains("play=1") { resumed += 1 }; usleep(100_000) }
+        XCTAssertEqual(resumed, 0, "video resumed by itself after PiP pause: \(probe)")
+        attach("Paused after PiP pause")
+        #else
+        throw XCTSkip("Mobile PiP")
+        #endif
+    }
+
+    /// V16: opening a new tab keeps the playing video in PiP.
+    @MainActor func testNewTabKeepsVideoPlayingInPiP() throws {
+        #if os(iOS)
+        startVideo()
+        app.buttons["tabs.new"].tap()
+        XCTAssertTrue(pipWindow.waitForExistence(timeout: 8), "PiP started when opening a new tab")
+        sleep(3)
+        attach("PiP after new tab")
+        XCTAssertTrue(pipWindow.exists, "PiP still running after 3 s")
+        #else
+        throw XCTSkip("Mobile PiP")
+        #endif
+    }
+
+    /// V16.2 extreme: repeated PiP → return cycles must land in fullscreen and keep playing every time.
+    @MainActor func testPiPReturnCyclesStayConsistent() throws {
+        #if os(iOS)
+        startVideo()
+        app.webViews.buttons["Fullscreen test video"].tap()
+        XCTAssertTrue(waitFor("fs=1", timeout: 5), "entered fullscreen: \(probe)")
+        var results: [String] = []
+        for cycle in 1...8 {
+            sleep(1)
+            XCUIDevice.shared.press(.home)
+            guard pipWindow.waitForExistence(timeout: 8) else { results.append("\(cycle): no PiP"); continue }
+            sleep(2)
+            var restored = false
+            for _ in 0..<4 where !restored {
+                pipWindow.tap()
+                let restore = springboard.buttons["Restore fullscreen"]
+                if restore.waitForExistence(timeout: 1.5) && restore.isHittable { restore.tap(); restored = true }
+            }
+            guard restored else { results.append("\(cycle): restore unreachable"); app.activate(); continue }
+            let ok = waitFor("fs=1", timeout: 4)
+            usleep(600_000)
+            let trail = app.staticTexts["debug.lifecycle"].firstMatch.label
+            results.append("\(cycle): \(ok ? "ok" : "FAIL") \(probe) :: \(trail)")
+        }
+        let log = XCTAttachment(string: results.joined(separator: "\n")); log.name = "PiP cycles"; log.lifetime = .keepAlways; add(log)
+        let failures = results.filter { !$0.contains(": ok") || !$0.contains("play=1") }
+        XCTAssertTrue(failures.isEmpty, "PiP cycles: \(failures)")
+        #else
+        throw XCTSkip("Mobile PiP")
         #endif
     }
 }

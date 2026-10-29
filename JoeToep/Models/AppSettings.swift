@@ -96,6 +96,26 @@ final class AppSettings: ObservableObject {
     @Published var portraitLockForRotation: Bool { didSet { save(portraitLockForRotation, "portraitLockForRotationV15"); Self.applyOrientationLock(self) } }
     @Published var instantTransitions: Bool { didSet { save(instantTransitions, "instantTransitionsV15") } }
     @Published var sponsorBlock: SponsorBlockSettings { didSet { sponsorBlock.save(defaults) } }
+    // MARK: V16
+    @Published var theaterMode: Bool { didSet { save(theaterMode, "theaterModeV16") } }
+    @Published var dataSaverOnCellular: Bool { didSet { save(dataSaverOnCellular, "dataSaverOnCellularV16") } }
+    @Published var cellularQuality: PlaybackQualityPreference { didSet { save(cellularQuality.rawValue, "cellularQualityV16") } }
+    @Published var pipOnTabSwitch: Bool { didSet { save(pipOnTabSwitch, "pipOnTabSwitchV16") } }
+    @Published var fullscreenNewVideoFromPiP: Bool { didSet { save(fullscreenNewVideoFromPiP, "fullscreenNewVideoFromPiPV16") } }
+    @Published var visualizerStyle: VisualizerStyle { didSet { save(visualizerStyle.rawValue, "visualizerStyleV16") } }
+    @Published var visualizerIntensity: Double { didSet { save(visualizerIntensity, "visualizerIntensityV16") } }
+    @Published var visualizerInTabBar: Bool { didSet { save(visualizerInTabBar, "visualizerInTabBarV16") } }
+    @Published var animationSpeed: Double { didSet { save(animationSpeed, "animationSpeedV16") } }
+    @Published var animationProfiles: [String: AnimationProfile] { didSet {
+        if let data = try? JSONEncoder().encode(animationProfiles) { defaults.set(data, forKey: "animationProfilesV16") } } }
+    @Published var showRefreshButton: Bool { didSet { save(showRefreshButton, "showRefreshButtonV16") } }
+    @Published var showHomeButton: Bool { didSet { save(showHomeButton, "showHomeButtonV16") } }
+    @Published var showSubscriptionsButton: Bool { didSet { save(showSubscriptionsButton, "showSubscriptionsButtonV16") } }
+    @Published var showLibraryButton: Bool { didSet { save(showLibraryButton, "showLibraryButtonV16") } }
+    @Published var showQualityButton: Bool { didSet { save(showQualityButton, "showQualityButtonV16") } }
+    @Published var showAirPlayButton: Bool { didSet { save(showAirPlayButton, "showAirPlayButtonV16") } }
+    @Published var showSettingsButton: Bool { didSet { save(showSettingsButton, "showSettingsButtonV16") } }
+    @Published var showNewTabButton: Bool { didSet { save(showNewTabButton, "showNewTabButtonV16") } }
     @Published var appleStreamingEngine: Bool { didSet { save(appleStreamingEngine, Self.appleStreamingEngineKey) } }
     static let appleStreamingEngineKey = "appleStreamingEngineV10"
     /// Off by default (user choice 26 Sep 2026): YouTube serves only 360p without MediaSource,
@@ -168,7 +188,7 @@ final class AppSettings: ObservableObject {
         tabLifetime = TabLifetime.stored(defaults)
         phoneElementFullscreen = flag("phoneElementFullscreenV12", false)
         themeStyle = ThemeStyle(rawValue: defaults.string(forKey: "themeStyleV15") ?? "") ?? .youtube
-        accentChoice = AccentChoice(rawValue: defaults.string(forKey: "accentChoiceV15") ?? "") ?? .red
+        accentChoice = AccentChoice(rawValue: defaults.string(forKey: "accentChoiceV15") ?? "") ?? .youtubeRed
         customAccentHex = defaults.string(forKey: "customAccentHexV15") ?? "#FF3B30"
         iconVariant = IconVariant(rawValue: defaults.string(forKey: "iconVariantV15") ?? "") ?? .outline
         iconWeight = IconWeightChoice(rawValue: defaults.string(forKey: "iconWeightV15") ?? "") ?? .regular
@@ -193,6 +213,24 @@ final class AppSettings: ObservableObject {
         portraitLockForRotation = flag("portraitLockForRotationV15", true)
         instantTransitions = flag("instantTransitionsV15", true)
         sponsorBlock = SponsorBlockSettings.stored(defaults)
+        theaterMode = flag("theaterModeV16", true)
+        dataSaverOnCellular = flag("dataSaverOnCellularV16", false)
+        cellularQuality = PlaybackQualityPreference(rawValue: defaults.string(forKey: "cellularQualityV16") ?? "") ?? .p720
+        pipOnTabSwitch = flag("pipOnTabSwitchV16", true)
+        fullscreenNewVideoFromPiP = flag("fullscreenNewVideoFromPiPV16", true)
+        visualizerStyle = VisualizerStyle(rawValue: defaults.string(forKey: "visualizerStyleV16") ?? "") ?? .bars
+        visualizerIntensity = (defaults.object(forKey: "visualizerIntensityV16") as? Double) ?? 0.6
+        visualizerInTabBar = flag("visualizerInTabBarV16", true)
+        animationSpeed = (defaults.object(forKey: "animationSpeedV16") as? Double) ?? 1.25
+        animationProfiles = (defaults.data(forKey: "animationProfilesV16")).flatMap { try? JSONDecoder().decode([String: AnimationProfile].self, from: $0) } ?? [:]
+        showRefreshButton = flag("showRefreshButtonV16", true)
+        showHomeButton = flag("showHomeButtonV16", true)
+        showSubscriptionsButton = flag("showSubscriptionsButtonV16", true)
+        showLibraryButton = flag("showLibraryButtonV16", true)
+        showQualityButton = flag("showQualityButtonV16", true)
+        showAirPlayButton = flag("showAirPlayButtonV16", true)
+        showSettingsButton = flag("showSettingsButtonV16", true)
+        showNewTabButton = flag("showNewTabButtonV16", true)
         Self.applyOrientationLock(self)
         TabTitleSummarizer.configure(from: self)
     }
@@ -213,7 +251,8 @@ final class AppSettings: ObservableObject {
             glassEnabled: glassEnabled, edgeToEdge: edgeToEdge, fullscreenOnLandscape: fullscreenOnLandscape, exitFullscreenOnPortrait: exitFullscreenOnPortrait, phoneElementFullscreen: phoneElementFullscreen,
             pipReturnTarget: pipReturnTarget, pipReturnKeepsPlaying: pipReturnKeepsPlaying,
             openWebLinksInApp: openWebLinksInApp, searchEngine: searchEngine, recordHistory: recordHistory,
-            instantTransitions: instantTransitions, sponsorBlock: sponsorBlock)
+            instantTransitions: instantTransitions, sponsorBlock: sponsorBlock,
+            theaterMode: theaterMode, dataSaverOnCellular: dataSaverOnCellular, cellularQuality: cellularQuality)
     }
     func acceptServiceNotice() { acceptedServiceNotice = true }
     func resetPreferences() {
@@ -235,7 +274,7 @@ final class AppSettings: ObservableObject {
         appleStreamingEngine = Self.defaultAppleStreamingEngine
         fullscreenOnLandscape = true; exitFullscreenOnPortrait = true; phoneElementFullscreen = false
         tabLifetime = .days2
-        themeStyle = .youtube; accentChoice = .red; customAccentHex = "#FF3B30"
+        themeStyle = .youtube; accentChoice = .youtubeRed; customAccentHex = "#FF3B30"
         iconVariant = .outline; iconWeight = .regular; iconRendering = .monochrome; animationStyle = .smooth
         tabShape = .rounded; tabCloseButtons = .hover; tabTextSize = .regular; showTabIcons = true
         showMoreMenu = true; showBookmarkButton = false
@@ -243,10 +282,20 @@ final class AppSettings: ObservableObject {
         openWebLinksInApp = true; searchEngine = .youtube; recordHistory = true
         pipReturnTarget = .fullscreen; pipReturnKeepsPlaying = true; keepScreenAwake = true
         portraitLockForRotation = true; instantTransitions = true; sponsorBlock = SponsorBlockSettings()
+        theaterMode = true; dataSaverOnCellular = false; cellularQuality = .p720; pipOnTabSwitch = true
+        fullscreenNewVideoFromPiP = true; visualizerStyle = .bars; visualizerIntensity = 0.6; visualizerInTabBar = true
+        animationSpeed = 1.25; animationProfiles = [:]
+        showRefreshButton = true; showHomeButton = true; showSubscriptionsButton = true; showLibraryButton = true
+        showQualityButton = true; showAirPlayButton = true; showSettingsButton = true; showNewTabButton = true
     }
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
     var accentColor: Color { accentChoice.color(custom: customAccentHex) }
-    var animation: Animation? { animationStyle.animation }
+    var animation: Animation? { animation(.tabs) }
+    /// V16: curve and speed for one part of the app (global style/speed unless overridden).
+    func animation(_ kind: AnimationKind) -> Animation? {
+        let profile = animationProfiles[kind.rawValue] ?? AnimationProfile()
+        return (profile.style ?? animationStyle).animation(speed: animationSpeed * profile.speed)
+    }
     /// iPhone: keep the interface in portrait so a landscape turn goes straight into fullscreen.
     static func applyOrientationLock(_ settings: AppSettings) {
         #if os(iOS)

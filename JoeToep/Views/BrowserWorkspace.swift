@@ -70,6 +70,8 @@ final class BrowserWorkspace: ObservableObject {
     @Published private(set) var tabs: [BrowserTab]
     @Published var selectedID: UUID
     @Published private(set) var closedTabs: [SavedBrowserTab] = []
+    /// V16: most-recently-used order for Ctrl+Tab.
+    private var recent: [UUID] = []
     private var playbackObservers: [UUID: AnyCancellable] = [:]
     private var urlObservers: [UUID: AnyCancellable] = [:]
     private var resumeObservers: [UUID: AnyCancellable] = [:]
@@ -166,7 +168,19 @@ final class BrowserWorkspace: ObservableObject {
             guard let self, let tab else { return }
             if playing {
                 tab.lastActive = Date()
-                for other in self.tabs where other.id != tab.id { other.session.pauseForTabSwitch() }
+                var handedOver = false
+                for other in self.tabs where other.id != tab.id {
+                    if other.session.isInPictureInPicture { other.session.stopPiPAndPause(); handedOver = true }
+                    else { other.session.pauseForTabSwitch() }
+                }
+                // V16: the new video takes over from the PiP video in fullscreen.
+                if handedOver, tab.id == self.selectedID,
+                   UserDefaults.standard.object(forKey: "fullscreenNewVideoFromPiPV16") as? Bool ?? true {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak tab] in
+                        guard let tab, tab.session.isPlaying, !tab.session.isFullscreen else { return }
+                        tab.session.openFullscreenFallback()
+                    }
+                }
             }
             DispatchQueue.main.async { self.updateIdleTimer() }
         }
@@ -180,8 +194,24 @@ final class BrowserWorkspace: ObservableObject {
     }
     private func leaveCurrent() {
         selected.lastActive = Date()
-        selected.session.leaveFullscreenForTabSwitch()
-        if !selected.session.isInPictureInPicture { selected.session.pauseForTabSwitch() }
+        recent.removeAll { $0 == selectedID }; recent.append(selectedID)
+        let session = selected.session
+        // V16.2: an untouched new tab must not pop up the keyboard when you come back to it later.
+        session.focusSearchWhenReady = false
+        // V16: a playing video continues in PiP while you open or browse another tab.
+        let keepInPiP = (UserDefaults.standard.object(forKey: "pipOnTabSwitchV16") as? Bool ?? true) && session.isPlaying
+        if keepInPiP && !session.isInPictureInPicture {
+            session.enterPiPForTabSwitch()
+            return
+        }
+        session.leaveFullscreenForTabSwitch()
+        if !session.isInPictureInPicture { session.pauseForTabSwitch() }
+    }
+    /// V16 Ctrl+Tab: back to the tab that was open before (again: forth), like app switching.
+    func selectRecent() {
+        guard let previous = recent.last(where: { id in id != selectedID && tabs.contains { $0.id == id } }),
+              let tab = tabs.first(where: { $0.id == previous }) else { selectPrevious(); return }
+        select(tab)
     }
     private var insertsNextToCurrent: Bool { UserDefaults.standard.object(forKey: "openNewTabsNextToCurrentV15") as? Bool ?? true }
     func addTab() { addTab(url: nil) }
@@ -291,6 +321,10 @@ struct WorkspaceActions {
     var zoomOut: () -> Void = {}
     var resetZoom: () -> Void = {}
     var togglePin: () -> Void = {}
+    var recentTab: () -> Void = {}
+    var forceRefresh: () -> Void = {}
+    var duplicateTab: () -> Void = {}
+    var copyLink: () -> Void = {}
 }
 extension Notification.Name {
     /// Object: the WebSession whose tab should present Settings (Cmd+,).
@@ -327,7 +361,10 @@ struct PlayerShellView: View {
             selectTab: { index in index >= 8 ? workspace.select(index: workspace.tabs.count - 1) : workspace.select(index: index) },
             goBack: { workspace.selected.session.goBack() }, goForward: { workspace.selected.session.goForward() },
             zoomIn: { workspace.selected.session.zoom(by: 0.1) }, zoomOut: { workspace.selected.session.zoom(by: -0.1) },
-            resetZoom: { workspace.selected.session.resetZoom() }, togglePin: { workspace.togglePin(workspace.selected) })
+            resetZoom: { workspace.selected.session.resetZoom() }, togglePin: { workspace.togglePin(workspace.selected) },
+            recentTab: workspace.selectRecent, forceRefresh: { workspace.selected.session.forceRefresh() },
+            duplicateTab: { workspace.duplicate(workspace.selected) },
+            copyLink: { if let url = workspace.selected.currentURL { Clipboard.copy(url) } })
     }
     private func toggleBookmark() {
         let tab = workspace.selected
@@ -335,13 +372,7 @@ struct PlayerShellView: View {
         let saved = library.isBookmarked(tab.session.currentURL)
         tab.session.showNotice(.success, saved ? "Bookmark added" : "Bookmark removed", tab.fullTitle)
     }
-    private func showFind() {
-        #if os(iOS)
-        workspace.selected.session.presentFind()
-        #else
-        findVisible = true
-        #endif
-    }
+    private func showFind() { findVisible = true }
 
     var body: some View {
         let theme = settings.theme
@@ -356,16 +387,25 @@ struct PlayerShellView: View {
                         .accessibilityHidden(workspace.selectedID != tab.id)
                         .zIndex(workspace.selectedID == tab.id ? 1 : 0)
                 }
-                #if os(macOS)
+                if editingAddress {
+                    // V16: tapping/clicking anywhere else closes the address bar.
+                    Color.black.opacity(0.001).contentShape(Rectangle())
+                        .onTapGesture { editingAddress = false }
+                        .zIndex(4)
+                }
                 if findVisible {
                     FindBar(session: workspace.selected.session, visible: $findVisible)
+                        #if os(macOS)
                         .padding(.top, settings.toolbarDensity.height + 6)
+                        #else
+                        .padding(.top, 6)
+                        #endif
                         .zIndex(5)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                #endif
             }
-            .animation(theme.animation, value: workspace.selectedID)
+            .animation(theme.anim(.tabs), value: workspace.selectedID)
+            .animation(theme.anim(.findBar), value: findVisible)
         }
         .background(theme.background)
         .environment(\.joeToepTheme, theme)
@@ -399,6 +439,8 @@ struct PlayerShellView: View {
                 Button("Find") { showFind() }.keyboardShortcut("f", modifiers: .command)
                 Button("Bookmark") { toggleBookmark() }.keyboardShortcut("d", modifiers: .command)
                 Button("Library") { showingLibrary = true }.keyboardShortcut("y", modifiers: .command)
+                Button("Recent tab") { workspace.selectRecent() }.keyboardShortcut(.tab, modifiers: .control)
+                Button("Force refresh") { workspace.selected.session.forceRefresh() }.keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Next tab") { workspace.selectNext() }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous tab") { workspace.selectPrevious() }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Back") { workspace.selected.session.goBack() }.keyboardShortcut("[", modifiers: .command)

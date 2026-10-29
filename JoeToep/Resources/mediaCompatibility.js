@@ -42,6 +42,10 @@
   // Presentation the video had right before PiP began: return exactly there (no inline hop).
   let lastMode = "inline", pipOrigin = "inline";
   let systemHandoff = false;
+  // V16: once PiP has settled, a pause (PiP window button, media key) is the user's intent and
+  // must never be "recovered". Only the first moments of the handoff may be.
+  let pipSince = 0, noFullscreenReturnUntil = 0;
+  const pipSettled = v => isPiP(v) && pipSince > 0 && Date.now() - pipSince > 600;
   // V15 (Mac): YouTube element fullscreen right before PiP counts as a fullscreen origin.
   let pageFullscreenAt = 0;
   const pageFullscreen = () => Boolean(document.fullscreenElement || document.webkitFullscreenElement);
@@ -194,10 +198,12 @@
     lastPiPVideo = isPiP(v) ? v : null;
     lastMode = isPiP(v) ? "picture-in-picture" : (v.webkitPresentationMode || "inline");
     if (isPiP(v)) {
+      if (!pipSince) pipSince = Date.now();
       requestUntil = 0;
       lastStatus = "system-pip-active";
       if (fallbackRoot) fallbackRoot.hidden = true;
     } else if (leavingPiP) {
+      pipSince = 0;
       lastStatus = "system-pip-returned";
       systemHandoff = false; handoffUntil = 0; externalRequestUntil = 0; requestUntil = 0;
       returnWantsPlay = (desiredPlaying || (config.keepPlaying && !userPause)) && !interrupted && !v.ended;
@@ -328,6 +334,10 @@
     if (e.target !== pick()) return;
     lastPauseAt = Date.now();
     if (interrupted) return; // An interruption is not a user pause.
+    if (pipSettled(main) && Date.now() >= transitionUntil) {
+      desiredPlaying = false; userPause = true; handoffUntil = 0; systemHandoff = false; returnWantsPlay = false;
+      lastStatus = "pip-user-pause"; return;
+    }
     if (isPiP(main) && Date.now() < transitionUntil && !transitionRecovered && desiredPlaying && !userPause) {
       transitionRecovered = true; lastStatus = "pip-transition-pause-recovered";
       native.play.call(main)?.catch(() => { lastStatus = "pip-transition-resume-declined"; });
@@ -524,6 +534,18 @@
       if (isPiP(v)) { returnToApp(false); return "exiting"; }
       return "ready";
     },
+    // V16: another tab's video starts: leave PiP to inline (paused), never to fullscreen.
+    closePiPInline() {
+      const v = pick();
+      returnWantsPlay = false; handoffUntil = 0; systemHandoff = false; desiredPlaying = false; userPause = true;
+      allowPauseUntil = Date.now() + 1500; noFullscreenReturnUntil = Date.now() + 3000;
+      if (!v || !isPiP(v)) return false;
+      try {
+        if (document.pictureInPictureElement && native.exitPiP) native.exitPiP.call(document)?.catch(() => {});
+        else if (native.presentation) native.presentation.call(v, "inline");
+      } catch (_) { return false; }
+      return true;
+    },
     actualPresentation() { const v = pick(); return isPiP(v) ? "picture-in-picture" : v?.webkitPresentationMode || "inline"; },
     cancelHandoff() { requestUntil = 0; handoffUntil = 0; externalRequestUntil = 0; systemHandoff = false; return true; },
     setInterrupted(value, canResume = false) {
@@ -561,6 +583,7 @@
       if (!v || isPiP(v) || v.readyState < 1) return false;
       if (v.webkitPresentationMode === "fullscreen" || v.webkitDisplayingFullscreen) return true;
       if (!wantsFullscreenReturn()) return false; // e.g. inline PiP with "where PiP started"
+      if (Date.now() < noFullscreenReturnUntil) return false; // V16: handed over to another tab
       if (!platform && config.macFullscreen === "youtube") {
         if (pageFullscreen()) return true;
         // Retry: request the player element directly (the button may be mid-transition).

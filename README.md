@@ -1,4 +1,4 @@
-# JoeToep V15 — 15.0.0 (15)
+# JoeToep V16.2 — 16.2.0 (18)
 
 Persoonlijke YouTube-browser voor Mac (macOS 27), iPhone 13 Pro (iOS 27) en iPad Pro 12,9" 2e generatie (iPadOS 17). Open `JoeToep.xcodeproj`, kies scheme **JoeToep**, je apparaat en je Signing Team (app-ID `nl.tijn.JoeToep`). Zie `CHANGELOG.md` voor alles wat nieuw is en `Docs/BUILD_REPORT.md` voor de testresultaten.
 
@@ -47,6 +47,6 @@ Een gratis team ondertekent 7 dagen; daarna meldt iOS "This app is no longer ava
 
 `npm ci --ignore-scripts && npm test` draait de DOM/bridge-regressies. Die simuleren Apple-media-API's en bewijzen geen native PiP.
 
-Native tests: `xcodebuild -project JoeToep.xcodeproj -scheme JoeToep -destination 'platform=macOS' -parallel-testing-enabled NO -only-testing:JoeToepTests test` (unit tests). UI- en apparaattests: `JoeToepUITests` en `JoeToepUITests/V15DeviceTests` (PiP-terugknop, rotatie, stress).
+Native tests: `xcodebuild -project JoeToep.xcodeproj -scheme JoeToep -destination 'platform=macOS' -parallel-testing-enabled NO -only-testing:JoeToepTests test` (unit tests). UI- en apparaattests: `JoeToepUITests` en `JoeToepUITests/V15DeviceTests` (PiP-terugknop, 8× PiP-cycli, pauze in PiP, nieuwe tab houdt PiP, rotatie, stress).
 
 Python-controles: installeer `Scripts/requirements-dev.txt` in een virtualenv, voer vervolgens `Scripts/validate_project.py`, `Scripts/test_content_filters.py` en `Scripts/validate_swift_syntax.py` uit. `Scripts/generate_fixture.sh` vereist ffmpeg en maakt een lokale video van 96 seconden. Er wordt geen YouTube-video gedownload.

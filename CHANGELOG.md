@@ -1,3 +1,63 @@
+# V16.2 — 16.2.0 (18)
+
+Bevat alle features van V15 en V16. Deze versie draait om PiP-stabiliteit en performance.
+
+**Picture in Picture**
+- Terug uit PiP met de knop in het PiP-venster gaat nu elke keer in één stap naar schermvullend en blijft spelen. Voorheen kwam de video vanaf de tweede keer inline terug. De oorzaak: JoeToep greep in terwijl iOS de terug-animatie nog uitvoerde, waardoor WebKit in een "spook-PiP"-toestand bleef hangen. JoeToep wacht nu tot de animatie klaar is en grijpt alleen in als de video echt nog in PiP staat (terugkeer via het app-icoon).
+- Blijft WebKit toch in zo'n spook-PiP-toestand hangen, dan herstelt JoeToep die naar schermvullend in plaats van inline.
+- Vangnet: komt een spelende video na PiP toch inline terecht, dan gaat hij nog één keer naar schermvullend. Sluiten met ✕ pauzeert de video en valt daar niet onder.
+
+**Performance**
+- Audiovisualizer: 30 in plaats van 60 beelden per seconde, asynchroon getekend. Hij staat stil als de app op de achtergrond is, in de energiebesparingsmodus, en tijdens schermvullend of PiP.
+
+**Tabs**
+- Een nieuwe tab die je niet gebruikt hebt, opent het toetsenbord niet meer als je er later naar terugwisselt.
+
+**Testen** (iPhone, iOS 27)
+- 55 unittests, 116 JS-scenario's (waaronder 10.000 overgangen en 2.000 fullscreen-cycli) en 12 V15/V16-scriptscenario's.
+- Apparaattests op de iPhone:
+  - acht keer achter elkaar PiP en terug;
+  - de PiP-terugknop;
+  - pauze in PiP blijft pauze;
+  - een nieuwe tab houdt de video in PiP;
+  - draaien naar landscape (schermvullend binnen 1,5 s);
+  - stresstest met tabs, PiP en de Camera-app.
+- Het testprobe toont nu het levenscyclus-logboek van de app, zodat een fout in een test zijn eigen oorzaak laat zien.
+
+# V16 — 16.0.0 (16)
+
+**Tabs en navigatie**
+- Ctrl+Tab wisselt naar de laatst gebruikte tab (MRU), niet links/rechts.
+- Middelklik op een tab sluit hem (macOS).
+- Vasthouden of middelklik op Home, Bibliotheek en Abonnementen opent ze in een nieuwe tab.
+- Vasthouden of middelklik op Vernieuwen doet een geforceerde herstart van de pagina en het webproces (noodknop als PiP of YouTube vastloopt, ook ⌘⇧R).
+- De adresbalk verdwijnt als je ergens anders tikt of klikt. Instelling om vanuit de adresbalk met Google te zoeken.
+- Nieuwe sneltoetsen: ⌘⇧D dupliceren, ⌘⇧C link kopiëren, ⌘K adres openen.
+- Zoeken op pagina (⌘F) zoals in Chrome: meteen typen, Enter voor volgende (⇧Enter vorige, ⌘G), markering op de pagina en een teller.
+
+**Video en PiP**
+- Theatermodus standaard aan op alle platforms.
+- Pauze in PiP blijft pauze; hervatten gebeurt alleen als jij opnieuw drukt (alle platforms).
+- Een nieuwe tab openen houdt de spelende video in PiP. Start er een nieuwe video in de actieve tab, dan pauzeert de PiP-video en speelt de nieuwe schermvullend.
+- iPad: de korte inzoom bij het starten van PiP is weg (geen inline object-fit-wisselingen meer).
+- Sneller naar schermvullend bij het draaien van de iPhone.
+- Datasparen op mobiel netwerk of de hotspot van eiFoon (standaard uit, kwaliteit instelbaar).
+
+**Uiterlijk**
+- Accentkleur "YouTube Red (Tjoep)" (#FF0033), nu de standaard.
+- Audiovisualizer over de hele breedte van de tab- en menubalk (staven, golf, gloed of uit; intensiteit instelbaar).
+- Menubalk op iPhone en iPad scrolt alleen als de knoppen niet passen. Elke knop is apart aan en uit te zetten.
+- Het "…"-menu is altijd volledig uitgeklapt.
+
+**Geavanceerd** (met waarschuwing)
+- Snelheid en curve van alle animaties samen en per soort (tabs, adresbalk, menubalk, meldingen, panelen, zoekbalk, visualizer).
+- Interne instellingen voor PiP, schermvullend, website en adblock, plus de SponsorBlock-server en diagnostiek.
+
+**Beperkingen**
+- De visualizer is gesimuleerd. WebKit geeft de audio niet vrij zonder PiP te breken.
+- De animaties van het PiP-venster en schermvullend zelf zijn van het systeem. JoeToep haalt alleen zijn eigen vertragingen weg.
+- De iPad kan niet automatisch getest worden: de testrunner crasht op de A10X-chip. De PiP-fixes zijn daar handmatig te controleren.
+
 # V15 — 15.0.0 (15)
 
 **Naam en project**

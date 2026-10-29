@@ -184,13 +184,21 @@ final class JoeToepUITests: XCTestCase {
         launch(["--skip-onboarding"])
         let settings = app.buttons["toolbar.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5)); settings.activateControl()
-        openSettingsPage("Playback & Picture in Picture")
+        // V16: PiP internals and the Apple-player switch live in Advanced settings.
+        let advanced = app.descendants(matching: .any)["settings.page.Advanced settings"].firstMatch
+        #if os(iOS)
+        for _ in 0..<4 where !advanced.exists { app.swipeUp() }
+        #endif
+        openSettingsPage("Advanced settings")
         let fallback = app.descendants(matching: .any)["settings.pipFallback"].firstMatch
+        #if os(iOS)
+        for _ in 0..<4 where !fallback.exists { app.swipeUp() }
+        #endif
         XCTAssertTrue(fallback.waitForExistence(timeout: 5))
         fallback.activateControl(); fallback.activateControl()
         #if os(iOS)
         let fullscreen = app.descendants(matching: .any)["settings.nativeFullscreen"].firstMatch
-        if !fullscreen.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !fullscreen.exists { app.swipeUp() }
         XCTAssertTrue(fullscreen.exists)
         #endif
     }

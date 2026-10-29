@@ -16,4 +16,6 @@ FOUNDATION_EXPORT NSString *JTMediaConfigurationSummary(void);
 /// V11: allow the next programmatic focus (e.g. YouTube search in a new tab) to show the
 /// iOS keyboard for `seconds`. Uses WebKit's input delegate SPI; no effect on macOS.
 FOUNDATION_EXPORT void JTAllowProgrammaticFocus(WKWebView *webView, NSTimeInterval seconds);
+/// V16: terminate the web content process (it restarts on the next load). NO if unavailable.
+FOUNDATION_EXPORT BOOL JTRestartWebContent(WKWebView *webView);
 NS_ASSUME_NONNULL_END

@@ -120,38 +120,58 @@ struct LibraryView: View {
     }
 }
 
-#if os(macOS)
-/// V15 (Mac): find on page (⌘F).
+/// V16: Chrome-style find on page (⌘F) on every platform. Typing searches immediately, Enter
+/// jumps to the next match (⇧Enter previous), all matches are highlighted.
 struct FindBar: View {
     @ObservedObject var session: WebSession
     @Binding var visible: Bool
     @State private var text = ""
-    @State private var found: Bool?
+    @State private var state = WebSession.FindState()
+    @State private var searchTask: Task<Void, Never>?
     @FocusState private var focused: Bool
     @Environment(\.joeToepTheme) private var theme
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "text.magnifyingglass").foregroundStyle(theme.secondary)
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(theme.secondary)
             TextField("Find on page", text: $text)
-                .textFieldStyle(.plain).frame(width: 220).focused($focused)
-                .onSubmit { search(backwards: false) }
-                .onChange(of: text) { _, _ in search(backwards: false) }
+                .textFieldStyle(.plain).frame(minWidth: 140, maxWidth: 260).focused($focused)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never).submitLabel(.next)
+                #endif
+                .onSubmit { session.findNext { state = $0 }; focused = true }
+                .onChange(of: text) { _, value in schedule(value) }
+                #if os(macOS)
                 .onExitCommand { close() }
-            if found == false && !text.isEmpty { Text("Not found").font(.caption).foregroundStyle(.red) }
-            Button { search(backwards: true) } label: { Image(systemName: "chevron.up") }.buttonStyle(.plain)
+                #endif
+                .accessibilityIdentifier("find.field")
+            Text(text.isEmpty ? "" : (state.count == 0 ? "No results" : "\(state.index)/\(state.count)"))
+                .font(.caption.monospacedDigit()).foregroundStyle(state.count == 0 && !text.isEmpty ? .red : theme.secondary)
+                .frame(minWidth: 54)
+            Button { session.findPrevious { state = $0 } } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.plain).disabled(state.count == 0)
                 .keyboardShortcut("g", modifiers: [.command, .shift])
-            Button { search(backwards: false) } label: { Image(systemName: "chevron.down") }.buttonStyle(.plain)
+            Button { session.findNext { state = $0 } } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.plain).disabled(state.count == 0)
                 .keyboardShortcut("g", modifiers: .command)
-            Button("Done") { close() }.buttonStyle(.plain).foregroundStyle(theme.accent)
+            Button { session.findPrevious { state = $0 } } label: { EmptyView() }
+                .keyboardShortcut(.return, modifiers: .shift).frame(width: 0).opacity(0)
+            Button { close() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(theme.secondary) }
+                .buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close find")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(radius: 10, y: 4)
-        .onAppear { focused = true }
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+        .padding(.horizontal, 12)
+        .onAppear { DispatchQueue.main.async { focused = true } }
     }
-    private func search(backwards: Bool) {
-        session.find(text, backwards: backwards) { match in found = match }
+    private func schedule(_ value: String) {
+        searchTask?.cancel()
+        searchTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            session.find(value) { state = $0 }
+        }
     }
     private func close() { session.clearFindHighlights(); visible = false }
 }
-#endif
