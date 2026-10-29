@@ -45,8 +45,8 @@
 - iPad stond op "unavailable" in `devicectl` → niet gebouwd. iPhone Mirroring werkt niet in Tijns regio, dus de eiFoon kan Claude niet bedienen: iPhone/iPad/Watch-tests doet Tijn zelf (lijst hieronder).
 - Opgelost: onderwerpen in de pagina-assistent (`PageDigest.keywords`, zie CHANGELOG).
 
-## Open punt: video speelt vanzelf na herstart (Mac)
-Twee keer na elkaar: afsluiten → starten → de laatst gekozen YouTube-tab (linkerpaneel van een Split View) speelt en gaat fullscreen op de HP-monitor. Bij de eerste keer stond de video bij het afsluiten op pauze. Verdachte paden: sync-overname (`WebSession` "takeover: …", `forcePlayOnStart`) als de eiFoon dezelfde video speelde, of het herstel van Split View/Space. Eerst testen met de eiFoon-app dicht en wifi/bluetooth uit; speelt hij dan nog, dan is het een regressie van de 22.2-fix ("geen vanzelf spelende video's").
+## Opgelost in 26.1: vast in fullscreen na herstart
+Herstelde videotab ging fullscreen tijdens YouTube's korte autoplay-blip (vóór de stil-bewaking pauzeerde) → gepauzeerd, laadrondje, F/Esc dood. Fix in `sitePreferences.js` (geen automatische fullscreen zolang `JoeToepMedia.diagnostics().quiet` actief is). Na de fix op de Mac twee keer herstart: geen fullscreen meer. Let op: of de video na een herstart speelt hangt af van "Keep playing when JoeToep reopens" (Sync & devices) — bij Tijn lijkt die aan te staan.
 
 ## Afvinklijst voor Tijn (eiFoon, iPad, Watch)
 - [ ] eiFoon: JoeToep 26.1 opent, tabs en Spaces kloppen met de Mac (sync).
@@ -60,4 +60,4 @@ Twee keer na elkaar: afsluiten → starten → de laatst gekozen YouTube-tab (li
 - [ ] eiFoon: widgets en de knoppen van de Live Activity.
 - [ ] Watch: bediening play/pauze en de huidige titel.
 - [ ] iPad (aansluiten en ontgrendelen, dan bouwen): Split View, lijn slepen, fullscreen in een paneel en terug.
-- [ ] Mac, open punt hierboven: herstart met de eiFoon-app dicht.
+- [ ] Mac: herstart met een gepauzeerde video → geen fullscreen, F/Esc/spatie werken.

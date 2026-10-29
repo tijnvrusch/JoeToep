@@ -94,6 +94,18 @@ test('Mac: theater + automatic fullscreen — no theater click before/while full
   t.fire(t.v, 'canplay'); await sleep(20);
   assert.equal(t.calls.theater, 0);
 });
+// V26.1: herstelde tab na een herstart (stil tot een gebaar) → YouTube's autoplay mag geen fullscreen starten.
+test('Mac: restored quiet tab — YouTube autoplay blip never requests automatic fullscreen', async () => {
+  const t = page({ mobile: false, prefs: { automaticFullscreen: true, theater: true } });
+  t.w.JoeToepMedia.quiet(-1);
+  // In WebKit speelt de video heel even vóór de stil-bewaking pauzeert; dat moment nabootsen.
+  t.st.paused = false; t.fire(t.v, 'canplay'); t.fire(t.v, 'timeupdate'); await sleep(20);
+  assert.equal(t.calls.autoFullscreen, 0, 'no fullscreen while JoeToep keeps the video quiet');
+  t.w.JoeToepMedia.quiet(0);                     // jouw klik op play (of een opdracht van JoeToep)
+  t.st.paused = true; t.scriptPlay(); await sleep(20);
+  assert.equal(t.calls.autoFullscreen, 1, 'after releasing quiet the normal automatic fullscreen works');
+});
+
 test('Mac: after leaving automatic fullscreen the video goes to theater mode', async () => {
   const t = page({ mobile: false, prefs: { automaticFullscreen: true, theater: true } });
   t.scriptPlay(); await sleep(20);

@@ -107,7 +107,12 @@
     const firstStart = startedKey !== key();
     if (firstStart && Date.now() <= (window.__jtSkipFSUntil || 0) && v && !v.paused) startedKey = key();
     const allowed = Date.now() > (window.__jtSkipFSUntil || 0) && (firstStart ? config.automaticFullscreen : (config.fullscreenOnPlay && resumeRequested));
-    if (window.JoeToepMedia.diagnostics().rawVisibility !== "visible" || !allowed || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||
+    // V26.1: zolang JoeToep de video stil houdt (herstelde tab na een herstart) nooit automatisch fullscreen.
+    // YouTube's eigen autoplay speelt dan heel even voordat de stil-bewaking pauzeert; sinds de V26-theaterwijziging
+    // viel fullscreen precies in dat moment → gepauzeerde video met laadrondje, vast in fullscreen.
+    const media = window.JoeToepMedia.diagnostics();
+    if (media.quiet === "until-gesture" || media.quiet > 0) return;
+    if (media.rawVisibility !== "visible" || !allowed || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||
         lastFullscreenKey === key() || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
     // Only one attempt per video; exiting fullscreen never immediately reopens it.
     requestWasFirstStart = firstStart;

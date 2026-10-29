@@ -7,6 +7,11 @@ Eerste test van V26 op echte apparaten (Mac). Gebouwd en geïnstalleerd op de Ma
 - **Oorzaak**: `PageDigest.keywords` telde ook de woorden uit links in de videobeschrijving mee, plus maandafkortingen en datums zoals "18th".
 - **Oplossing**: links (`https://…`, `www.…`, `iets.com/…`) gaan eruit vóór het tellen; webwoorden en maandafkortingen worden overgeslagen, net als woorden die met een cijfer beginnen. Nieuwe test `testKeywordsSkipLinksAndDates`.
 
+## Opgelost: na een herstart vast in fullscreen met een draaiend laadrondje
+- **Wat merkte je**: bij het openen van JoeToep ging de laatste YouTube-video meteen fullscreen (op de HP-monitor), bleef gepauzeerd met YouTube's laadrondje, F en Esc deden niets en de spatiebalk werkte maar één keer.
+- **Oorzaak**: een herstelde tab wordt stil gehouden tot je zelf iets aanraakt. YouTube's eigen autoplay speelt dan heel even voordat JoeToep pauzeert. Sinds V26 wacht automatische fullscreen niet meer eerst op de theatermodus, waardoor het fullscreen-verzoek precies in dat korte moment viel; daarna stond een gepauzeerde video in een fullscreen die nergens meer op reageerde.
+- **Oplossing**: `sitePreferences.js` vraagt nooit automatisch fullscreen aan zolang de stil-bewaking actief is. Zodra jij op play drukt (of JoeToep zelf laat spelen) werkt automatische fullscreen gewoon. Nieuwe jsdom-test (faalt zonder de fix).
+
 ## Getest op de Mac (OK)
 - Spaces: nieuwe Space maken (opent met een Home-tab), heen en terug wisselen.
 - Split View: openen via het menu; een opgeschorte tab is een paar seconden wit tot hij geladen is, daarna staan beide panelen goed.
@@ -14,7 +19,6 @@ Eerste test van V26 op echte apparaten (Mac). Gebouwd en geïnstalleerd op de Ma
 - Pagina-assistent: samenvatten met Apple Intelligence werkt.
 
 ## Nog open (zie Docs/HANDOFF-V27.md › 26.1)
-- Na een herstart begon de laatste video twee keer vanzelf te spelen, fullscreen op de HP-monitor. Mogelijk een overname door de sync (speelde de eiFoon dezelfde video?), anders een regressie van de 22.2-fix.
 - iPhone, iPad, Watch, widgets en Live Activity zijn nog niet getest (iPhone Mirroring is in deze regio niet beschikbaar).
 
 # 26.0.0 (39)
