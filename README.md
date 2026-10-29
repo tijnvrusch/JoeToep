@@ -1,6 +1,32 @@
-# JoeToep V17.1 — 17.1.0 (21)
+# JoeToep — 25.1.0 (38)
 
-Persoonlijke YouTube-browser voor Mac (macOS 27), iPhone 13 Pro (iOS 27) en iPad Pro 12,9" 2e generatie (iPadOS 17). Open `JoeToep.xcodeproj`, kies scheme **JoeToep**, je apparaat en je Signing Team (app-ID `nl.tijn.JoeToep`). Zie `CHANGELOG.md` voor alles wat nieuw is en `Docs/BUILD_REPORT.md` voor de testresultaten.
+Open-source persoonlijke YouTube-browser en -speler voor **Mac**, **iPhone** en **iPad** (plus Apple Watch, widgets en Live Activity), gebouwd met SwiftUI en WKWebView. Tabs en afspeelpositie synchroniseren live tussen je apparaten; Picture in Picture, fullscreen (met automatisch liggend op de iPhone) en een Arc-achtige zoekbalk zijn tot in detail uitgewerkt.
+
+- **Wat er nieuw is:** [`CHANGELOG.md`](CHANGELOG.md) · **alle versies:** [`Docs/VERSIEGESCHIEDENIS.md`](Docs/VERSIEGESCHIEDENIS.md) (elke versie is een git-tag)
+- **Bijdragen:** [`CONTRIBUTING.md`](CONTRIBUTING.md) · **licentie:** MIT ([`LICENSE`](LICENSE))
+- **Voor Claude/AI-sessies:** [`CLAUDE.md`](CLAUDE.md), nieuwste overdracht [`Docs/HANDOFF-V26.md`](Docs/HANDOFF-V26.md), chatgeschiedenis in [`Docs/chatgeschiedenis/`](Docs/chatgeschiedenis/)
+
+## Bouwen
+
+1. Open `JoeToep.xcodeproj` in Xcode (26 of nieuwer).
+2. Kies scheme **JoeToep**, je apparaat (My Mac, iPhone of iPad) en je eigen Signing Team. Pas zo nodig `JOETOEP_BUNDLE_ID` (standaard `nl.tijn.JoeToep`) en de App Group aan.
+3. Run. Alle apparaten moeten dezelfde app-build draaien om te kunnen syncen.
+
+Snelle checks zonder Xcode: `node Scripts/test_media_compatibility.cjs` (en andere `Scripts/test_*.cjs`) en `python3 Scripts/validate_project.py`.
+
+## Projectstructuur
+
+| Map | Inhoud |
+|---|---|
+| `JoeToep/Browser` | `WebSession` (één tab: WKWebView, PiP, fullscreen, herstel), webview-hosting |
+| `JoeToep/Views` | SwiftUI-schermen: werkruimte/tabs (`BrowserWorkspace`), instellingen, overlay, zijbalk |
+| `JoeToep/Support` | Sync (`TabSyncService`), widgets/Watch-brug, Live Activity, Spotify, oriëntatie |
+| `JoeToep/Models` | Datamodellen (sync-snapshots, bibliotheek, tabopslag) |
+| `JoeToep/Resources` | Geïnjecteerde scripts (`mediaCompatibility.js`, `sitePreferences.js`, …) |
+| `JoeToepWidgets`, `JoeToepWatch`, `JoeToepWatchWidgets` | Widgets, Watch-app en complicaties |
+| `JoeToepTests`, `JoeToepUITests`, `Scripts` | Tests en validatie |
+| `Docs` | Runbook, testplan, buildrapport, overdrachten, versiegeschiedenis |
+
 
 ## Signing (gratis Apple-team)
 
