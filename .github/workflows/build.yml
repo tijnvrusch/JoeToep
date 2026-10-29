@@ -1,0 +1,65 @@
+# Echte Swift-/Xcode-builds voor JoeToep op een macOS-runner van GitHub.
+# De Claude-cloudsessie draait op Linux (geen Xcode, geen AppKit/UIKit/SwiftUI),
+# dus elke push laat GitHub de app hier compileren voor macOS én de iOS-simulator.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: JS-tests en projectvalidatie
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: JS-scripttests
+        run: |
+          set -e
+          for t in Scripts/test_*.cjs; do echo "== $t"; node "$t"; done
+      - name: Projectvalidatie
+        run: python3 Scripts/validate_project.py
+
+  xcode:
+    name: Xcode ${{ matrix.platform }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            destination: "generic/platform=macOS"
+          - platform: iOS
+            destination: "generic/platform=iOS Simulator"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nieuwste Xcode kiezen
+        run: |
+          XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Gekozen: $XC"; sudo xcode-select -s "$XC"; xcodebuild -version
+      - name: Bouwen (zonder ondertekenen)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project JoeToep.xcodeproj -scheme JoeToep \
+            -destination "${{ matrix.destination }}" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build.log | grep -E "error:|warning: .*JoeToep/|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+      - name: Foutmeldingen samenvatten
+        if: failure()
+        run: grep -E "error:" build.log | sort -u | head -100 || true
+      - name: Buildlog bewaren
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.platform }}
+          path: build.log
