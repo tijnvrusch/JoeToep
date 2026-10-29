@@ -1,3 +1,18 @@
+# Build report V25 — 25.0.0 (37), 29-10-2026
+
+| Platform | Gebouwd/geïnstalleerd | Getest |
+|---|---|---|
+| Mac (M1 Max, ingebouwd scherm) | ja — Debug, Run vanuit Xcode, geen fouten (6 oude waarschuwingen) | klik = pauze/afspelen in fullscreen (elk precies één keer), dubbelklik = eruit (blijft spelen), Esc, F in/uit, Esc tijdens de ingang, 3× snel F in/uit + dubbelklik, YouTube's fullscreen-knop → telkens netjes inline; 5 s fullscreen op het ingebouwde scherm (notch) zonder uit-en-weer-aan |
+| iPhone 13 Pro "eiFoon" (kabel, iOS 27.2) | ja — "Running JoeToep on eiFoon" | scherm niet zichtbaar (Device Hub: microfoon/camera actief) → handmatige test door Tijn |
+| iPad Pro 2e gen. | nee | — |
+
+Opvallend: bij het starten vanuit Xcode kwam de herstelde (gepauzeerde) video op de Mac direct in fullscreen terug — bestaand open punt uit 23.1, nog niet opgelost.
+
+JS (jsdom): bridge 17, mediaCompatibility 134, V15 12, V17 13, V23.1 11, V24 10, **V25 13 (nieuw; 7 daarvan falen op 24.0 = bug nagebootst)** — alles groen.
+Swift: grammaticacontrole (tree-sitter) van alle gewijzigde bestanden zonder fouten; geen Apple-SDK-typecontrole mogelijk zonder Xcode. `V25FeatureTests` staat klaar voor ⌘U.
+
+Eerstvolgende stap: in het open Open-paneel `JoeToep.xcodeproj` kiezen (het paneel staat al in de juiste map: die heette JoeToep-V23.1 en heet nu JoeToep-V25), dan Run op Mac en eiFoon, unit tests, en op de iPhone: herstelde tab → fullscreen → ▶/❚❚ (met Mac tegelijk aan), en op de Mac: Esc/F/dubbelklik/knop op het ingebouwde scherm, BenQ en HP.
+
 # Build report V24 — 24.0.0 (36), 15-10-2026
 
 | Platform | Gebouwd/geïnstalleerd | Getest |

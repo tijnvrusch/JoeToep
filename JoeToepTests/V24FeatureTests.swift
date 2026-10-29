@@ -24,8 +24,9 @@ final class V24FeatureTests: XCTestCase {
         XCTAssertFalse(hub.sources.contains { $0.kind == .spotify && $0.title.isEmpty })
     }
 
-    func testVersionIs24() {
-        XCTAssertEqual(AppConstants.version, "24.0.0")
+    func testVersionIsAtLeast24() {
+        // V25: exacte versie staat in V25FeatureTests; hier alleen: nooit terug naar vóór 24.
+        XCTAssertGreaterThanOrEqual(Int(AppConstants.version.split(separator: ".").first ?? "0") ?? 0, 24)
     }
 
     #if os(iOS)

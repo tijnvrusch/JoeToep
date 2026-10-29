@@ -1,3 +1,30 @@
+# 25.0.0 (37)
+
+## iPhone: play/pauze werkt altijd precies één keer
+- **Oorzaak 1 — tik op ▶ in Apple's fullscreen-speler werd als "YouTube-autoplay" gezien.** Een herstelde tab of een tab die net door de sync werd bijgewerkt (het andere apparaat speelt) staat "stil": YouTube mag hem niet zelf starten, alleen een tik van jou. Maar tikken in Apple's eigen fullscreen-speler (en in het PiP-venster) komen nooit als klik in de pagina aan. JoeToep zag daardoor alleen "de video start zonder tik" en pauzeerde hem meteen weer — elke keer dat je op ▶ drukte.
+  **Oplossing:** JoeToep weet nu wie een video start. Elk script (YouTube én JoeToep zelf) gaat via een bewaakte play()/pause(); een start in Apple's fullscreen-speler of PiP zonder zo'n script-verzoek is dus jouw tik → hij speelt, en de stil-bewaking voor die video is meteen voorbij. YouTube-autoplay blijft gewoon tegengehouden (ook in fullscreen).
+- **Oorzaak 2 — de stil-bewaking ging opnieuw aan nadat jij al speelde.** Zodra de pagina klaar was met laden (dat kan seconden ná je eerste tik zijn) zette de app "stil tot je hem aanraakt" opnieuw aan. De eerstvolgende "playing" — na bufferen, na de overgang naar fullscreen of een kwaliteitswissel — pauzeerde de video dan "vanzelf", vaak midden in fullscreen.
+  **Oplossing:** de bewaking beslist nu één keer per start (bij "play"); een toegestane start wordt daarna nooit meer gepauzeerd. Heb je een video zelf gestart, dan wordt "stil" voor die video niet opnieuw aangezet, en speelt hij 1,2 s, dan laat ook de app het stil-houden voor die tab los.
+- **Oorzaak 3 — het hervatten van een herstelde tab ("gepauzeerd op 2:00") pauzeerde jouw eigen eerste ▶.** Op de iPhone laadt YouTube de video pas als je op play drukt; precies dan voerde JoeToep "spoel naar 2:00 en blijf gepauzeerd" uit. Nu spoelt hij nog steeds naar je plek, maar pauzeert hij niet als jij hem net startte. Hetzelfde voor het gelijkzetten van de positie met een ander apparaat.
+- **❚❚ in Apple's fullscreen-speler is jouw pauze**: hij wordt nooit meer "hersteld" (binnen 3 s na terugkeer uit PiP of tijdens een overdracht sprong de video soms weer aan). Een pauze die WebKit zelf doet (fullscreen verlaten, app naar de achtergrond) telt niet als de jouwe, zodat PiP/achtergrond-afspelen gewoon blijft werken.
+- **Video op de iPhone pauzeerde vanzelf als de Mac "wakker" werd**: begon je op de iPhone net (< 10 s) met kijken, dan nam alleen het activeren van JoeToep op de Mac (Xcode-Run, een melding, ⌘Tab erlangs) de video over en pauzeerde de iPhone. Dat gebeurt niet meer; een echte klik op de Mac, *Continue here* of *Play here* werkt gewoon. Geldt ook andersom.
+
+## Mac: fullscreen is altijd te verlaten
+- **Notch-fout in de fullscreen-bewaker (ingebouwd scherm MacBook Pro):** macOS houdt in fullscreen de strook van de camera vrij. De 100 %-bewaker van V23 zag dat als "video te klein" en zette fullscreen als laatste redmiddel uit en ná 1,1 s weer áán. Drukte je in die tijd zelf Esc/F, dan ging hij toch weer fullscreen — "fullscreen is niet te verlaten" — en elke fullscreen op het ingebouwde scherm haperde één keer. De bewaker meet nu tegen het bruikbare vlak (scherm min veilige marges) en gaat nooit meer uit-en-aan als jij fullscreen net zelf bediende.
+- **Noodweg eruit:** gaf je Esc, F, dubbelklik of de fullscreen-knop terwijl de video fullscreen stond, dan controleert JoeToep na 0,7 s of WebKit er ook echt uit is. Hangt hij nog (WebKit midden in een overgang, YouTube's eigen fullscreen-stand "vast", een verweesd fullscreen-venster), dan eerst via de pagina eruit en YouTube's stand gelijkzetten, en daarna met WebKit's eigen noodknop (`closeAllMediaPresentations`). Nooit tijdens een lopende overgang; een nieuwe toets/klik breekt het af. Esc betekent altijd "eruit", ook tijdens de ingang.
+
+## Sneller en zonder haperen
+- De mediabewaking zoekt "de" video nu via een levende lijst in plaats van bij elke aanroep alle video's op te zoeken en te kopiëren. Die zoekactie draait tientallen keren per seconde (YouTube vraagt voortdurend `visibilityState`/`hasFocus` op) — minder werk en geheugen-afval tijdens afspelen.
+- De fullscreen-bewaker gaat op het ingebouwde scherm niet meer onnodig fullscreen uit en weer in (zie hierboven).
+
+## Tests
+- Nieuw: `Scripts/test_v25_scripts.cjs` — 13 scenario's, o.a. ▶/❚❚ in Apple's fullscreen-speler onder elke stil-bewaking, laat opnieuw "stil" zetten na laden, bufferen na een toegestane start, hervatten van een herstelde tab, 2.000× ▶/❚❚-stresstest (elke tik werkt precies één keer) en 2.000 autoplay-pogingen (geen enkele lekt door). 7 van de 13 falen op de code van 24.0 (het probleem is dus nagebootst) en slagen op 25.
+- Nieuw: `JoeToepTests/V25FeatureTests.swift` (versie, klokwaarde van de overdracht, gebundelde scripts bevatten de V25-bewaking). `testVersionIs24` → `testVersionIsAtLeast24`.
+- Alle bestaande JS-suites groen: bridge 17, mediaCompatibility 134, V15 12, V17 13, V23.1 11, V24 10, V25 13.
+
+## Overig
+- Versie 25.0.0 (37). Alle aanpassingen van 23, 23.1 en 24 zitten erin (V24 was de nieuwste en volledige stand; niets ontbrak).
+
 # 24.0.0 (36)
 
 ## Mac: de app crashte (opgelost)

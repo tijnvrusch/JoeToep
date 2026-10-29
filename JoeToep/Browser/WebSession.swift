@@ -1456,7 +1456,7 @@ final class WebSession: NSObject, ObservableObject {
            Ruim 1 s gepauzeerd houden — behalve als je daarna zelf iets aanraakt. */
         let touched=false;const mark=e=>{if(e.isTrusted)touched=true;};
         for(const ty of ['pointerdown','keydown','touchstart'])window.addEventListener(ty,mark,{capture:true,once:true});
-        for(const d of [120,350,700,1200])setTimeout(()=>{if(touched||v.paused)return;try{if(p&&p.pauseVideo)p.pauseVideo();else v.pause();}catch(_){}},d);
+        for(const d of [120,350,700,1200])setTimeout(()=>{if(touched||v.paused||window.JoeToepMedia?.userPlayIntent?.())return;try{if(p&&p.pauseVideo)p.pauseVideo();else v.pause();}catch(_){}},d);
         return 1;})()
         """, completionHandler: nil)
     }
@@ -1763,7 +1763,70 @@ final class WebSession: NSObject, ObservableObject {
     private var autoFullscreenRequestedAt = Date.distantPast
     /// Esc terwijl de video nog inline stond: een automatisch verzoek dat binnen 2 s volgt, vervalt.
     private var lastInlineEscAt = Date.distantPast
+    /// V25: laatste keer dat jij fullscreen zelf bediende (Esc, F, dubbelklik).
+    private var lastUserFullscreenActionAt = Date.distantPast
+    private var exitWatchSerial = 0
+    /// V25 — fullscreen verlaten werkt ALTIJD. Was de video fullscreen toen je Esc, F of dubbelklik gaf
+    /// (= eruit), dan kijkt JoeToep na 0,7 s of WebKit er ook echt uit is. Hangt het nog (WebKit midden in
+    /// een overgang, YouTube's fullscreen-stand "vast", een verweesd fullscreen-venster), dan eerst via de
+    /// pagina eruit (en YouTube's eigen stand gelijkzetten), en na nog 0,8 s met WebKit's eigen
+    /// noodknop `closeAllMediaPresentations`. Een nieuwe toets/klik binnen die tijd breekt het af.
+    private func ensureFullscreenExit(after why: String) {
+        exitWatchSerial &+= 1
+        let serial = exitWatchSerial
+        // Esc betekent altijd "eruit" (ook tijdens de ingang); F/dubbelklik/knop alleen als hij al fullscreen stond.
+        let state = webView.fullscreenState
+        let wasFullscreen = why == "Esc"
+            ? (isFullscreen || state != .notInFullscreen || webKitFullscreenWindowVisible)
+            : (state == .inFullscreen || (isFullscreen && state != .enteringFullscreen))
+        guard wasFullscreen else { return }
+        let stuck: () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.webView.fullscreenState == .inFullscreen || self.webKitFullscreenWindowVisible
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self, serial == self.exitWatchSerial else { return }
+            // Nog in een overgang? Dan even geduld (WebKit nooit halverwege onderbreken).
+            if self.webView.fullscreenState == .exitingFullscreen || self.webView.fullscreenState == .enteringFullscreen {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    guard let self, serial == self.exitWatchSerial, stuck() else { return }
+                    self.forceFullscreenExit(serial: serial, why: why, stuck: stuck)
+                }
+                return
+            }
+            guard stuck() else {
+                // WebKit is eruit, maar staat YouTube nog in zijn fullscreen-stand? Gelijkzetten.
+                self.webView.evaluateJavaScript(Self.staleYouTubeFullscreenFix, completionHandler: nil)
+                return
+            }
+            self.forceFullscreenExit(serial: serial, why: why, stuck: stuck)
+        }
+    }
+    private func forceFullscreenExit(serial: Int, why: String, stuck: @escaping () -> Bool) {
+        recordLifecycle("fullscreen exit (\(why)) did not happen → leave via page")
+        webView.evaluateJavaScript(Self.forcePageFullscreenExit, completionHandler: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, serial == self.exitWatchSerial, stuck() else { return }
+            self.recordLifecycle("fullscreen still stuck → closeAllMediaPresentations")
+            self.webView.closeAllMediaPresentations { }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.webView.evaluateJavaScript(Self.staleYouTubeFullscreenFix, completionHandler: nil)
+            }
+        }
+    }
+    private static let forcePageFullscreenExit = "(()=>{const d=document;try{if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d)?.catch?.(()=>{});}}catch(_){}" +
+        "try{const v=d.querySelector('video.html5-main-video')||d.querySelector('video');if(v&&v.webkitDisplayingFullscreen)v.webkitExitFullscreen();}catch(_){}" +
+        "try{window.JoeToepStage&&window.JoeToepStage.exit&&window.JoeToepStage.exit();}catch(_){}return 0})()"
+    /// YouTube denkt nog dat hij fullscreen is terwijl de pagina het niet meer is → laat hem opnieuw kijken.
+    private static let staleYouTubeFullscreenFix = "(()=>{const d=document;if(d.fullscreenElement||d.webkitFullscreenElement)return 0;" +
+        "const f=d.querySelector('ytd-watch-flexy[fullscreen]'),p=d.getElementById('movie_player');" +
+        "if(!f&&!(p&&p.classList.contains('ytp-fullscreen')))return 0;" +
+        "try{d.dispatchEvent(new Event('fullscreenchange'));d.dispatchEvent(new Event('webkitfullscreenchange'));}catch(_){}" +
+        "return 1})()"
     func cancelAutomaticFullscreenFollowUp(_ why: String) {
+        lastUserFullscreenActionAt = Date()
+        fullscreenFit?.userIntervened()
+        ensureFullscreenExit(after: why)
         // Alleen als JoeToep net zelf (automatisch) fullscreen aanvroeg; F of dubbelklik = jouw nieuwe keuze.
         if why == "Esc" && !isFullscreen { lastInlineEscAt = Date() }
         if why == "Esc" && !isFullscreen && Date().timeIntervalSince(autoFullscreenRequestedAt) < 2.5 {
@@ -1900,12 +1963,16 @@ final class WebSession: NSObject, ObservableObject {
     /// V23: laatste redmiddel van de fullscreen-bewaker — het fullscreen-vlak bleef te klein (oude
     /// schermmaat). Eén keer netjes uit en weer in fullscreen; de video blijft gewoon doorspelen.
     private func reenterFullscreenForFit() {
-        guard isFullscreen, !pip.isActive, !pip.isRequesting else { return }
+        // V25: nooit als jij fullscreen net zelf bediende (Esc/F/dubbelklik/knop): dan zou JoeToep je
+        // na het verlaten weer fullscreen zetten ("fullscreen is niet te verlaten").
+        guard isFullscreen, !pip.isActive, !pip.isRequesting,
+              Date().timeIntervalSince(lastUserFullscreenActionAt) > 4 else { return }
         let serial = navigationSerial
         webView.evaluateJavaScript("(()=>{try{const d=document;if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d);return 1}}catch(_){}return 0})()", completionHandler: nil)
+        let asked = lastUserFullscreenActionAt
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
             guard let self, self.navigationSerial == serial, self.isVisibleTab, self.applicationActive,
-                  !self.isFullscreen, !self.pip.isActive else { return }
+                  !self.isFullscreen, !self.pip.isActive, self.lastUserFullscreenActionAt == asked else { return }
             if let w = self.webView.window, w.styleMask.contains(.fullScreen) { return }
             self.enterFullscreenForHandOverIgnoringPlayState()
         }
@@ -2449,6 +2516,8 @@ final class WebSession: NSObject, ObservableObject {
         }
         if event.name == .exitWindowFullscreen {
             #if os(macOS)
+            // V25: jij wilde eruit (fullscreen-knop of dubbelklik) → nakijken dat WebKit er ook echt uit gaat.
+            cancelAutomaticFullscreenFollowUp("button")
             if let window = webView.window, window.styleMask.contains(.fullScreen), !window.isWebKitFullScreenWindow { window.toggleFullScreen(nil) }
             #endif
             return
@@ -2488,6 +2557,19 @@ final class WebSession: NSObject, ObservableObject {
         let wasPlaying = isPlaying
         videoID = event.videoID
         isPlaying = event.playing; isBuffering = event.buffering
+        // V25: speelt de video écht (1,2 s, de stil-bewaking in de pagina liet hem dus toe — jouw tik,
+        // ▶ in Apple's fullscreen-speler, of een opdracht van JoeToep)? Dan is "stil houden" voor deze
+        // tab voorbij. Voorheen bleef het in de app staan en zette didFinish (pagina klaar met laden)
+        // het in de pagina opnieuw aan, waarna de eerstvolgende "playing" de video weer pauzeerde.
+        if event.playing && !wasPlaying && (quietUntilGestureURL != nil || syncQuietUntil > Date()) {
+            let token = event.videoID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self, self.isPlaying, self.videoID == token,
+                      self.quietUntilGestureURL != nil || self.syncQuietUntil > Date() else { return }
+                self.recordLifecycle("playing → quiet released")
+                self.releaseQuiet()
+            }
+        }
         // V21: native vangnet voor "gepauzeerd → uit fullscreen". De JavaScript-versie slaat het over
         // als de pagina zich "verborgen" voelt (Mac: fullscreen-venster terwijl JoeToep niet actief is);
         // daarom ook hier: na 0,45 s nog steeds gepauzeerd in fullscreen → fullscreen verlaten.

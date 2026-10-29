@@ -304,7 +304,9 @@
     // (anders zitten we toch al ongeveer goed, bijvoorbeeld omdat de video daar al stond).
     if (Math.abs((v.currentTime || 0) - target.time) > 2) { try { v.currentTime = Math.max(0, Math.min(target.time, end)); } catch (_) {} }
     if (target.play && v.paused) v.play()?.catch(() => {});
-    if (!target.play && !v.paused) v.pause();
+    // V25: niet pauzeren als JIJ hem net startte (tik op de speler, ▶ in Apple's fullscreen-speler):
+    // de video "pauzeerde dan vanzelf" zodra hij voor het eerst kon spelen, vaak al in fullscreen.
+    if (!target.play && !v.paused && !window.JoeToepMedia?.userPlayIntent?.()) v.pause();
     resume = null;
   }
   for (const event of ['loadedmetadata', 'canplay', 'playing']) window.addEventListener(event, applyResume, true);

@@ -64,6 +64,15 @@
     visibility: Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState"),
     hidden: Object.getOwnPropertyDescriptor(Document.prototype, "hidden")
   };
+  // V25: WIE startte of stopte de video? Scripts (YouTube én JoeToep zelf) lopen via play()/pause()
+  // hieronder of via ownPlay/ownPause. De knoppen van Apple's fullscreen-speler en van het PiP-venster
+  // niet: die bereiken de pagina nooit als klik of toets. Zonder dit onderscheid zag JoeToep een tik op
+  // ▶ in de iPhone-fullscreen-speler als "YouTube-autoplay" en pauzeerde hij de video meteen weer.
+  let scriptPlayAt = 0, scriptPauseAt = 0, ownMediaAt = 0, presentationChangedAt = 0;
+  const ownPlay = v => { ownMediaAt = Date.now(); return native.play.call(v); };
+  const ownPause = v => { ownMediaAt = Date.now(); return native.pause.call(v); };
+  for (const name of ["webkitbeginfullscreen", "webkitendfullscreen", "webkitpresentationmodechanged", "enterpictureinpicture", "leavepictureinpicture"])
+    window.addEventListener(name, () => { presentationChangedAt = Date.now(); }, true);
   // Al deze "let"-variabelen zijn de gedeelde toestand van het script: ze onthouden wat er
   // op dit moment aan de hand is (welke video, of de gebruiker pauzeerde, tot wanneer we
   // nog mogen "herstellen", enz.). "let" (niet "const") omdat hun waarde steeds verandert.
@@ -116,13 +125,21 @@
   const isPiP = v => Boolean(v && (v.webkitPresentationMode === "picture-in-picture" || document.pictureInPictureElement === v));
   // Kiest de "hoofdvideo" waar dit script zich mee bemoeit: als de huidige er nog is en in
   // PiP staat, blijf daarbij; anders kies de speler-video, of anders de eerst spelende video.
+  const allVideos = document.getElementsByTagName("video");
   const pick = () => {
     // ?. (optional chaining): als "main" null is, wordt dit gewoon "undefined" in plaats
     // van een foutmelding. isConnected checkt of het element nog echt in de pagina zit.
     if (main?.isConnected && isPiP(main)) return main;
-    const videos = Array.from(document.querySelectorAll("video"));
-    const candidate = videos.find(v => v.classList.contains("html5-main-video")) ||
-      videos.find(v => !v.paused && !v.ended) || videos[0] || null;
+    // V25: levende lijst i.p.v. querySelectorAll + Array.from bij elke aanroep. pick() draait heel vaak
+    // (YouTube vraagt visibilityState/hasFocus tientallen keren per seconde op) — dit scheelt
+    // allocaties en hapering op de Mac. Zelfde keuze als voorheen.
+    let candidate = null, playing = null;
+    for (let i = 0; i < allVideos.length; i++) {
+      const v = allVideos[i];
+      if (v.classList.contains("html5-main-video")) { candidate = v; break; }
+      if (!playing && !v.paused && !v.ended) playing = v;
+    }
+    candidate = candidate || playing || allVideos[0] || null;
     // Is de gekozen video anders dan voorheen? Dan is dit een "nieuwe" video: reset alle
     // bijhorende status (of hij speelt, of de gebruiker pauzeerde, enz.).
     if (candidate !== main) {
@@ -199,6 +216,7 @@
   // halen; door dat sjabloon aan te passen, verandert het gedrag van élke video tegelijk.
   // "...args" (rest-parameters) vangt alle meegegeven argumenten op in een array.
   HTMLMediaElement.prototype.pause = function(...args) {
+    scriptPauseAt = Date.now();
     // Is deze video beschermd en heeft de gebruiker net niet zelf iets gedaan? Dan
     // weigeren we de pauze gewoon (we roepen native.pause niet aan) en stoppen.
     if (protectedNow(this) && Date.now() >= allowPauseUntil && !userPause) {
@@ -214,6 +232,7 @@
   // site zelf blokkeren (bijv. omdat een andere presentator al actief is, of de
   // gebruiker net zelf pauzeerde).
   HTMLMediaElement.prototype.play = function(...args) {
+    scriptPlayAt = Date.now();
     if (nativeActive && this === pick()) { lastStatus = "blocked-site-play-native-pip"; return Promise.resolve(); }
     if (config.protect && this === pick() && userPause &&
         (isPiP(this) || rawVisibility() !== "visible") && Date.now() >= allowPauseUntil) {
@@ -263,14 +282,14 @@
     // Cancel every recovery budget BEFORE touching playback.
     handoffUntil = 0; systemHandoff = false; returnWantsPlay = false;
     recoveryUsed = true; returnRecoveryUsed = true;
-    if (action !== "pause") quietUntil = 0;
+    if (action !== "pause") { quietUntil = 0; userPlayAt = Date.now(); releasedKey = currentV(); }
     if (action === "pause") {
       userPause = true; desiredPlaying = false; interruptionWantsPlay = false;
-      native.pause.call(v);
+      ownPause(v);
     } else {
       if (interrupted) return true;
       userPause = false; desiredPlaying = true;
-      native.play.call(v)?.catch(() => { lastStatus = "remote-play-declined"; signal(); });
+      ownPlay(v)?.catch(() => { lastStatus = "remote-play-declined"; signal(); });
     }
     lastStatus = "remote-" + action;
     updateMediaState(); signal(); return true;
@@ -371,7 +390,7 @@
       returnRecoveryUsed = true;
       // native.play (de ONGEWIJZIGDE play-functie) aanroepen, met .catch om een eventuele
       // weigering van de browser (bijv. geen toestemming voor autoplay) af te vangen.
-      native.play.call(v)?.catch(() => { lastStatus = "return-resume-declined"; });
+      ownPlay(v)?.catch(() => { lastStatus = "return-resume-declined"; });
     }
   }
 
@@ -521,7 +540,8 @@
   // V22: "stil" na een sync-wijziging: een video in een tab die van een ander apparaat komt,
   // mag niet zelf gaan spelen (YouTube-autoplay, seekTo op een gepauzeerde speler). Alleen een
   // echte klik/toets of een opdracht van JoeToep zelf (remoteAction) start hem.
-  let quietUntil = 0, lastGestureAt = 0, quietKey = "", lastPlayerGestureAt = 0;
+  let quietUntil = 0, lastGestureAt = 0, quietKey = "", lastPlayerGestureAt = 0, nativePauseAt = 0;
+  let userPlayAt = 0, releasedKey = "";
   const currentV = () => {
     try {
       const v = new URLSearchParams(location.search).get("v");
@@ -545,7 +565,7 @@
     window.addEventListener(t, e => {
       if (!e.isTrusted) return;
       lastGestureAt = Date.now();
-      if (playerGesture(e)) { lastPlayerGestureAt = Date.now(); if (quietUntil === Infinity) quietUntil = 0; }
+      if (playerGesture(e)) { lastPlayerGestureAt = Date.now(); if (quietUntil === Infinity) { quietUntil = 0; releasedKey = currentV(); } }
     }, true);
   // Zou de stil-bewaking dit afspelen nu tegenhouden?
   const quietBlocks = () => {
@@ -556,15 +576,41 @@
     }
     return now < quietUntil && now - lastGestureAt >= 1500;
   };
+  // V25: speelt de video in Apple's eigen fullscreen-speler of in PiP? Daar komen tikken niet als
+  // klik in de pagina aan; een "play" zonder voorafgaand script-verzoek is daar dus jouw tik op ▶.
+  const inNativePresentation = v => Boolean(v && (v.webkitDisplayingFullscreen || v.webkitPresentationMode === "fullscreen" || isPiP(v)));
+  const nativeUserPlay = v => platform && inNativePresentation(v) && Date.now() - Math.max(scriptPlayAt, ownMediaAt) > 800;
+  const allowedPlay = new WeakSet();
+  const releaseQuietByUser = why => {
+    if (quietUntil !== 0) lastStatus = "quiet-released: " + why;
+    quietUntil = 0; releasedKey = currentV();
+  };
+  // V25: de stil-bewaking beslist ÉÉN keer per start (bij "play"). Een latere "playing" (na bufferen,
+  // na de fullscreen-overgang, na een kwaliteitswissel) van een toegestane start wordt nooit meer
+  // gepauzeerd — dat was het "pauzeert vanzelf in fullscreen".
   const quietGuard = e => {
-    if (!quietBlocks()) return;
     const v = e.target; if (!(v instanceof HTMLMediaElement)) return;
+    if (e.type === "play") {
+      if (nativeUserPlay(v)) {
+        userPlayAt = lastPlayerGestureAt = lastGestureAt = Date.now();
+        releaseQuietByUser("native controls"); allowedPlay.add(v); return;
+      }
+      const byGesture = Date.now() - lastPlayerGestureAt < 1500;
+      if (byGesture) userPlayAt = Date.now();
+      if (!quietBlocks()) {
+        if (quietUntil !== 0 && byGesture) releaseQuietByUser("gesture");
+        allowedPlay.add(v); return;
+      }
+    } else if (allowedPlay.has(v) || !quietBlocks()) return;
+    allowedPlay.delete(v);
     desiredPlaying = false; userPause = true; returnWantsPlay = false;
-    try { native.pause.call(v); } catch (_) {}
+    try { ownPause(v); } catch (_) {}
     lastStatus = "sync-quiet-blocked-autoplay";
   };
   window.addEventListener("play", quietGuard, true);
   window.addEventListener("playing", quietGuard, true);
+  window.addEventListener("pause", e => { if (e.target instanceof HTMLMediaElement) allowedPlay.delete(e.target); }, true);
+  window.addEventListener("emptied", e => { if (e.target instanceof HTMLMediaElement) allowedPlay.delete(e.target); }, true);
   window.addEventListener("pointerdown", e => {  // fires on every mouse press / finger touch
     if (!e.isTrusted) return;                     // ignore clicks that scripts simulate
     // closest() walks up from the clicked element to its parents and returns the first one
@@ -595,6 +641,16 @@
       returnWantsPlay = false; handoffUntil = 0; systemHandoff = false;
       lastStatus = "user-pause"; return;
     }
+    // V25: ❚❚ in Apple's fullscreen-speler (iPhone/iPad) is ook jouw keuze: nooit "herstellen".
+    // Niet tijdens een presentatie-overgang (WebKit pauzeert zelf bij het verlaten van fullscreen) en
+    // niet als de app net naar de achtergrond gaat (dat draait de visibilitychange hieronder terug).
+    if (platform && main && (main.webkitDisplayingFullscreen || main.webkitPresentationMode === "fullscreen") && !isPiP(main) &&
+        rawVisibility() === "visible" && Date.now() - Math.max(scriptPauseAt, ownMediaAt) > 800 &&
+        Date.now() - presentationChangedAt > 900 && Date.now() >= transitionUntil) {
+      desiredPlaying = false; userPause = true; returnWantsPlay = false; handoffUntil = 0; systemHandoff = false;
+      allowPauseUntil = Date.now() + 1200; nativePauseAt = Date.now();
+      lastStatus = "native-user-pause"; return;
+    }
     // PiP is al een tijdje "settled" (rustig, geen overgang meer bezig): een pauze nu is
     // dus echt de gebruiker die op de PiP-pauzeknop drukte, niet het systeem.
     if (pipSettled(main) && Date.now() >= transitionUntil) {
@@ -605,7 +661,7 @@
     // geen echte gebruikerspauze, dus hervat het afspelen (maximaal één keer).
     if (isPiP(main) && Date.now() < transitionUntil && !transitionRecovered && desiredPlaying && !userPause) {
       transitionRecovered = true; lastStatus = "pip-transition-pause-recovered";
-      native.play.call(main)?.catch(() => { lastStatus = "pip-transition-resume-declined"; });
+      ownPlay(main)?.catch(() => { lastStatus = "pip-transition-resume-declined"; });
       return;
     }
     // We zitten in het "terugkeer uit PiP"-venster en willen doorspelen: probeer te
@@ -620,13 +676,13 @@
     if (systemHandoff && eligible(main) && desiredPlaying && !userPause &&
         Date.now() < handoffUntil && Date.now() >= allowPauseUntil && !recoveryUsed) {
       recoveryUsed = true;
-      native.play.call(main)?.catch(() => { lastStatus = "resume-declined"; });
+      ownPlay(main)?.catch(() => { lastStatus = "resume-declined"; });
     } else if (isPiP(main)) { desiredPlaying = false; userPause = true; }
     else if (eligible(main) && backgroundEpisode && rawVisibility() !== "visible" &&
              desiredPlaying && !userPause && Date.now() < handoffUntil && !recoveryUsed) {
       // Some OS versions pause after visibilitychange instead of before it.
       recoveryUsed = true;
-      native.play.call(main)?.catch(() => { lastStatus = "resume-declined"; });
+      ownPlay(main)?.catch(() => { lastStatus = "resume-declined"; });
     }
   }, true);
   // Zodra de video is afgelopen: we willen hem niet meer als "moet spelen" beschouwen.
@@ -653,6 +709,9 @@
     if (!hidden) { backgroundEpisode = false; recoveryUsed = false; handoffUntil = 0; systemHandoff = false; recoverReturn(); }
     if (hidden && !backgroundEpisode) {
       backgroundEpisode = true;
+      // V25: de "pauze" vlak vóór het naar de achtergrond gaan kwam van het systeem, niet van jou.
+      if (nativePauseAt && Date.now() - nativePauseAt < 750) { userPause = false; desiredPlaying = true; allowPauseUntil = 0; }
+      nativePauseAt = 0;
       const recentSystemPause = v?.paused && lastPauseAt > 0 && Date.now() - lastPauseAt < 750;
       if (config.automatic && eligible(v) && !userPause && desiredPlaying && (!v.paused || recentSystemPause)) {
         handoffUntil = Date.now() + handoffDuration;
@@ -660,7 +719,7 @@
         // Exactly one recovery for a system pause immediately before backgrounding.
         if (v.paused && !isPiP(v) && lastPauseAt > 0 && Date.now() - lastPauseAt < 750 && !recoveryUsed) {
           recoveryUsed = true;
-          native.play.call(v)?.catch(() => { lastStatus = "resume-declined"; });
+          ownPlay(v)?.catch(() => { lastStatus = "resume-declined"; });
         }
         // Fullscreen iOS owns automatic PiP. Swift observes it before attempting rescue.
         const nativeFullscreen = platform && (v.webkitPresentationMode === "fullscreen" || v.webkitDisplayingFullscreen);
@@ -742,7 +801,7 @@
     nativeActive = true; handoffUntil = 0; systemHandoff = false; returnWantsPlay = false;
     if (!v) return { status: "none" };
     const wasPlaying = !v.paused && !v.ended;
-    if (wasPlaying) native.pause.call(v);
+    if (wasPlaying) ownPause(v);
     lastStatus = "native-pip-handoff"; signal();
     return { status: "paused", wasPlaying, time: v.currentTime || 0 };
   }
@@ -755,11 +814,11 @@
     if (!restore) {  // V22: ✕ = stoppen, geen fullscreen terug
       noFullscreenReturnUntil = Date.now() + 5000; window.__joetoepPiPClosedAt = Date.now();
       returnWantsPlay = false; play = false;
-      try { if (!v.paused) native.pause.call(v); } catch (_) {}
+      try { if (!v.paused) ownPause(v); } catch (_) {}
     }
     if (play) {
       userPause = false; desiredPlaying = true;
-      native.play.call(v)?.catch(() => { lastStatus = "native-return-play-declined"; signal(); });
+      ownPlay(v)?.catch(() => { lastStatus = "native-return-play-declined"; signal(); });
     } else { desiredPlaying = false; userPause = true; }
     lastStatus = restore ? "native-pip-restored" : "native-pip-closed"; signal();
     return { status: "ok" };
@@ -794,7 +853,15 @@
     // Past de instellingen aan met nieuwe waarden ("next"). De spread "..." kopieert eerst
     // alle bestaande instellingen, en overschrijft daarna alleen wat in "next" zit.
     configure(next) { config = { ...config, ...next }; if (!config.fallback && fallbackRoot) fallbackRoot.hidden = true; return true; },
-    quiet(ms) { quietUntil = ms < 0 ? Infinity : (ms > 0 ? Date.now() + ms : 0); if (ms < 0) quietKey = currentV(); return true; },
+    // V25: "stil tot je hem aanraakt" opnieuw zetten (bijv. als de pagina klaar is met laden) nadat jij
+    // deze video al zelf startte, telt niet meer: anders pauzeerde de eerstvolgende "playing" hem weer.
+    quiet(ms) {
+      if (ms < 0 && releasedKey && releasedKey === currentV()) { lastStatus = "quiet-skipped: you played this video"; return false; }
+      quietUntil = ms < 0 ? Infinity : (ms > 0 ? Date.now() + ms : 0); if (ms < 0) quietKey = currentV(); return true;
+    },
+    // V25: startte JIJ de video net (tik/klik op de speler, spatie/K, ▶ in Apple's fullscreen-speler of PiP)?
+    // Dan mogen herstel- en sync-stappen hem niet meer pauzeren.
+    userPlayIntent() { return Date.now() - userPlayAt < 2500 || Date.now() - lastPlayerGestureAt < 1500; },
     prepareHandoff, beginAutomaticHandoff, returnToApp, remoteAction, sourceInfo, nativeHandoff, nativeReturn,
     // Record explicit user intent when the site's own player performs the action.
     noteIntent(action) {
@@ -817,7 +884,7 @@
         returnWantsPlay = true; returnUntil = Date.now() + 2000; returnRecoveryUsed = false; desiredPlaying = true; userPause = false;
         // setTimeout voert de functie pas na 450 milliseconden uit: geef de browser even de
         // tijd om de fullscreen echt af te sluiten voordat we proberen door te spelen.
-        setTimeout(() => { const now = pick(); if (now === v && v.paused && !userPause && !interrupted) native.play.call(v)?.catch(() => {}); }, 450);
+        setTimeout(() => { const now = pick(); if (now === v && v.paused && !userPause && !interrupted) ownPlay(v)?.catch(() => {}); }, 450);
       }
       return true;
     },
@@ -877,7 +944,7 @@
         interrupted = false; interruptionWantsPlay = false;
         if (resume) {
           desiredPlaying = true;
-          native.play.call(v)?.catch(() => { lastStatus = "interruption-resume-declined"; signal(); });
+          ownPlay(v)?.catch(() => { lastStatus = "interruption-resume-declined"; signal(); });
         }
       }
       updateMediaState(); signal();
@@ -923,7 +990,7 @@
     diagnostics: () => {
       const v = pick();
       return { quiet: quietUntil === Infinity ? "until-gesture" : Math.max(0, quietUntil - Date.now()), quietVideo: window.JOETOEP_QUIET_VIDEO || "", lastGestureAt,
-        status: lastStatus, mediaSessionAvailable: typeof nativeSetAction === "function", interrupted, rawVisibility: rawVisibility(), recoveryUsed, platform,
+        userPlayAt, releasedKey, status: lastStatus, mediaSessionAvailable: typeof nativeSetAction === "function", interrupted, rawVisibility: rawVisibility(), recoveryUsed, platform,
           pipOrigin, lastMode, nativeOwner, nativeActive, systemHandoff, requestPending: Date.now() < requestUntil, desiredPlaying, userPause, interruptionWantsPlay, protectedHandoff: Date.now() < handoffUntil,
         videoConnected: Boolean(v?.isConnected), paused: v?.paused, readyState: v?.readyState,
         width: v?.videoWidth, height: v?.videoHeight, time: v?.currentTime,

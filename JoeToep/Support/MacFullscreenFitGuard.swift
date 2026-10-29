@@ -63,6 +63,13 @@ final class MacFullscreenFitGuard {
         pending.forEach { $0.cancel() }; pending.removeAll()
     }
 
+    /// V25: jij bediende fullscreen zelf (Esc/F/dubbelklik): geplande controles vervallen en deze
+    /// fullscreen-sessie gaat nooit meer "uit en weer aan".
+    func userIntervened() {
+        pending.forEach { $0.cancel() }; pending.removeAll()
+        reentered = true
+    }
+
     /// WebSession meldt een wissel van de fullscreen-stand van de pagina.
     func fullscreenChanged(_ fullscreen: Bool) {
         if fullscreen && !wasFullscreen { viewportMisses = 0; reentered = false }
@@ -130,7 +137,13 @@ final class MacFullscreenFitGuard {
             guard elementFullscreen, let window = webView.window, let screen = window.screen,
                   window.styleMask.contains(.fullScreen) else { return }
             let size = webView.convert(webView.bounds, to: nil).size
-            guard Self.smaller(size, than: screen.frame.size) else { self.viewportMisses = 0; return }
+            // V25: op een MacBook met notch laat macOS de strook van de camera vrij in fullscreen. Dat is
+            // geen "te klein" fullscreen: vergelijk met het bruikbare vlak (scherm min veilige marges),
+            // anders zette de bewaker fullscreen op het ingebouwde scherm telkens uit en weer aan (hapering).
+            let insets = screen.safeAreaInsets
+            let usable = CGSize(width: screen.frame.width - insets.left - insets.right,
+                                height: screen.frame.height - insets.top - insets.bottom)
+            guard Self.smaller(size, than: usable) else { self.viewportMisses = 0; return }
             self.viewportMisses += 1
             self.log("fullscreen fit: viewport \(Int(size.width))x\(Int(size.height)) on screen \(Int(screen.frame.width))x\(Int(screen.frame.height))")
             if self.viewportMisses == 1 {

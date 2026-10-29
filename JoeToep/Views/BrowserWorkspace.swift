@@ -383,7 +383,8 @@ final class BrowserWorkspace: ObservableObject {
         playbackSeenAt[snapshot.origin] = snapshot.sentAt
         // V21: onthoud wat het andere apparaat NU speelt (voor automatisch overnemen bij wisselen).
         if let playing = snapshot.playingID, let remote = snapshot.tabs.first(where: { $0.id == playing }), let url = remote.url {
-            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: playing, url: url, time: remote.time ?? 0, receivedAt: Date())
+            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: playing, url: url, time: remote.time ?? 0, receivedAt: Date(),
+                                            playStamp: snapshot.playStamp)
         } else if let hid = snapshot.handoffID, let remote = snapshot.tabs.first(where: { $0.id == hid }), let url = remote.url,
                   case let key = SyncRules.handoffKey(origin: snapshot.origin, tab: hid, nonce: snapshot.handoffNonce),   // V22.2: met nonce
                   !Self.consumedHandoffs.contains(key) {
@@ -527,6 +528,8 @@ final class BrowserWorkspace: ObservableObject {
         var paused = false
         /// V22: sleutel van de overdracht (één keer overnemen, ook niet opnieuw na een herstart).
         var handoffKey: String? = nil
+        /// V25: klokwaarde van het moment dat het daar begon te spelen (ms sinds 1970, hybride klok).
+        var playStamp: UInt64? = nil
         /// Geschatte positie nu: laatste bekende tijd + hoe lang geleden (de video liep door).
         func estimatedTime(at now: Date = Date()) -> Double { paused ? time : time + max(0, now.timeIntervalSince(receivedAt)) }
     }
@@ -678,8 +681,18 @@ final class BrowserWorkspace: ObservableObject {
             }
             return
         }
+        // V25: begon de video daar pas net (< 10 s) — jij drukte er net zelf op play — dan neemt het
+        // alleen ACTIVEREN van deze app (Xcode-Run, een melding, ⌘Tab erlangs) hem niet over. Anders
+        // pauzeerde de video op de iPhone "vanzelf", vaak midden in fullscreen. Een echte klik/tik
+        // hier, of Continue here / Play here, werkt gewoon.
+        var freshRemoteStart = false
+        if trigger == .appActivated, !localPlaying, let remote = remotePlayback, !remote.paused,
+           let stamp = remote.playStamp, now.timeIntervalSince1970 - Double(stamp) / 1000 < 10 {
+            freshRemoteStart = true
+            TabSyncService.shared.noteHandoff("no takeover on activation: playback there just started")
+        }
         // V21: het andere apparaat speelt → hier meteen verder spelen (instelbaar).
-        if !localPlaying, let remote = remotePlayback, HandoffPrefs.autoResume,
+        if !localPlaying, !freshRemoteStart, let remote = remotePlayback, HandoffPrefs.autoResume,
            !(sentAway?.device == remote.device && SyncDiff.sameDestination(sentAway?.url, remote.url) && Date() < (sentAway?.until ?? .distantPast)),
            now.timeIntervalSince(remote.receivedAt) < HandoffPrefs.maxAge,
            trigger == .appActivated || (trigger == .interaction && idle >= HandoffPrefs.idleBeforeTakeover) {

@@ -363,6 +363,12 @@
     if (!e.isTrusted || !foreignFullscreen() || !e.target?.closest?.('.ytp-fullscreen-button, .fullscreen-icon, button[aria-label*="ullscreen" i]')) return;
     if (exitAnyFullscreen()) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
+  // V25 (Mac): klik op YouTube's fullscreen-knop terwijl de video fullscreen staat = eruit. De app kijkt
+  // dan na of WebKit er ook echt uit gaat (en helpt anders), net als bij Esc, F en dubbelklik.
+  if (!window.JOETOEP_MOBILE) window.addEventListener('click', e => {
+    if (!e.isTrusted || !fsElement() || !e.target?.closest?.('.ytp-fullscreen-button')) return;
+    setTimeout(() => document.dispatchEvent(new Event('joetoep-exit-window-fullscreen')), 0);
+  }, true);
   // ── V23.1: Mac-fullscreen — klik = pauze/afspelen, dubbelklik = fullscreen uit. ALTIJD. ──────────
   // In fullscreen deed een klik op het beeld niets (F, Esc en spatie werkten wel; de knoppen in de
   // balk ook). YouTube's eigen klik-op-de-video werkt in WebKit's fullscreen-venster niet
