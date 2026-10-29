@@ -9,4 +9,4 @@
    - een build voor macOS én iOS in Xcode (AppKit/UIKit-code altijd achter `#if os(macOS)` / `#if os(iOS)`).
 5. Open een pull request met een korte beschrijving en hoe je het getest hebt.
 
-Een nieuwe release = versie ophogen (`project.pbxproj`, `AppConstants.swift`, `Scripts/validate_project.py`), commit "JoeToep VX.Y" en tag `vX.Y`.
+Een nieuwe release = versie ophogen (`project.pbxproj`, `AppConstants.swift`, `Scripts/validate_project.py`), commit "JoeToep VX.Y" en branch `versie/vX.Y`.

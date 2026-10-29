@@ -2,7 +2,7 @@
 
 Open-source persoonlijke YouTube-browser en -speler voor **Mac**, **iPhone** en **iPad** (plus Apple Watch, widgets en Live Activity), gebouwd met SwiftUI en WKWebView. Tabs en afspeelpositie synchroniseren live tussen je apparaten; Picture in Picture, fullscreen (met automatisch liggend op de iPhone) en een Arc-achtige zoekbalk zijn tot in detail uitgewerkt.
 
-- **Wat er nieuw is:** [`CHANGELOG.md`](CHANGELOG.md) · **alle versies:** [`Docs/VERSIEGESCHIEDENIS.md`](Docs/VERSIEGESCHIEDENIS.md) (elke versie is een git-tag)
+- **Wat er nieuw is:** [`CHANGELOG.md`](CHANGELOG.md) · **alle versies:** [`Docs/VERSIEGESCHIEDENIS.md`](Docs/VERSIEGESCHIEDENIS.md) (elke versie staat in een eigen branch `versie/vX.Y`)
 - **Bijdragen:** [`CONTRIBUTING.md`](CONTRIBUTING.md) · **licentie:** MIT ([`LICENSE`](LICENSE))
 - **Voor Claude/AI-sessies:** [`CLAUDE.md`](CLAUDE.md), nieuwste overdracht [`Docs/HANDOFF-V26.md`](Docs/HANDOFF-V26.md), chatgeschiedenis in [`Docs/chatgeschiedenis/`](Docs/chatgeschiedenis/)
 

@@ -25,5 +25,5 @@ Persoonlijke YouTube-browser/-speler (SwiftUI + WKWebView) van Tijn, één multi
 - Geen vangnetten/geplande herinneringen starten tenzij Tijn erom vraagt.
 
 ## Git
-- Elke versie is een commit + tag (`v15` … `v25.1`). Nieuwe versie = commit "JoeToep VX.Y" + tag `vX.Y`.
+- Elke versie is een commit op `main` plus een branch `versie/vX.Y` (`versie/v15` … `versie/v25.1`). Nieuwe versie = commit "JoeToep VX.Y" + branch `versie/vX.Y` (tags pushen wordt door de proxy geblokkeerd).
 - Chatgeschiedenis van eerdere sessies: `Docs/chatgeschiedenis/`.
