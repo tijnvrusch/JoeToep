@@ -10,6 +10,10 @@ from PIL import Image
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# V26: de huidige versie staat op één plek. Ophogen = deze twee waarden, project.pbxproj (alle targets),
+# JoeToep/Support/AppConstants.swift en een nieuw bovenste kopje in CHANGELOG.md.
+EXPECTED_VERSION = "26.0.0"
+EXPECTED_BUILD = 39
 
 
 def require(condition: bool, message: str) -> None:
@@ -127,8 +131,23 @@ def check_setting_help():
     dup = [k for k, c in collections.Counter(keys).items() if c > 1]
     require(not dup, "SettingHelp duplicate keys: " + ", ".join(dup))
 
+def check_version() -> None:
+    """V26: versie en build zijn overal gelijk (alle targets, AppConstants, CHANGELOG)."""
+    project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
+    marketing = set(re.findall(r"MARKETING_VERSION = ([0-9.]+);", project))
+    builds = set(re.findall(r"CURRENT_PROJECT_VERSION = ([0-9]+);", project))
+    require(marketing == {EXPECTED_VERSION}, f"MARKETING_VERSION differs from {EXPECTED_VERSION}: {sorted(marketing)}")
+    require(builds == {str(EXPECTED_BUILD)}, f"CURRENT_PROJECT_VERSION differs from {EXPECTED_BUILD}: {sorted(builds)}")
+    require(project.count(f"MARKETING_VERSION = {EXPECTED_VERSION};") >= 8, "Not every build configuration carries the version")
+    constants = (ROOT / "JoeToep/Support/AppConstants.swift").read_text()
+    require(f'static let version = "{EXPECTED_VERSION}"' in constants, "AppConstants.version out of date")
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    first = next(line for line in changelog.splitlines() if line.startswith("# "))
+    require(first.strip() == f"# {EXPECTED_VERSION} ({EXPECTED_BUILD})", f"CHANGELOG top heading is {first!r}")
+
+
 def main() -> int:
-    checks = [check_required_files, check_plists, check_assets, check_sources, check_project_file, check_v2, check_v3, check_v4, check_v5, check_v6, check_v7, check_setting_help, check_v21, check_v22]
+    checks = [check_version, check_v26, check_required_files, check_plists, check_assets, check_sources, check_project_file, check_v2, check_v3, check_v4, check_v5, check_v6, check_v7, check_setting_help, check_v21, check_v22]
     for check in checks:
         check()
         print(f"PASS {check.__name__}")
@@ -156,7 +175,6 @@ def check_v2() -> None:
     definitions = re.findall(r"^\t\t([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", project, re.M)
     require(len(definitions) == len(set(definitions)), "Duplicate Xcode object id")
     require(set(re.findall(r"\b[A-F0-9]{24}\b", project)) <= set(definitions), "Dangling Xcode object reference")
-    require("MARKETING_VERSION = 23.0.0;" in project, "V3 version missing")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     require({item.get("BlueprintName") for item in scheme.findall(".//TestableReference/BuildableReference")}
             == {"JoeToepTests", "JoeToepUITests"}, "Scheme omits a test target")
@@ -208,7 +226,6 @@ def check_v4() -> None:
     project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
     require(project.count("PRODUCT_NAME = JoeToep;") == 2, "Product name differs across configurations")
     require(project.count("PRODUCT_MODULE_NAME = JoeToep;") == 2, "Stable module name lost")
-    require(project.count("CURRENT_PROJECT_VERSION = 34;") >= 2, "Build version mismatch")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     for item in scheme.findall(".//BuildableReference"):
         require(item.get("ReferencedContainer") == "container:JoeToep.xcodeproj", "Old scheme project path")
@@ -314,6 +331,63 @@ def check_v22() -> None:
     require("system-pip-closed" in media and "quiet(ms)" in media, "PiP close / sync quiet guard missing in JS")
     model = (ROOT / "JoeToep/Models/SyncModel.swift").read_text()
     require("handoffID" in model and "handoffTime" in model, "Background handoff marker missing")
+
+
+def check_v26() -> None:
+    """V26: Spaces, Split View, Peek, Boosts en de pagina-assistent zijn compleet en veilig ingebouwd."""
+    for name in ["JoeToep/Models/BrowserSpaces.swift", "JoeToep/Models/SplitLayout.swift", "JoeToep/Models/SiteBoosts.swift",
+                 "JoeToep/Models/PageDigest.swift", "JoeToep/Models/V26Prefs.swift", "JoeToep/Views/V26Views.swift",
+                 "JoeToep/Views/V26Panels.swift", "JoeToep/Support/PageAssistant.swift", "JoeToep/Resources/boosts.js",
+                 "JoeToep/Resources/pageReader.js", "JoeToepTests/LinuxV26Tests.swift", "JoeToepTests/V26FeatureTests.swift",
+                 "Scripts/test_v26_arc_scripts.cjs", "Scripts/linux_swift_tests.sh"]:
+        require((ROOT / name).is_file(), "V26 file missing: " + name)
+    require(not (ROOT / "JoeToep/Views/DebugHUD.swift").exists(), "Empty DebugHUD.swift is back")
+    # Pure modellen: alleen Foundation, zodat ze op Linux compileren en getest worden.
+    for name in ["BrowserSpaces", "SplitLayout", "SiteBoosts", "PageDigest", "V26Prefs"]:
+        imports = set(re.findall(r"^import (\w+)", (ROOT / f"JoeToep/Models/{name}.swift").read_text(), re.M))
+        require(imports == {"Foundation"}, f"{name}.swift must only import Foundation (Linux tests): {sorted(imports)}")
+    session = (ROOT / "JoeToep/Browser/WebSession.swift").read_text()
+    require('installScript("boosts", world: Self.bridgeWorld, time: .atDocumentStart' in session, "Boosts must load at document start in the bridge world")
+    require('installScript("pageReader", world: Self.bridgeWorld)' in session, "Page reader must run in the bridge world")
+    require("guard message.frameInfo.isMainFrame else { return }" in session.split('event.hasPrefix("boostZap")', 1)[1][:200],
+            "Zap messages must come from the main frame")
+    require("boosts.hashValue" in session, "Changed boosts must reinstall the document-start scripts")
+    for name in ["boosts.js", "pageReader.js"]:
+        source = (ROOT / "JoeToep/Resources" / name).read_text()
+        for token in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "setInterval(", "requestAnimationFrame(", "fetch(", "XMLHttpRequest"]:
+            require(token not in source, f"{name}: forbidden {token}")
+    store = (ROOT / "JoeToep/Models/TabSessionStore.swift").read_text()
+    require("static func sanitized" in store and "SavedBrowserTab(id: $0.id" not in store,
+            "TabSessionStore must keep every field (groupID/spaceID) when saving and restoring")
+    # Elke V26-instelling heeft uitleg en is vindbaar in de instellingen.
+    help_text = (ROOT / "JoeToep/Views/SettingHelp.swift").read_text()
+    block = help_text[help_text.index("static let v26Texts"):]
+    block = block[:block.index("    ]")]
+    keys = re.findall(r'^\s*"([^"]+)":', block, re.M)
+    require(len(keys) == len(set(keys)), "SettingHelp.v26Texts has duplicate keys")
+    texts_block = help_text[help_text.index("static let texts"):]
+    texts_block = texts_block[:texts_block.index("    ]")]
+    old_keys = set(re.findall(r'^\s*"([^"]+)":', texts_block, re.M))
+    require(not (set(keys) & old_keys), "V26 setting titles must not reuse existing titles: " + ", ".join(sorted(set(keys) & old_keys)))
+    titles = re.findall(r'SettingToggle\("([^"]+)"', (ROOT / "JoeToep/Views/V26Panels.swift").read_text())
+    missing = [t for t in titles if t not in keys]
+    require(not missing, "V26 settings without help text: " + ", ".join(missing))
+    # CommandsBuilder accepteert hooguit 10 onderdelen per niveau (anders bouwt het menu niet).
+    app = (ROOT / "JoeToep/JoeToepApp.swift").read_text()
+    body = app[app.index("struct BrowserCommands"):]
+    body = body[body.index("var body: some Commands {"):]
+    depth, top, i = 0, 0, body.index("{") + 1
+    line_start = True
+    for line in body[i:].splitlines():
+        stripped = line.strip()
+        if depth == 0 and re.match(r"(CommandGroup|CommandMenu|Group|SidebarCommands|ToolbarCommands)\b", stripped):
+            top += 1
+        depth += line.count("{") - line.count("}")
+        if depth < 0:
+            break
+    require(top <= 10, f"BrowserCommands has {top} top-level items (max 10)")
+    package = json.loads((ROOT / "package.json").read_text())
+    require("test_v26_arc_scripts.cjs" in package["scripts"]["test"], "npm test must run the V26 scripts")
 
 
 if __name__ == "__main__":

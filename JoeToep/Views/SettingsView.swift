@@ -103,6 +103,8 @@ struct SettingsView: View {
                     }
                     link("Tabs, sidebar & search bar", "sidebar.left", .indigo, "Vertical tabs, groups, pinned tabs, ⌘T search bar") { SidebarAndCommandBarSettings() }
                     link("Top bar auto-hide", "rectangle.expand.vertical", .mint, "Hide tabs and buttons automatically") { AutoHideSettings() }
+                    // V26: Arc/Dia-functies.
+                    link(SettingHelp.v26Page, "square.stack.3d.up.fill", .purple, "Spaces, Split View, Peek, Boosts and the page assistant") { V26Settings() }
                 }
                 Section("Watching & listening") {
                     link("Playback & Picture in Picture", "pip.fill", .red, "Fullscreen, theater mode, speed, gestures, PiP") { PlaybackSettings(settings: settings, session: session) }
@@ -222,6 +224,7 @@ struct SettingsView: View {
         case "Audio visualizer": VisualizerSettings(settings: settings).navigationTitle(name)
         case "Focus filters": FocusSettings(settings: settings).navigationTitle(name)
         case "Internals & diagnostics": AdvancedSettings(settings: settings, session: session).navigationTitle(name)
+        case SettingHelp.v26Page: V26Settings().navigationTitle(name)
         default: PlaybackSettings(settings: settings, session: session).navigationTitle("Playback & Picture in Picture")
         }
     }

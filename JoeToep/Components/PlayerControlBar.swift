@@ -268,8 +268,20 @@ struct PlayerControlBar: View {
             MoreAction("Save Frame", "camera") { MediaExtras.shared.captureFrame(from: session) },
             MoreAction("Save as PDF", "doc.richtext") { savePDF() },
             MoreAction("Search Tabs", "rectangle.and.text.magnifyingglass") { showingTabSearch = true },
-            MoreAction("Settings", "gearshape") { showSettings() },
         ]
+        // V26: Arc/Dia-functies (alleen wat aan staat; Split View niet op de iPhone).
+        #if os(iOS)
+        if V26Prefs.splitEnabled() && UIDevice.current.userInterfaceIdiom != .phone {
+            list.append(MoreAction("Split View", "rectangle.split.2x1") { actions?.toggleSplit() })
+        }
+        #endif
+        if V26Prefs.assistantEnabled() { list.append(MoreAction("Assistant", "sparkles") { actions?.toggleAssistant() }) }
+        if V26Prefs.boostsEnabled() && session.boostSite != nil {
+            list.append(MoreAction("Boost", "paintbrush.pointed") { actions?.editBoost() })
+            list.append(MoreAction("Zap", "bolt") { actions?.zap() })
+        }
+        if V26Prefs.spacesEnabled() { list.append(MoreAction("New Space", "plus.square.on.square") { actions?.newSpace() }) }
+        list.append(MoreAction("Settings", "gearshape") { showSettings() })
         #if os(macOS)
         list.insert(MoreAction("Print…", "printer") { session.printPage() }, at: max(0, list.count - 1))
         #endif
@@ -333,6 +345,22 @@ struct PlayerControlBar: View {
                     }
                 }
                 Button { MediaExtras.shared.captureFrame(from: session) } label: { Label("Save Current Frame…", systemImage: "camera") }
+            }
+            // V26: Arc/Dia-functies.
+            Section("Spaces, Split View & Boosts") {
+                if V26Prefs.splitEnabled() {
+                    Button { actions?.toggleSplit() } label: { Label("Split View", systemImage: "rectangle.split.2x1") }
+                }
+                if V26Prefs.assistantEnabled() {
+                    Button { actions?.toggleAssistant() } label: { Label("Page Assistant", systemImage: "sparkles") }
+                }
+                if V26Prefs.boostsEnabled() && session.boostSite != nil {
+                    Button { actions?.editBoost() } label: { Label("Boost This Site…", systemImage: "paintbrush.pointed") }
+                    Button { actions?.zap() } label: { Label(session.isZapping ? "Stop Zapping" : "Zap Elements", systemImage: "bolt") }
+                }
+                if V26Prefs.spacesEnabled() {
+                    Button { actions?.newSpace() } label: { Label("New Space", systemImage: "plus.square.on.square") }
+                }
             }
             Section("Page") {
                 Button { session.requestSite(session.effectivePresentation == .desktop ? .mobile : .desktop) } label: {

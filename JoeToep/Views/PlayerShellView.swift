@@ -142,6 +142,11 @@ struct TabPlayerView: View {
                 }
             }
         }
+        // V26: Zap (Boosts) — uitleg, Undo en Done onderaan de pagina.
+        .overlay(alignment: .bottom) {
+            if session.isZapping { ZapBanner(session: session).transition(.move(edge: .bottom).combined(with: .opacity)) }
+        }
+        .animation(Motion.quick(), value: session.isZapping)
         .background(theme.background.ignoresSafeArea())
         // .task draait automatisch zodra deze view voor het eerst verschijnt.
         .task {

@@ -364,7 +364,37 @@ struct PaletteCommand {
     let keywords: [String]
     let run: @MainActor (BrowserWorkspace) -> Void
 
-    @MainActor static var all: [PaletteCommand] { base + platformSpecific + deviceCommands }
+    @MainActor static var all: [PaletteCommand] { base + platformSpecific + deviceCommands + v26Commands }
+    /// V26: Split View, pagina-assistent, Boosts en Spaces ("> split", "summarise", "space work" …).
+    @MainActor private static var v26Commands: [PaletteCommand] {
+        var list: [PaletteCommand] = []
+        if V26Prefs.splitEnabled() {
+            list.append(PaletteCommand(title: "Split View (Open / Close)", symbol: "rectangle.split.2x1", keywords: ["split", "side by side", "two tabs", "naast"]) {
+                $0.toggleSplit() })
+            list.append(PaletteCommand(title: "Swap Split View Panes", symbol: "arrow.left.arrow.right", keywords: ["swap", "split"]) { $0.swapSplitPanes() })
+        }
+        if V26Prefs.assistantEnabled() {
+            list.append(PaletteCommand(title: "Summarise Page (Page Assistant)", symbol: "sparkles",
+                                       keywords: ["summarise", "summarize", "summary", "assistant", "ask", "ai", "samenvatten"]) { $0.showAssistant = true })
+        }
+        if V26Prefs.boostsEnabled() {
+            list.append(PaletteCommand(title: "Boost This Site…", symbol: "paintbrush.pointed", keywords: ["boost", "css", "customise", "customize", "style"]) { ws in
+                if ws.selected.session.boostSite != nil { ws.showBoostEditor = true } })
+            list.append(PaletteCommand(title: "Zap Elements (hide parts of this page)", symbol: "bolt", keywords: ["zap", "hide", "remove element"]) {
+                $0.selected.session.startZap() })
+        }
+        if V26Prefs.spacesEnabled() {
+            list.append(PaletteCommand(title: "New Space", symbol: "plus.square.on.square", keywords: ["space", "new space", "ruimte"]) { $0.addSpace() })
+            for space in SpaceStore.load() {
+                let symbol = space.symbolIsEmoji ? "square.stack" : space.symbol
+                list.append(PaletteCommand(title: "Switch to Space “\(space.name)”", symbol: symbol, keywords: ["space", space.name.lowercased()]) {
+                    $0.switchSpace(to: space.id) })
+                list.append(PaletteCommand(title: "Move Tab to Space “\(space.name)”", symbol: "arrow.right.square", keywords: ["move", "space", space.name.lowercased()]) {
+                    $0.moveTab($0.selected, toSpace: space.id) })
+            }
+        }
+        return list
+    }
     /// "Verder op iPhone" / "Hier verder (van Mac)" voor elk verbonden apparaat.
     @MainActor private static var deviceCommands: [PaletteCommand] {
         let sync = TabSyncService.shared

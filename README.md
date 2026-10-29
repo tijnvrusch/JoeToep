@@ -1,10 +1,10 @@
-# JoeToep — 25.1.0 (38)
+# JoeToep — 26.0.0 (39)
 
-Open-source persoonlijke YouTube-browser en -speler voor **Mac**, **iPhone** en **iPad** (plus Apple Watch, widgets en Live Activity), gebouwd met SwiftUI en WKWebView. Tabs en afspeelpositie synchroniseren live tussen je apparaten; Picture in Picture, fullscreen (met automatisch liggend op de iPhone) en een Arc-achtige zoekbalk zijn tot in detail uitgewerkt.
+Open-source persoonlijke YouTube-browser en -speler voor **Mac**, **iPhone** en **iPad** (plus Apple Watch, widgets en Live Activity), gebouwd met SwiftUI en WKWebView. Tabs en afspeelpositie synchroniseren live tussen je apparaten; Picture in Picture, fullscreen (met automatisch liggend op de iPhone) en een Arc-achtige zoekbalk zijn tot in detail uitgewerkt. Sinds versie 26 werkt JoeToep als een browser in de stijl van **Arc en Dia**: Spaces, Split View, Peek, Boosts met Zap en een pagina-assistent die op het apparaat zelf draait.
 
 - **Wat er nieuw is:** [`CHANGELOG.md`](CHANGELOG.md) · **alle versies:** [`Docs/VERSIEGESCHIEDENIS.md`](Docs/VERSIEGESCHIEDENIS.md) (elke versie staat in een eigen branch `versie/vX.Y`)
 - **Bijdragen:** [`CONTRIBUTING.md`](CONTRIBUTING.md) · **licentie:** MIT ([`LICENSE`](LICENSE))
-- **Voor Claude/AI-sessies:** [`CLAUDE.md`](CLAUDE.md), nieuwste overdracht [`Docs/HANDOFF-V26.md`](Docs/HANDOFF-V26.md), chatgeschiedenis in [`Docs/chatgeschiedenis/`](Docs/chatgeschiedenis/)
+- **Voor Claude/AI-sessies:** [`CLAUDE.md`](CLAUDE.md), nieuwste overdracht [`Docs/HANDOFF-V27.md`](Docs/HANDOFF-V27.md), chatgeschiedenis in [`Docs/chatgeschiedenis/`](Docs/chatgeschiedenis/)
 
 ## Bouwen
 
@@ -19,10 +19,10 @@ Snelle checks zonder Xcode: `node Scripts/test_media_compatibility.cjs` (en ande
 | Map | Inhoud |
 |---|---|
 | `JoeToep/Browser` | `WebSession` (één tab: WKWebView, PiP, fullscreen, herstel), webview-hosting |
-| `JoeToep/Views` | SwiftUI-schermen: werkruimte/tabs (`BrowserWorkspace`), instellingen, overlay, zijbalk |
+| `JoeToep/Views` | SwiftUI-schermen: werkruimte/tabs (`BrowserWorkspace`), instellingen, overlay, zijbalk; V26: `V26Views` (Split View, Peek, Spaces, Zap) en `V26Panels` (assistent, Boost-bewerker, instellingen) |
 | `JoeToep/Support` | Sync (`TabSyncService`), widgets/Watch-brug, Live Activity, Spotify, oriëntatie |
-| `JoeToep/Models` | Datamodellen (sync-snapshots, bibliotheek, tabopslag) |
-| `JoeToep/Resources` | Geïnjecteerde scripts (`mediaCompatibility.js`, `sitePreferences.js`, …) |
+| `JoeToep/Models` | Datamodellen (sync-snapshots, bibliotheek, tabopslag) en de pure V26-logica: `BrowserSpaces`, `SplitLayout`, `SiteBoosts`, `PageDigest`, `V26Prefs` (alleen Foundation, ook op Linux te testen) |
+| `JoeToep/Resources` | Geïnjecteerde scripts (`mediaCompatibility.js`, `sitePreferences.js`, …; V26: `boosts.js`, `pageReader.js`) |
 | `JoeToepWidgets`, `JoeToepWatch`, `JoeToepWatchWidgets` | Widgets, Watch-app en complicaties |
 | `JoeToepTests`, `JoeToepUITests`, `Scripts` | Tests en validatie |
 | `Docs` | Runbook, testplan, buildrapport, overdrachten, versiegeschiedenis |
@@ -31,6 +31,16 @@ Snelle checks zonder Xcode: `node Scripts/test_media_compatibility.cjs` (en ande
 ## Signing (gratis Apple-team)
 
 Een gratis team ondertekent 7 dagen; daarna meldt iOS "This app is no longer available". Settings toont bovenaan hoe lang de huidige build nog geldig is. Een dagelijkse geplande taak in Claude herbouwt de app vanuit Xcode op iPhone en iPad zodra het profiel binnen 30 uur verloopt (Mac wakker, Claude-app open, apparaten via kabel). Alleen het betaalde Apple Developer Program (1 jaar geldig) maakt dit overbodig.
+
+## Arc- en Dia-functies (V26)
+
+Alles is uit te zetten en in te stellen onder **Instellingen › Spaces, Split View & Boosts**.
+
+- **Spaces**: aparte sets tabs met een eigen naam, icoon en kleur. Wisselen via de icoontjes onderaan de zijbalk, de Space-knop in de tabbalk of ⌃1…⌃9. Vastgezette tabs zijn favorieten in elke Space. Rechtsklik op een tab › *Move to Space*.
+- **Split View**: twee tabs naast of onder elkaar (⌘⇧\, of rechtsklik › *Open in Split View*). Sleep de lijn om de verdeling te kiezen; klik op een paneel om het de focus te geven.
+- **Peek**: ⇧-klik op een link (Mac) of *Open in Peek* opent hem in een zwevend venster. Esc sluit, ⌘↩ houdt hem als tab.
+- **Boosts en Zap**: pas een site blijvend aan (⌘⌥B): onderdelen wegklikken (Zap, ⌘⌥Z), snelle aanpassingen zoals reacties of eindkaarten verbergen, een ander lettertype, kleurfilter, achtergrondkleur, leesbreedte of eigen CSS.
+- **Pagina-assistent** (⌘E): samenvatting, kernpunten of antwoord op een vraag over de open pagina. Met Apple Intelligence op het apparaat als dat er is, anders een ingebouwde offline methode. Er gaat niets naar een server.
 
 ## Bediening
 
@@ -54,6 +64,11 @@ Een gratis team ondertekent 7 dagen; daarna meldt iOS "This app is no longer ava
 | ⌘R / ⌘, | Herladen / instellingen |
 | ⌘+ / ⌘− / ⌘0 | Zoom |
 | ⌥Z | PiP wisselen |
+| ⌃1…⌃9, ⌃⌘[ / ⌃⌘], ⌃⌘N | Space kiezen / vorige of volgende Space / nieuwe Space |
+| ⌘⇧\ | Split View aan/uit |
+| ⌘E | Pagina-assistent |
+| ⌘⌥B / ⌘⌥Z | Boost-bewerker / Zap |
+| ⇧-klik, ⌘↩ | Link in Peek (Mac) / Peek als tab houden |
 | Spatie, ←/→, ⌥←/→, ⌘⌥←/→, ↑/↓ | Play/pauze, 5 s, 30 s, 60 s, volume ±5% |
 
 ## Standaarden
@@ -71,7 +86,9 @@ Een gratis team ondertekent 7 dagen; daarna meldt iOS "This app is no longer ava
 
 ## Ontwikkeling
 
-`npm ci --ignore-scripts && npm test` draait de DOM/bridge-regressies. Die simuleren Apple-media-API's en bewijzen geen native PiP.
+`npm ci --ignore-scripts && npm test` draait alle DOM/bridge-regressies (`Scripts/test_*.cjs`, `test_bridge.mjs`). Die simuleren Apple-media-API's en bewijzen geen native PiP.
+
+**Swift zonder Mac** (bijv. in een Claude-cloudsessie): `Scripts/linux_swift_tests.sh` bouwt een tijdelijk SwiftPM-pakket met alle bestanden die alleen Foundation gebruiken en draait hun unit tests (`JoeToepTests/LinuxV26Tests.swift` en de andere pure tests). Er is een lokale `swift` nodig, of Docker; de standaardimage is `mirror.gcr.io/library/swift:6.1-noble` (Docker Hub kan een limiet geven). SwiftUI/AppKit/UIKit/WebKit-code kan alleen in Xcode gebouwd worden.
 
 Native tests: `xcodebuild -project JoeToep.xcodeproj -scheme JoeToep -destination 'platform=macOS' -parallel-testing-enabled NO -only-testing:JoeToepTests test` (unit tests). UI- en apparaattests: `JoeToepUITests` en `JoeToepUITests/V15DeviceTests` (PiP-terugknop, 8× PiP-cycli, pauze in PiP, nieuwe tab houdt PiP, rotatie, stress).
 

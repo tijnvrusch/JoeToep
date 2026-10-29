@@ -179,15 +179,34 @@ struct BrowserCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command).disabled(actions == nil)
             }
         }
-        // Eigen zoom-knoppen, toegevoegd ná de bestaande werkbalk-groep.
-        CommandGroup(before: .toolbar) {
-            Button("Show / Hide Sidebar") { NotificationCenter.default.post(name: .joeToepToggleSidebar, object: nil) }
-                .keyboardShortcut("s", modifiers: .command)
+        // V26: Spaces, Split View, Boosts en de pagina-assistent (Arc/Dia).
+        CommandMenu("Spaces") {
+            Button("New Space") { actions?.newSpace() }.keyboardShortcut("n", modifiers: [.command, .control]).disabled(actions == nil)
+            Button("Next Space") { actions?.nextSpace() }.keyboardShortcut("]", modifiers: [.command, .control]).disabled(actions == nil)
+            Button("Previous Space") { actions?.previousSpace() }.keyboardShortcut("[", modifiers: [.command, .control]).disabled(actions == nil)
+            Divider()
+            ForEach(1..<10) { number in
+                Button("Space \(number)") { actions?.selectSpace(number - 1) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .control).disabled(actions == nil)
+            }
+            Divider()
+            Button("Split View") { actions?.toggleSplit() }.keyboardShortcut("\\", modifiers: [.command, .shift]).disabled(actions == nil)
+            Button("Page Assistant") { actions?.toggleAssistant() }.keyboardShortcut("e", modifiers: .command).disabled(actions == nil)
+            Button("Boost This Site…") { actions?.editBoost() }.keyboardShortcut("b", modifiers: [.command, .option]).disabled(actions == nil)
+            Button("Zap Elements") { actions?.zap() }.keyboardShortcut("z", modifiers: [.command, .option]).disabled(actions == nil)
         }
-        CommandGroup(after: .toolbar) {
-            Button("Zoom In") { actions?.zoomIn() }.keyboardShortcut("+", modifiers: .command).disabled(actions == nil)
-            Button("Zoom Out") { actions?.zoomOut() }.keyboardShortcut("-", modifiers: .command).disabled(actions == nil)
-            Button("Actual Size") { actions?.resetZoom() }.keyboardShortcut("0", modifiers: .command).disabled(actions == nil)
+        // V26: in één Group (CommandsBuilder accepteert hooguit 10 onderdelen; met het Spaces-menu waren het er 11).
+        Group {
+            // Eigen zoom-knoppen, toegevoegd ná de bestaande werkbalk-groep.
+            CommandGroup(before: .toolbar) {
+                Button("Show / Hide Sidebar") { NotificationCenter.default.post(name: .joeToepToggleSidebar, object: nil) }
+                    .keyboardShortcut("s", modifiers: .command)
+            }
+            CommandGroup(after: .toolbar) {
+                Button("Zoom In") { actions?.zoomIn() }.keyboardShortcut("+", modifiers: .command).disabled(actions == nil)
+                Button("Zoom Out") { actions?.zoomOut() }.keyboardShortcut("-", modifiers: .command).disabled(actions == nil)
+                Button("Actual Size") { actions?.resetZoom() }.keyboardShortcut("0", modifiers: .command).disabled(actions == nil)
+            }
         }
         // Een klein menu voor het aan/uitzetten van Picture in Picture.
         CommandMenu("Playback") {

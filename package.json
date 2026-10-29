@@ -4,7 +4,7 @@
   "private": true,
   "description": "Development-only DOM regression tests; not an app runtime dependency",
   "scripts": {
-    "test": "node Scripts/test_bridge.mjs && node Scripts/test_media_compatibility.cjs && node Scripts/test_v15_scripts.cjs"
+    "test": "node Scripts/test_bridge.mjs && node Scripts/test_media_compatibility.cjs && node Scripts/test_v15_scripts.cjs && node Scripts/test_v17_scripts.cjs && node Scripts/test_v231_scripts.cjs && node Scripts/test_v24_scripts.cjs && node Scripts/test_v25_scripts.cjs && node Scripts/test_v26_scripts.cjs && node Scripts/test_v26_arc_scripts.cjs"
   },
   "devDependencies": {
     "jsdom": "26.1.0"

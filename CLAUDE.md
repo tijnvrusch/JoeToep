@@ -1,19 +1,21 @@
 # CLAUDE.md — werken aan JoeToep
 
-Lees dit eerst. Daarna: `README.md`, `CHANGELOG.md` (bovenste versie), `Docs/HANDOFF-V26.md` (nieuwste overdracht), `Docs/VERSIEGESCHIEDENIS.md`.
+Lees dit eerst. Daarna: `README.md`, `CHANGELOG.md` (bovenste versie), `Docs/HANDOFF-V27.md` (nieuwste overdracht), `Docs/VERSIEGESCHIEDENIS.md`.
 
 ## Wat is JoeToep
-Persoonlijke YouTube-browser/-speler (SwiftUI + WKWebView) van Tijn, één multiplatform-target voor macOS, iOS en iPadOS, plus Apple Watch-app, widgets en een Live Activity. Kern: tabs, tab-sync tussen apparaten (MultipeerConnectivity, `Support/TabSyncService.swift`), Picture in Picture, fullscreen, overlay/zoekbalk, Spotify-koppeling. Veel gedrag zit in de geïnjecteerde scripts in `JoeToep/Resources/*.js` (vooral `mediaCompatibility.js`, `sitePreferences.js`, `playbackControls.js`).
+Persoonlijke YouTube-browser/-speler (SwiftUI + WKWebView) van Tijn, één multiplatform-target voor macOS, iOS en iPadOS, plus Apple Watch-app, widgets en een Live Activity. Sinds V26 ook Arc/Dia-functies: Spaces, Split View, Peek, Boosts/Zap en een pagina-assistent (zie `Docs/HANDOFF-V27.md`). Kern: tabs, tab-sync tussen apparaten (MultipeerConnectivity, `Support/TabSyncService.swift`), Picture in Picture, fullscreen, overlay/zoekbalk, Spotify-koppeling. Veel gedrag zit in de geïnjecteerde scripts in `JoeToep/Resources/*.js` (vooral `mediaCompatibility.js`, `sitePreferences.js`, `playbackControls.js`).
 
 ## Taal en stijl
 - Antwoord Tijn in het **Nederlands**. Code-commentaar is Nederlands met versielabel (bijv. `// V25:`).
 - Elke wijziging komt in `CHANGELOG.md` (nieuwste bovenaan, kopje `# X.Y.Z (build)`), in gewone taal: wat de gebruiker merkte, de oorzaak, de oplossing.
-- Versie ophogen in `JoeToep.xcodeproj/project.pbxproj` (`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION` — alle targets), `JoeToep/Support/AppConstants.swift` en `Scripts/validate_project.py`.
+- Versie ophogen in `JoeToep.xcodeproj/project.pbxproj` (`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION` — alle targets), `JoeToep/Support/AppConstants.swift` en `Scripts/validate_project.py` (`EXPECTED_VERSION` / `EXPECTED_BUILD` bovenaan); `check_version` vergelijkt ze met elkaar en met het bovenste CHANGELOG-kopje.
 
 ## Testen in de cloud (zonder Mac)
-- `node Scripts/test_media_compatibility.cjs` en de andere `Scripts/test_*.cjs` (DOM-simulatie van de JS-scripts).
-- `python3 Scripts/validate_project.py` (projectpoorten).
-- Swift kan hier niet gecompileerd worden voor Apple-platforms: wees extra zorgvuldig (`#if os(macOS)`/`os(iOS)` voor AppKit/UIKit, `@MainActor`, toegang tot `private` leden).
+- `npm ci --ignore-scripts && npm test` (alle `Scripts/test_*.cjs` + `test_bridge.mjs`: DOM-simulatie van de JS-scripts).
+- `python3 Scripts/validate_project.py` (projectpoorten; Pillow nodig: `python3 -m venv … && pip install -r Scripts/requirements-dev.txt`).
+- `Scripts/linux_swift_tests.sh`: compileert de pure Swift-bestanden (alleen Foundation) en draait hun unit tests op Linux. Geen `swift`? Start Docker (`dockerd &`) — het script gebruikt `mirror.gcr.io/library/swift:6.1-noble` (Docker Hub en download.swift.org kunnen geblokkeerd/gelimiteerd zijn). Nieuwe pure logica → in `Models/` met alleen `import Foundation`, toevoegen aan de lijst in het script, tests in `JoeToepTests/LinuxV26Tests.swift` (of een nieuw bestand in de testlijst).
+- `Scripts/validate_swift_syntax.py` (tree-sitter) geeft ook vals alarm op bestaande code; vergelijk het aantal meldingen per bestand met de vorige versie in plaats van op nul te mikken.
+- SwiftUI/AppKit/UIKit/WebKit kunnen hier niet gecompileerd worden: wees extra zorgvuldig (`#if os(macOS)`/`os(iOS)` voor AppKit/UIKit, `@MainActor`, toegang tot `private` leden, hooguit 10 onderdelen per Commands-/ViewBuilder-niveau, geen dubbele sleutels in dictionary-literals zoals `SettingHelp.texts` — dat crasht bij het starten).
 - Echte builds en tests gebeuren op Tijns Mac via Xcode (zie `Docs/RUNBOOK.md`, `Docs/BUILD_REPORT.md`).
 
 ## Werken op Tijns Mac (alleen als die gekoppeld is)

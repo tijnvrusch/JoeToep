@@ -7,6 +7,8 @@ struct TabGroup: Codable, Identifiable, Equatable, Sendable {
     var name: String
     var color: String          // naam uit `palette`
     var collapsed = false
+    /// V26: Space waarin de groep staat (nil = de eerste Space; oudere data blijft leesbaar).
+    var spaceID: UUID? = nil
 
     static let palette = ["blue", "purple", "pink", "red", "orange", "yellow", "green", "teal", "gray"]
     var swiftUIColor: Color { Self.color(named: color) }

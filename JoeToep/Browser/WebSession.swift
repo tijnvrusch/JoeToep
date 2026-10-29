@@ -38,6 +38,13 @@ final class WebSession: NSObject, ObservableObject {
     let isPrivate: Bool
     /// URL, switch-to-it. Set by the workspace (context menus, target=_blank links).
     var onOpenInNewTab: ((URL, Bool) -> Void)?
+    /// V26: link openen in Peek (zwevend voorbeeld). Gezet door de werkruimte.
+    var onPeek: ((URL) -> Void)?
+    /// V26: Zap-modus (Boosts) staat aan op deze pagina.
+    @Published private(set) var isZapping = false
+    /// V26: aantal Zaps in deze Zap-sessie (voor de "Undo"-knop).
+    @Published private(set) var zapsThisSession = 0
+    private var boostObservation: AnyCancellable?
     private var contextLink: (url: URL, date: Date)?
     private var titleObservation: NSKeyValueObservation?
     private var sponsorTask: Task<Void, Never>?
@@ -306,6 +313,7 @@ final class WebSession: NSObject, ObservableObject {
                 return link.url
             }
             custom.openInNewTab = { [weak self] url, activate in self?.onOpenInNewTab?(url, activate) }
+            custom.openInPeek = { [weak self] url in self?.onPeek?(url) }      // V26
             custom.openInNewWindow = { url in WindowOpener.open(url) }      // V17.1
         }
         #endif
@@ -335,6 +343,10 @@ final class WebSession: NSObject, ObservableObject {
                 self.retryFailedNavigationIfEligible()
             }
         }
+        // V26: een Boost gewijzigd (in dit of een ander venster) → meteen toepassen en voor volgende pagina's klaarzetten.
+        boostObservation = NotificationCenter.default.publisher(for: BoostStore.didChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.boostsChanged() }
     }
 
     func start(with initial: SettingsSnapshot) {
@@ -2149,7 +2161,10 @@ final class WebSession: NSObject, ObservableObject {
         // allereerste script, anders was YouTube soms sneller met autoplay dan didFinish.
         let quietVideo = quietUntilGestureURL.flatMap { SponsorBlockService.videoID(from: $0) }?
             .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" } ?? ""
-        let key = "\(enabled)|\(level.rawValue)|\(settings.hideAdCards)|\(settings.cookieBannerMode.rawValue)|\(settings.stripTrackingParameters)|\(settings.globalPrivacyControl)|\(settings.blockTrackers)|\(settings.pipOnAllSites)|\(quietVideo)"
+        // V26: alle Boosts gaan mee bij documentStart (per site gekozen in boosts.js) → geen flits van de
+        // oorspronkelijke pagina; een gewijzigde Boost installeert de scripts opnieuw.
+        let boosts = Self.boostBootstrap()
+        let key = "\(enabled)|\(level.rawValue)|\(settings.hideAdCards)|\(settings.cookieBannerMode.rawValue)|\(settings.stripTrackingParameters)|\(settings.globalPrivacyControl)|\(settings.blockTrackers)|\(settings.pipOnAllSites)|\(quietVideo)|\(boosts.hashValue)"
         guard key != installedScriptKey else { return }
         installedScriptKey = key
         contentController.removeAllUserScripts()
@@ -2179,6 +2194,69 @@ final class WebSession: NSObject, ObservableObject {
         installScript("cookieConsent", world: Self.bridgeWorld, prefix: cookie, allFrames: true)
         if settings.pipOnAllSites { installScript("webPiP", world: .page) }   // PiP op elke site
         installScript("creatorTools", world: .page)                          // snelheid, A-B-loop …
+        // V26: Boosts (eigen CSS/Zap per site) en de paginalezer voor de pagina-assistent (alleen op verzoek actief).
+        installScript("boosts", world: Self.bridgeWorld, time: .atDocumentStart, prefix: "window.JOETOEP_BOOSTS_ALL = \(boosts);\n")
+        installScript("pageReader", world: Self.bridgeWorld)
+    }
+
+    // MARK: - V26 Boosts, Zap en de pagina-assistent
+
+    /// `{ "youtube.com": {enabled, css, site}, … }` voor boosts.js (leeg als Boosts uit staan).
+    static func boostBootstrap() -> String { BoostStore.bootstrap(globallyEnabled: V26Prefs.boostsEnabled()) }
+    /// De Boost van de huidige site nu toepassen (na een wijziging; nieuwe pagina's krijgen hem bij documentStart).
+    func applyBoost() {
+        let payload = BoostStore.payload(for: currentURL, globallyEnabled: V26Prefs.boostsEnabled())
+        bridge("window.JoeToepBoosts?.apply(\(payload)); 0")
+    }
+    private func boostsChanged() {
+        guard hasStarted else { return }
+        installUserScripts()
+        applyBoost()
+    }
+    /// Sleutel van de site in deze tab (nil voor startpagina, bestanden …).
+    var boostSite: String? { BoostStore.siteKey(for: currentURL) }
+    func startZap() {
+        guard boostSite != nil else {
+            showNotice(.information, "Nothing to zap here", "Zap works on websites (http and https)."); return
+        }
+        zapsThisSession = 0
+        bridge("window.JoeToepBoosts?.startZap({highlight: \(V26Prefs.zapHighlight())}) === true") { [weak self] result in
+            guard let self else { return }
+            if case .success(let value) = result, (value as? Bool) == true { self.isZapping = true }
+            else { self.showNotice(.information, "Zap is not ready yet", "Wait until the page has loaded and try again.") }
+        }
+    }
+    func stopZap() {
+        isZapping = false
+        bridge("window.JoeToepBoosts?.stopZap(); 0")
+    }
+    /// Laatste Zap ongedaan maken: element weer tonen en de selector uit de Boost halen.
+    func undoZap() {
+        // Alleen Zaps uit déze Zap-sessie (nooit een selector die je eerder bewust bewaarde).
+        guard zapsThisSession > 0, let site = boostSite, var boost = BoostStore.loadAll()[site], !boost.hiddenSelectors.isEmpty else { return }
+        boost.hiddenSelectors.removeLast()
+        zapsThisSession = max(0, zapsThisSession - 1)
+        bridge("window.JoeToepBoosts?.undoZap(); 0")
+        BoostStore.save(boost)
+    }
+    private func handleZap(_ body: [String: Any]) {
+        guard let site = boostSite, let selector = body["selector"] as? String else { return }
+        var boost = BoostStore.loadAll()[site] ?? SiteBoost(site: site)
+        guard boost.addHidden(selector) else { return }
+        boost.enabled = true
+        zapsThisSession += 1
+        BoostStore.save(boost)
+    }
+    /// Tekst van de pagina voor de pagina-assistent (alleen lokaal verwerkt). nil = niet leesbaar.
+    func readPage(maxCharacters: Int = 30_000) async -> PageContent? {
+        // `false` (geen null) als de lezer er niet is: een lege uitkomst kan de async API laten haperen.
+        let script = "window.JoeToepPageReader ? window.JoeToepPageReader.extract(\(maxCharacters)) : false"
+        guard let object = (try? await webView.evaluateJavaScript(script, in: nil, contentWorld: Self.bridgeWorld)) as? [String: Any] else { return nil }
+        let title = (object["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? pageTitle ?? ""
+        let url = (object["url"] as? String).flatMap(URL.init(string:)) ?? currentURL
+        let page = PageContent(title: title, url: url, text: (object["text"] as? String) ?? "",
+                               summary: (object["description"] as? String) ?? "")
+        return page.isEmpty ? nil : page
     }
 
     // MARK: - V15 titles, history
@@ -2818,6 +2896,12 @@ final class WebSession: NSObject, ObservableObject {
 extension WebSession: WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == AppConstants.linkMessageName {
+            // V26: Zap-meldingen van boosts.js (alleen uit de hoofdpagina; de site komt van ónze URL, niet uit het bericht).
+            if let body = message.body as? [String: Any], let event = body["event"] as? String, event.hasPrefix("boostZap") {
+                guard message.frameInfo.isMainFrame else { return }
+                if event == "boostZap" { handleZap(body) } else if event == "boostZapEnded" { isZapping = false }
+                return
+            }
             guard let body = message.body as? [String: Any], let raw = body["url"] as? String, raw.count < 4000,
                   let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
                 contextLink = nil; return
@@ -2858,6 +2942,14 @@ extension WebSession: WKNavigationDelegate {
            ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             decisionHandler(.cancel, preferences)
             onOpenInNewTab?(url, action.modifierFlags.contains(.shift))
+            return
+        }
+        // V26: ⇧-klik op een link → Peek (zwevend voorbeeld), zoals Arc.
+        if action.navigationType == .linkActivated, action.modifierFlags.contains(.shift), !action.modifierFlags.contains(.command),
+           !action.modifierFlags.contains(.option), V26Prefs.peekEnabled(), V26Prefs.peekShiftClick(), let onPeek,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            decisionHandler(.cancel, preferences)
+            onPeek(url)
             return
         }
         #endif
@@ -3077,12 +3169,15 @@ extension WebSession: WKUIDelegate {
                 self?.onOpenInNewTab?(url, false)
             }
             let copy = UIAction(title: "Copy Link", image: UIImage(systemName: "doc.on.doc")) { _ in UIPasteboard.general.url = url }
+            // V26: Peek — de link in een zwevend voorbeeld boven deze pagina.
+            let peek = UIAction(title: "Open in Peek", image: UIImage(systemName: "eye")) { _ in self?.onPeek?(url) }
             // V17.1: op iPad (meerdere vensters mogelijk) ook "Open in nieuw venster".
             let window = UIAction(title: "Open in New Window", image: UIImage(systemName: "rectangle.badge.plus")) { _ in
                 WindowOpener.open(url)
             }
-            let openers: [UIMenuElement] = UIApplication.shared.supportsMultipleScenes && UIDevice.current.userInterfaceIdiom == .pad
+            var openers: [UIMenuElement] = UIApplication.shared.supportsMultipleScenes && UIDevice.current.userInterfaceIdiom == .pad
                 ? [open, background, window] : [open, background]
+            if V26Prefs.peekEnabled(), self?.onPeek != nil { openers.insert(peek, at: 1) }
             let others = suggested.filter { element in
                 guard let action = element as? UIAction else { return true }
                 return !action.title.localizedCaseInsensitiveContains("reading list") && !action.title.localizedCaseInsensitiveContains("copy link")

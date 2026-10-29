@@ -5,8 +5,9 @@ import XCTest
 @MainActor
 final class V25FeatureTests: XCTestCase {
 
-    func testVersionIs25() {
-        XCTAssertTrue(AppConstants.version.hasPrefix("25."), "25.x")
+    func testVersionIsAtLeast25() {
+        // V26: exacte versie staat in V26FeatureTests; hier alleen: nooit terug naar vóór 25.
+        XCTAssertGreaterThanOrEqual(Int(AppConstants.version.split(separator: ".").first ?? "0") ?? 0, 25)
     }
 
     /// De klokwaarde van het moment dat het andere apparaat begon te spelen reist mee, zodat het alleen

@@ -32,6 +32,11 @@ struct TabBarView: View {
     @State private var dragConsumed: CGFloat = 0
     @Environment(\.joeToepTheme) private var theme
     @Environment(\.openWindow) private var openWindow
+    // V26: Spaces en Split View.
+    @AppStorage(V26Prefs.Key.spacesEnabled) private var spacesEnabled = true
+    @AppStorage(V26Prefs.Key.spaceNameInTabBar) private var spaceNameInTabBar = true
+    @AppStorage(V26Prefs.Key.pinnedEverywhere) private var pinnedEverywhere = true
+    @AppStorage(V26Prefs.Key.splitEnabled) private var splitEnabled = true
     // Op de Mac is er wat meer ruimte, dus mogen tabbladen iets breder minimaal zijn.
     /// V17.1: maximale tabbreedte zolang er minder dan 4 tabs zijn (Mac en iPad).
     private let fewTabsMaxWidth: CGFloat = 220
@@ -54,6 +59,8 @@ struct TabBarView: View {
         HStack(spacing: 4) {
             if leadingInset > 0 { WindowDragArea().frame(width: leadingInset, height: theme.tabHeight + 4) }
             if let leading { leading.fixedSize() }
+            // V26: Space-knop (alle Spaces, nieuwe Space, bewerken).
+            if spacesEnabled && !editing { SpaceMenuChip(workspace: workspace, showName: spaceNameInTabBar && !isPhone) }
             // ZStack laat ons wisselen tussen twee views (adresbalk of
             // tabstrip) die elkaar overlappen tijdens de animatie.
             ZStack {
@@ -113,7 +120,9 @@ struct TabBarView: View {
         GeometryReader { geometry in
             // Berekent hoe breed elk tabblad zou moeten zijn als ze allemaal
             // gelijk verdeeld worden over de beschikbare breedte.
-            let count = CGFloat(max(workspace.tabs.count, 1))
+            // V26: alleen de tabs van de actieve Space.
+            let visibleTabs = workspace.visibleTabs
+            let count = CGFloat(max(visibleTabs.count, 1))
             let spacing: CGFloat = 4
             // V19.2: ruimte voor de +-knop direct achter de tabs.
             let plusWidth: CGFloat = settings.showNewTabButton ? (showsWindowButton ? 64 : 32) + spacing : 0
@@ -124,13 +133,13 @@ struct TabBarView: View {
             // uitgerekt maar maximaal `fewTabsMaxWidth` breed; pas vanaf 4 tabs delen ze de ruimte.
             // V19.2: 1 tab ≈ de halve breedte, 2 tabs = samen de volle breedte, 3+ = kleiner (gelijk
             // verdeeld, nooit onder het minimum; daarna scrollen).
-            let width = workspace.tabs.count == 1 ? max(room / 2, minimumTabWidth) : max(natural, minimumTabWidth)
+            let width = visibleTabs.count == 1 ? max(room / 2, minimumTabWidth) : max(natural, minimumTabWidth)
             // ScrollViewReader geeft toegang tot "proxy", waarmee we
             // programmatisch naar een specifiek tabblad kunnen scrollen.
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     HStack(spacing: spacing) {
-                        ForEach(workspace.tabs) { tab in
+                        ForEach(visibleTabs) { tab in
                             TabChip(tab: tab, session: tab.session, selected: workspace.selectedID == tab.id, width: width,
                                     select: { tapped(tab) }, close: { workspace.close(tab) })
                                 .contextMenu { menu(for: tab) }
@@ -189,7 +198,7 @@ struct TabBarView: View {
                             }
                     }
                     .frame(minWidth: geometry.size.width, alignment: .leading)
-                    .animation(theme.animation, value: workspace.tabs.map(\.id))
+                    .animation(theme.animation, value: visibleTabs.map(\.id))
                     .animation(theme.animation, value: workspace.selectedID)
                 }
                 .scrollIndicators(.hidden)
@@ -322,6 +331,20 @@ struct TabBarView: View {
         Button { workspace.select(tab); editing = true } label: { Label("Edit Address…", systemImage: "character.cursor.ibeam") }
         Button { tab.session.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
         Button { workspace.duplicate(tab) } label: { Label("Duplicate Tab", systemImage: "plus.square.on.square") }
+        // V26: Split View en Spaces.
+        if splitEnabled && tab.id != workspace.selectedID && !isPhone {
+            Button { withAnimation(Motion.quick(0.22)) { workspace.openSplit(with: tab) } } label: {
+                Label("Open in Split View", systemImage: "rectangle.split.2x1")
+            }
+        }
+        if spacesEnabled && workspace.spaces.count > 1 {
+            Menu("Move to Space") {
+                ForEach(workspace.spaces) { space in
+                    Button(space.name) { withAnimation(Motion.quick()) { workspace.moveTab(tab, toSpace: space.id) } }
+                        .disabled(space.id == workspace.spaceID(of: tab))
+                }
+            }
+        }
         if !workspace.otherDevices.isEmpty {
             Menu("Continue on…") {
                 ForEach(workspace.otherDevices, id: \.id) { d in

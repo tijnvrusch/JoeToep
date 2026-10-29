@@ -9,6 +9,8 @@ final class JoeToepWebView: WKWebView {
     var openInNewTab: ((URL, Bool) -> Void)?
     /// V17.1: "Open in nieuw venster".
     var openInNewWindow: ((URL) -> Void)?
+    /// V26: "Open in Peek" (zwevend voorbeeld, zoals Arc).
+    var openInPeek: ((URL) -> Void)?
 
     /// V19.1: één klik pauzeert/speelt meteen, ook als het JoeToep-venster nog niet actief was
     /// (anders "verbruikt" macOS de eerste klik om het venster naar voren te halen).
@@ -32,7 +34,17 @@ final class JoeToepWebView: WKWebView {
         menu.insertItem(switchItem, at: 0)
         menu.insertItem(backgroundItem, at: 1)
         menu.insertItem(windowItem, at: 2)
-        menu.insertItem(.separator(), at: 3)
+        var next = 3
+        if openInPeek != nil, V26Prefs.peekEnabled() {
+            let peekItem = NSMenuItem(title: "Open in Peek", action: #selector(openPeekItem(_:)), keyEquivalent: "")
+            peekItem.representedObject = url; peekItem.target = self
+            peekItem.image = NSImage(systemSymbolName: "eye", accessibilityDescription: nil)
+            menu.insertItem(peekItem, at: next); next += 1
+        }
+        menu.insertItem(.separator(), at: next)
+    }
+    @objc private func openPeekItem(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { openInPeek?(url) }
     }
     @objc private func openSwitching(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { openInNewTab?(url, true) }

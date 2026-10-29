@@ -19,3 +19,4 @@ Elke versie staat als commit op `main` én in een eigen branch `versie/vX.Y` (bi
 | `versie/v24` | 15-10-2026 | Mac: de app crashte (opgelost); Mac: fullscreen verlaten = inline blijven (na test met Tijn); Mac: bediening in fullscreen zoals YouTube; Mac: automatisch fullscreen altijd betrouwbaar |
 | `versie/v25` | 29-10-2026 | iPhone: play/pauze werkt altijd precies één keer; Mac: fullscreen is altijd te verlaten; Sneller en zonder haperen; Tests |
 | `versie/v25.1` | 29-10-2026 | iPhone: omlaag vegen uit fullscreen = inline blijven; Mac: de zoekbalk (⌘T) zoekt waar jij wilt; Mac: theatermodus breekt automatische fullscreen niet meer; Tests |
+| `versie/v26` (nu nog `claude/cool-ride-ksydny`) | 29-10-2026 | Arc/Dia-editie: Spaces, Split View, Peek, Boosts en Zap, pagina-assistent; tabgroepen blijven na herstart bewaard; Swift-tests op Linux |

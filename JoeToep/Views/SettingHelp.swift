@@ -4,7 +4,7 @@
 import SwiftUI
 
 enum SettingHelp {
-    static func text(for title: String) -> String? { texts[title] }
+    static func text(for title: String) -> String? { texts[title] ?? v26Texts[title] }
 
     static let texts: [String: String] = [
         // Appearance
@@ -131,6 +131,30 @@ enum SettingHelp {
 }
 
 extension SettingHelp {
+    /// V26: alle instellingen van Spaces, Split View, Peek, Boosts en de pagina-assistent staan op één pagina.
+    static let v26Page = "Spaces, Split View & Boosts"
+    static let v26Texts: [String: String] = [
+        "Spaces": "Separate sets of tabs (Home, Music, Work …), each with its own name, icon and colour, like Arc.",
+        "Pinned tabs in every Space": "Pinned tabs work as favourites and stay visible in every Space. Off: each Space has its own pinned tabs.",
+        "Space switcher in the sidebar": "Icons for every Space at the bottom of the vertical sidebar.",
+        "Space name in the tab bar": "Shows the name of the current Space next to its icon in the tab bar.",
+        "Tint the sidebar with the Space colour": "The sidebar takes on a soft tint of the active Space's colour.",
+        "Keyboard shortcuts for Spaces (⌃1…⌃9)": "⌃1…⌃9 open a Space; ⌃⌘[ and ⌃⌘] go to the previous or next Space; ⌃⌘N makes a new one.",
+        "Split View": "Two tabs side by side or stacked in one window (⌘⇧\\). Drag the divider to resize.",
+        "Stack panes vertically by default": "New split views put the tabs above each other instead of side by side.",
+        "Title bar above each pane": "A small bar with the title and buttons (swap, rotate, close) above each pane.",
+        "Highlight the focused pane": "A coloured outline shows which pane has the keyboard and the buttons.",
+        "Peek": "Opens a link in a floating preview above the page; keep it as a tab with ⌘↩ or close it with Esc.",
+        "Shift-click a link to peek": "On the Mac, Shift-click opens a link in Peek instead of in this tab.",
+        "Click outside the preview closes it": "Clicking the dimmed page behind the preview closes Peek.",
+        "Boosts": "Change websites for good: hide parts (Zap), quick fixes, another font, a colour filter or your own CSS.",
+        "Highlight elements while zapping": "Shows a red outline around the element you are about to hide.",
+        "Page assistant": "Summarises the page, lists key points or answers questions about it (⌘E), on this device.",
+        "Use Apple Intelligence for the page assistant": "Uses on-device Apple Intelligence when available; otherwise a fast built-in method. Nothing leaves the device.",
+        "Summarise automatically when opened": "Opening the assistant summarises the page right away.",
+        "Show topics": "Shows the main topics of the page; tap one to ask about it.",
+    ]
+
     /// V20: uitleg + pagina van de nieuwe instellingen (apart, zodat er nooit dubbele sleutels ontstaan).
     static let v20Texts: [String: String] = [
         "Spotify": "Control the Spotify app on your Mac from JoeToep: play, pause, next, volume, shuffle, repeat.",
@@ -308,12 +332,12 @@ extension SettingHelp {
         let q = query.trimmingCharacters(in: .whitespaces).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         guard !q.isEmpty else { return [] }
         let words = q.split(separator: " ").map(String.init)
-        let all = texts.merging(v20Texts) { a, _ in a }
+        let all = texts.merging(v20Texts) { a, _ in a }.merging(v26Texts) { a, _ in a }
         return all.compactMap { title, help in
             if !advanced && advancedOnly.contains(title) { return nil }
             let hay = (title + " " + help).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             guard words.allSatisfy({ hay.contains($0) }) else { return nil }
-            return (title, help, pages[title] ?? v20Pages[title] ?? "Playback & Picture in Picture")
+            return (title, help, pages[title] ?? v20Pages[title] ?? (v26Texts[title] != nil ? v26Page : "Playback & Picture in Picture"))
         }
         .sorted { a, b in
             let aTitle = a.title.lowercased().contains(q), bTitle = b.title.lowercased().contains(q)

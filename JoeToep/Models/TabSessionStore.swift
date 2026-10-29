@@ -13,6 +13,8 @@ struct SavedBrowserTab: Codable, Equatable, Identifiable {
     var title: String? = nil
     /// V21: tabgroep (zijbalk/tabbalk), optioneel zodat oudere data leesbaar blijft.
     var groupID: UUID? = nil
+    /// V26: in welke Space de tab staat (nil = de eerste Space; oudere data blijft leesbaar).
+    var spaceID: UUID? = nil
 }
 struct SavedTabSession: Codable, Equatable {
     var tabs: [SavedBrowserTab]
@@ -37,16 +39,21 @@ final class TabSessionStore {
               !["accounts.google.com", "accounts.youtube.com"].contains(host) else { return nil }
         return url
     }
+    /// V26: alleen de URL opschonen en ALLE andere velden behouden. Voorheen werd hier een nieuwe
+    /// SavedBrowserTab opgebouwd zonder `groupID` (en later `spaceID`): na een herstart waren alle
+    /// tabgroepen in de zijbalk leeg en stonden hun tabs weer los.
+    static func sanitized(_ tab: SavedBrowserTab) -> SavedBrowserTab {
+        var copy = tab
+        copy.url = restorable(tab.url)
+        return copy
+    }
     func restore(lifetime: TimeInterval? = nil, now: Date = Date()) -> SavedTabSession? {
         guard !claimed else { return nil }
         claimed = true
         guard let data = defaults.data(forKey: key),
               var saved = try? JSONDecoder().decode(SavedTabSession.self, from: data), !saved.tabs.isEmpty else { return nil }
         var seen = Set<UUID>()
-        saved.tabs = saved.tabs.filter { seen.insert($0.id).inserted }.map {
-            SavedBrowserTab(id: $0.id, url: Self.restorable($0.url), time: $0.time, playing: $0.playing, lastActive: $0.lastActive,
-                            pinned: $0.pinned, title: $0.title)
-        }
+        saved.tabs = saved.tabs.filter { seen.insert($0.id).inserted }.map(Self.sanitized)
         if let lifetime {
             let selected = saved.selectedID
             saved.tabs = saved.tabs.filter { $0.id == selected || $0.pinned == true || now.timeIntervalSince($0.lastActive ?? now) <= lifetime }
@@ -58,10 +65,7 @@ final class TabSessionStore {
     func save(_ session: SavedTabSession, window: UUID) {
         if windows[window] == nil { windowOrder.append(window) }
         windows[window] = session
-        let all = windowOrder.flatMap { windows[$0]?.tabs ?? [] }.map {
-            SavedBrowserTab(id: $0.id, url: Self.restorable($0.url), time: $0.time, playing: $0.playing, lastActive: $0.lastActive,
-                            pinned: $0.pinned, title: $0.title)
-        }
+        let all = windowOrder.flatMap { windows[$0]?.tabs ?? [] }.map(Self.sanitized)
         // V22.3: de selectie van het EERSTE (hoofd)venster bewaren, niet van het venster dat toevallig als
         // laatste opsloeg (een extra venster zette anders na een herstart zijn eigen "Home"-tab voorop).
         let selection = windowOrder.first.flatMap { windows[$0]?.selectedID } ?? session.selectedID

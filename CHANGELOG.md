@@ -1,3 +1,68 @@
+# 26.0.0 (39)
+
+JoeToep wordt in deze versie een volwaardige browser in de stijl van Arc en Dia, met alles van de eerdere versies erbij. Alle nieuwe functies zijn uit te zetten en in te stellen onder **Instellingen › Spaces, Split View & Boosts**.
+
+## Nieuw: Spaces (zoals Arc)
+- **Wat je merkt:** je kunt je tabs verdelen over aparte Spaces (bijv. "Home", "Muziek", "Werk"), elk met een eigen naam, icoon (SF Symbol of emoji) en kleur. Een nieuwe tab komt in de Space waarin je zit; de tabbalk en de zijbalk tonen alleen de tabs van die Space.
+- **Wisselen:** de icoontjes onderaan de zijbalk, de Space-knop links in de tabbalk, ⌃1…⌃9, ⌃⌘[ / ⌃⌘], of typ "space" in de zoekbalk (⌘T). Kies je (via de zoekbalk, de sync of ⌃Tab) een tab uit een andere Space, dan gaat JoeToep vanzelf mee naar die Space.
+- **Favorieten:** vastgezette tabs blijven standaard in élke Space zichtbaar (instelbaar: per Space eigen vastgezette tabs).
+- **Beheren:** rechtsklik op een Space: naam/icoon/kleur, links/rechts verplaatsen, verwijderen (tabs gaan mee naar de vorige Space, of worden gesloten). Rechtsklik op een tab › *Move to Space*. Tabgroepen horen bij de Space waarin je ze maakte. De laatste Space kan nooit weg.
+- **Arc-gedrag:** sluit je de laatste tab van een Space, dan blijf je in die Space met een nieuwe lege tab, in plaats van ongemerkt naar een andere Space te springen. Elke Space onthoudt welke tab je het laatst open had. De zijbalk krijgt de kleur van de Space (sterkte instelbaar).
+- Spaces worden gedeeld door al je vensters; de tabs zelf synchroniseren zoals altijd (een tab van een ander apparaat komt in de eerste Space).
+
+## Nieuw: Split View
+- **Wat je merkt:** twee tabs naast elkaar (of boven elkaar) in één venster: ⌘⇧\, rechtsklik op een tab › *Open in Split View*, het ⋯-menu of "split" in de zoekbalk. Zonder gekozen tab komt de vorige tab ernaast; is er geen andere tab, dan opent er een nieuwe.
+- Beide pagina's zijn live. Klik op een paneel om het de focus te geven (knoppen en sneltoetsen werken dan daar); een video in het andere paneel speelt gewoon door tot je een andere video start (één video tegelijk blijft de regel).
+- Sleep de scheidingslijn om de verdeling te kiezen (20–80 %); dubbelklik = 50/50. De laatst gekozen verdeling wordt de nieuwe standaard.
+- Boven elk paneel een kleine titelbalk met *wisselen*, *naast/onder elkaar*, *alleen deze tab* en *sluiten*. Instelbaar: standaardverdeling, boven elkaar als standaard, titelbalken, focusrand, ruimte tussen de panelen en het andere paneel dimmen.
+- Te smal venster (< 640 pt) → automatisch boven elkaar; te klein voor beide → alleen de tab met de focus. Kies je een tab buiten de Split View, dan eindigt hij (het andere paneel pauzeert, zoals bij een gewone tabwissel). Op de iPhone zit Split View niet in de menu's.
+- **Techniek:** elke tab houdt zijn eigen webview; Split View geeft alleen een ander kader. Openen, sluiten, wisselen en slepen laden dus nooit een pagina opnieuw.
+
+## Nieuw: Peek (zwevend voorbeeld)
+- **Wat je merkt:** ⇧-klik op een link (Mac) of *Open in Peek* in het linkmenu (Mac en iPhone/iPad) opent de link in een zwevend venster boven de huidige pagina. Esc of een klik ernaast sluit hem; *Open as Tab* (⌘↩) maakt er een gewone tab van, rechts naast de tab waar hij vandaan kwam; *Open in Split View* zet hem er meteen naast.
+- Een Peek is géén tab: hij wordt niet bewaard of gesynct zolang je hem niet houdt. Start er een video in, dan pauzeren de andere tabs (één video tegelijk).
+- Instelbaar: grootte, hoe donker de pagina erachter wordt, sluiten bij klik ernaast, en ⇧-klik aan/uit.
+
+## Nieuw: Boosts en Zap (zoals Arc)
+- **Wat je merkt:** elke website blijvend naar je hand zetten via ⌘⌥B, het ⋯-menu of "boost" in de zoekbalk:
+  - **Zap** (⌘⌥Z): klik op elk onderdeel van een pagina en het is voortaan weg op die site. Rode markering tijdens het kiezen, *Undo* en *Done* onderaan; Esc stopt.
+  - **Snelle aanpassingen:** reacties verbergen, aanbevelingen naast de video, eindkaarten/infokaarten, live chat, merchandise, de hele startfeed (alleen zoeken/abonnementen), videovoorbeelden bij aanwijzen en meldingsgetallen verbergen (YouTube); animaties uit en alle links onderstrepen (elke site).
+  - **Uiterlijk:** ander lettertype (systeem, afgerond, serif, monospace), kleurfilter (donker forceren, grijstinten, sepia, warm, meer contrast), eigen achtergrondkleur en een maximale leesbreedte.
+  - **Eigen CSS** per site (wordt pas toegepast als je even stopt met typen).
+- www.youtube.com en m.youtube.com delen één Boost; music.youtube.com heeft een eigen. Alle Boosts gaan bij het laden mee vóór de site zelf tekent, dus je ziet nooit eerst de oude pagina. Een wijziging werkt meteen in elk open venster.
+- **Veiligheid:** Boosts draaien in JoeToep's eigen, afgeschermde scriptwereld (de site ziet en stoort ze niet), zonder `innerHTML` (werkt met YouTube's Trusted Types). Zap-meldingen worden alleen uit de hoofdpagina geaccepteerd en de site wordt bepaald door JoeToep's eigen adres, niet door het bericht. Selectors met tekens waarmee je uit een CSS-regel kunt breken worden geweigerd; `@import` in eigen CSS wordt genegeerd.
+
+## Nieuw: pagina-assistent (zoals Dia)
+- **Wat je merkt:** ⌘E (of het ⋯-menu, of "summarise" in de zoekbalk) opent een paneel rechts (Mac/iPad; op de iPhone een blad) dat de open pagina **samenvat**, de **kernpunten** geeft of een **vraag over de pagina** beantwoordt. Met leestijd, de belangrijkste onderwerpen (tik om ernaar te vragen) en een kopieerknop.
+- Gebruikt **Apple Intelligence op het apparaat** als dat beschikbaar is; anders (en als terugval bij een fout) een snelle ingebouwde offline methode die de best passende zinnen van de pagina kiest. Er gaat nooit tekst van de pagina naar een server.
+- Op YouTube leest hij de titel, de beschrijving onder de video en de reacties; menu's, knoppen, aanbevelingen en de speler worden overgeslagen.
+- Instelbaar: Apple Intelligence aan/uit, lengte (2–12 zinnen), automatisch samenvatten bij openen, onderwerpen tonen en de paneelbreedte (Mac).
+
+## Sneltoetsen (nieuw)
+| Toets | Actie |
+|---|---|
+| ⌃1…⌃9 | Space 1–9 |
+| ⌃⌘[ / ⌃⌘] | Vorige / volgende Space |
+| ⌃⌘N | Nieuwe Space |
+| ⌘⇧\ | Split View aan/uit |
+| ⌘E | Pagina-assistent |
+| ⌘⌥B / ⌘⌥Z | Boost-bewerker / Zap |
+| ⇧-klik (Mac), ⌘↩ | Link in Peek / Peek als tab houden |
+
+⌘1…⌘9 en volgende/vorige tab werken nu binnen de Space die je ziet.
+
+## Opgelost: tabgroepen waren na een herstart leeg
+- **Wat je merkte:** na het opnieuw starten van JoeToep stonden alle tabs uit je groepen in de zijbalk weer los; de groepen zelf bleven leeg.
+- **Oorzaak:** de tab-opslag bouwde bij opslaan én herstellen elke tab opnieuw op en liet daarbij het groepsveld weg.
+- **Oplossing:** alleen het adres wordt nog opgeschoond; alle andere velden (groep, Space, positie, vastgezet) blijven bewaard. Er is een test die dit bij elke build controleert.
+
+## Ontwikkeling, tests en open source
+- **Swift-tests in de cloud:** `Scripts/linux_swift_tests.sh` compileert alle pure modellen (Spaces, Split View, Boosts, pagina-assistent, voorkeuren, tab-opslag, PiP-statusmachine …) met Swift 6.1 op Linux en draait 37 unit tests, waaronder stresstests met duizenden willekeurige bewerkingen. Zo is ook zonder Mac te zien dat deze code compileert en klopt.
+- **Nieuwe tests:** `JoeToepTests/LinuxV26Tests.swift` (pure logica, ook in Xcode), `JoeToepTests/V26FeatureTests.swift` (werkruimte: Spaces wisselen, sluiten, verwijderen, Split View, Peek, opslaan na herstart en een stresstest van 500 bewerkingen) en `Scripts/test_v26_arc_scripts.cjs` (15 jsdom-scenario's voor Boosts, Zap en de paginalezer). `npm test` draait nu álle JS-suites.
+- **Projectcontrole:** `Scripts/validate_project.py` controleerde nog op versie 23.0.0 en faalde daardoor al een tijd; de versie staat nu op één plek en wordt overal vergeleken (alle targets, AppConstants, CHANGELOG). Nieuwe poort `check_v26`: pure modellen alleen Foundation, scripts in de afgeschermde wereld, geen `innerHTML`/timers/netwerk in de nieuwe scripts, uitleg bij elke nieuwe instelling, en hooguit 10 menu's per niveau in de menubalk (anders bouwt het menu niet).
+- Het lege `Views/DebugHUD.swift` is weg. De V25-versietest eist nu "≥ 25" in plaats van precies "25.x".
+- **Nog op de toestellen te testen:** bouwen voor macOS en iOS in Xcode, en de lijst in `Docs/HANDOFF-V27.md` (Spaces, Split View, Peek, Boosts, assistent; plus de openstaande punten van V25: iPhone-rotatie, BenQ/HP-fullscreen, Live Activity-knoppen, Watch, UI-tests).
+
 # 25.1.0 (38)
 
 ## iPhone: omlaag vegen uit fullscreen = inline blijven

@@ -32,6 +32,13 @@ struct SidebarView: View {
     @AppStorage("sidebarShowNowPlayingV21") private var showNowPlaying = true
     @AppStorage("sidebarShowURLV21") private var showURL = true
     @AppStorage("sidebarCompactRowsV21") private var compactRows = false
+    // V26: Spaces (Arc).
+    @AppStorage(V26Prefs.Key.spacesEnabled) private var spacesEnabled = true
+    @AppStorage(V26Prefs.Key.spaceSwitcher) private var spaceSwitcher = true
+    @AppStorage(V26Prefs.Key.spaceTint) private var spaceTint = true
+    @AppStorage(V26Prefs.Key.spaceTintStrength) private var spaceTintStrength = 0.14
+    @AppStorage(V26Prefs.Key.pinnedEverywhere) private var pinnedEverywhere = true
+    @AppStorage(V26Prefs.Key.splitEnabled) private var splitEnabled = true
     @State private var renaming: UUID?
     @State private var renameText = ""
     @State private var dropTarget: String?
@@ -47,7 +54,8 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if !workspace.pinnedTabs.isEmpty || dropTarget == "pinned" { pinnedGrid }
-                    ForEach(workspace.groups) { group in groupSection(group) }
+                    if spacesEnabled { SpaceTitleRow(workspace: workspace) }
+                    ForEach(workspace.visibleGroups) { group in groupSection(group) }
                     looseSection
                 }
                 .padding(.horizontal, 8)
@@ -61,6 +69,16 @@ struct SidebarView: View {
         .background {
             if GlassPrefs.enabled { Rectangle().fill(.ultraThinMaterial).overlay(theme.background.opacity(0.55)) }
             else { theme.background.opacity(0.94) }
+        }
+        // V26: de zijbalk kleurt mee met de actieve Space (zoals Arc).
+        .background(alignment: .top) {
+            if spacesEnabled && spaceTint {
+                LinearGradient(colors: [TabGroup.color(named: workspace.activeSpace.color).opacity(min(max(spaceTintStrength, 0), 0.5)),
+                                        TabGroup.color(named: workspace.activeSpace.color).opacity(min(max(spaceTintStrength, 0), 0.5) * 0.35)],
+                               startPoint: .top, endPoint: .bottom)
+                    .allowsHitTesting(false)
+                    .animation(Motion.fade(0.3), value: workspace.activeSpaceID)
+            }
         }
         .overlay(alignment: .trailing) { resizeHandle }
         .accessibilityIdentifier("sidebar")
@@ -200,7 +218,7 @@ struct SidebarView: View {
             .draggable(tab.id.uuidString) { Text(tab.title).padding(6) }
             .dropDestination(for: String.self) { items, _ in
                 guard let raw = items.first, let id = UUID(uuidString: raw), let moved = workspace.tabs.first(where: { $0.id == id }) else { return false }
-                moved.pinned = tab.pinned; moved.groupID = tab.groupID
+                moved.pinned = tab.pinned; moved.groupID = tab.groupID; moved.spaceID = tab.spaceID   // V26: ook dezelfde Space
                 return workspace.moveTab(id: id, before: tab.id)
             }
             .middleClick { workspace.close(tab) }
@@ -210,8 +228,22 @@ struct SidebarView: View {
         Button { workspace.togglePin(tab) } label: { Label(tab.pinned ? "Unpin" : "Pin to top", systemImage: tab.pinned ? "pin.slash" : "pin") }
         Menu("Move to group") {
             Button("New group…") { let g = workspace.newGroup(with: tab); renameText = g.name; renaming = g.id }
-            ForEach(workspace.groups) { g in Button(g.name) { workspace.setGroup(tab, to: g.id) } }
+            ForEach(workspace.visibleGroups) { g in Button(g.name) { workspace.setGroup(tab, to: g.id) } }
             if tab.groupID != nil { Divider(); Button("Remove from group") { workspace.setGroup(tab, to: nil) } }
+        }
+        // V26: naar een andere Space verplaatsen, of naast de huidige tab zetten (Split View).
+        if spacesEnabled && workspace.spaces.count > 1 {
+            Menu("Move to Space") {
+                ForEach(workspace.spaces) { space in
+                    Button(space.name) { withAnimation(Motion.quick()) { workspace.moveTab(tab, toSpace: space.id) } }
+                        .disabled(space.id == workspace.spaceID(of: tab))
+                }
+            }
+        }
+        if splitEnabled && tab.id != workspace.selectedID {
+            Button { withAnimation(Motion.quick(0.22)) { workspace.openSplit(with: tab) } } label: {
+                Label("Open in Split View", systemImage: "rectangle.split.2x1")
+            }
         }
         Button { workspace.duplicate(tab) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
         if !workspace.otherDevices.isEmpty {
@@ -233,6 +265,7 @@ struct SidebarView: View {
     private var footer: some View {
         VStack(spacing: 6) {
             if showNowPlaying { SidebarNowPlaying(workspace: workspace) }
+            if spacesEnabled && spaceSwitcher { SpaceSwitcherBar(workspace: workspace) }
             ScrollView(.horizontal) {
                 PlayerControlBar(session: workspace.selected.session, settings: settings, availableWidth: width, actions: actions,
                                  showSettings: actions.openSettings, part: .trailing, fixedButtonSize: 28)

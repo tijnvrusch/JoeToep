@@ -17,6 +17,8 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var pinned: Bool
     /// V21: in welke tabgroep deze tab zit (nil = los).
     @Published var groupID: UUID?
+    /// V26: in welke Space (Arc) deze tab staat (nil = de eerste Space).
+    @Published var spaceID: UUID?
     /// V18: er staat een wijziging van een ander apparaat klaar (stipje in de tab).
     @Published var syncPending = false
     var lastActive: Date
@@ -29,6 +31,7 @@ final class BrowserTab: ObservableObject, Identifiable {
         id = saved.id; isPrivate = privateMode
         session = WebSession(privateMode: privateMode)
         lastActive = saved.lastActive ?? Date(); pinned = saved.pinned ?? false; groupID = saved.groupID
+        spaceID = saved.spaceID
         let initial = saved.title ?? TabTitleSummarizer.fallbackTitle(for: saved.url)
         title = initial; fullTitle = initial
         session.restoredURL = saved.url
@@ -77,7 +80,9 @@ final class BrowserTab: ObservableObject, Identifiable {
 @MainActor
 final class BrowserWorkspace: ObservableObject {
     @Published private(set) var tabs: [BrowserTab]
-    @Published var selectedID: UUID
+    /// V26: een andere tab gekozen (op welke manier dan ook: klik, sync, sneltoets, zoekbalk) → de Space
+    /// volgt mee en Split View eindigt als de nieuwe tab er geen deel van is.
+    @Published var selectedID: UUID { didSet { if selectedID != oldValue { selectionChanged(from: oldValue) } } }
     @Published private(set) var closedTabs: [SavedBrowserTab] = []
     /// V16: most-recently-used order for Ctrl+Tab.
     private var recent: [UUID] = []
@@ -154,11 +159,19 @@ final class BrowserWorkspace: ObservableObject {
         } else {
             let first = BrowserTab(); tabs = [first]; selectedID = first.id
         }
+        // V26: de Space van de herstelde tab is de actieve Space.
+        activeSpaceID = SpaceLogic.resolve(tabs.first(where: { $0.id == selectedID })?.spaceID, in: spaces)
         tabs.forEach(observe)
         claimSync()
         persist()
         startExpiryChecks()
         Self.registry.add(self)
+        // V26: een ander venster wijzigde de Spaces → hier dezelfde lijst tonen.
+        spacesObserver = NotificationCenter.default.publisher(for: SpaceStore.didChange)
+            .sink { [weak self] note in
+                guard let self, (note.object as AnyObject?) !== self else { return }
+                self.reloadSpacesFromStore()
+            }
     }
     private var expiryTask: Task<Void, Never>?
     /// V13: close tabs that have been inactive longer than the chosen lifetime (never pinned tabs).
@@ -731,7 +744,7 @@ final class BrowserWorkspace: ObservableObject {
     private static func saved(_ tab: BrowserTab, url override: URL? = nil) -> SavedBrowserTab {
         let session = tab.session
         let url = override ?? session.currentURL ?? session.restoredURL
-        var result = SavedBrowserTab(id: tab.id, url: url, lastActive: tab.lastActive, pinned: tab.pinned ? true : nil, title: tab.title, groupID: tab.groupID)
+        var result = SavedBrowserTab(id: tab.id, url: url, lastActive: tab.lastActive, pinned: tab.pinned ? true : nil, title: tab.title, groupID: tab.groupID, spaceID: tab.spaceID)
         if let point = session.resumePoint, let url, Self.sameVideo(point.url, url) {
             result.time = point.time; result.playing = point.playing
         } else if session.currentURL == nil, let restored = session.restoredURL, restored == url {
@@ -755,6 +768,8 @@ final class BrowserWorkspace: ObservableObject {
         tab.session.onOpenInNewTab = { [weak self, weak tab] url, activate in
             self?.openInNewTab(url, activate: activate, from: tab)
         }
+        // V26: ⇧-klik / "Open in Peek" → zwevend voorbeeld boven deze tab.
+        tab.session.onPeek = { [weak self, weak tab] url in self?.openPeek(url, from: tab) }
         // V17: "terug" terwijl er geen vorige pagina is → deze tab sluiten (als dat aan staat).
         tab.session.onCannotGoBack = { [weak self, weak tab] in
             guard let self, let tab else { return }
@@ -984,7 +999,7 @@ final class BrowserWorkspace: ObservableObject {
     /// New tab; without a URL it opens the start page with the search field focused.
     func addTab(url: URL?, privateMode: Bool = false, activate: Bool = true, after anchor: BrowserTab? = nil) {
         Self.active = self
-        let tab = BrowserTab(saved: SavedBrowserTab(url: url), privateMode: privateMode)
+        let tab = BrowserTab(saved: SavedBrowserTab(url: url, spaceID: anchor?.spaceID ?? activeSpaceID), privateMode: privateMode)
         tab.session.userActivatedAt = Date()   // V22.2: zelf geopend → een video mag meteen spelen
         if url == nil {
             // V19.2: nieuwe-tab-pagina (standaard aan); anders zoals voorheen YouTube's zoekveld.
@@ -1060,7 +1075,8 @@ final class BrowserWorkspace: ObservableObject {
     @discardableResult
     func newGroup(named name: String = "New group", with tab: BrowserTab? = nil) -> TabGroup {
         let colors = TabGroup.palette
-        let group = TabGroup(name: name, color: colors[groups.count % colors.count])
+        var group = TabGroup(name: name, color: colors[groups.count % colors.count])
+        group.spaceID = tab?.spaceID ?? activeSpaceID   // V26: groep hoort bij de Space waarin hij gemaakt werd
         groups.append(group)
         if let tab { tab.groupID = group.id; tab.pinned = false; persist() }
         return group
@@ -1094,11 +1110,17 @@ final class BrowserWorkspace: ObservableObject {
     }
     /// Arc "Clear": alle losse (niet vastgezette, niet gegroepeerde) tabs sluiten.
     func clearLooseTabs() {
-        let loose = tabs.filter { !$0.pinned && $0.groupID == nil && $0.id != selectedID }
+        let loose = tabs.filter { !$0.pinned && $0.groupID == nil && $0.id != selectedID && isInActiveSpace($0) }   // V26: alleen deze Space
         batching { for tab in loose where tabs.count > 1 { close(tab) } }   // V22.2
     }
-    func tabs(in group: UUID?) -> [BrowserTab] { tabs.filter { !$0.pinned && $0.groupID == group } }
-    var pinnedTabs: [BrowserTab] { tabs.filter(\.pinned) }
+    /// V26: alleen tabs in de actieve Space (vastgezette tabs volgens "Pinned tabs in every Space").
+    func tabs(in group: UUID?) -> [BrowserTab] { tabs.filter { !$0.pinned && $0.groupID == group && isInActiveSpace($0) } }
+    var pinnedTabs: [BrowserTab] { tabs.filter { $0.pinned && isInActiveSpace($0) } }
+    /// V26: groepen van de actieve Space.
+    var visibleGroups: [TabGroup] {
+        guard V26Prefs.spacesEnabled() else { return groups }
+        return groups.filter { SpaceLogic.resolve($0.spaceID, in: spaces) == activeSpaceID }
+    }
 
     /// V20: alle open vensters (zwak), voor het mediacentrum.
     static let registry = NSHashTable<BrowserWorkspace>.weakObjects()
@@ -1116,16 +1138,22 @@ final class BrowserWorkspace: ObservableObject {
             TabSyncService.shared.noteHandoff("takeover cancelled: you picked another tab")
         }
         guard tab.id != selectedID else { return }
+        // V26: het andere paneel van Split View → alleen de focus verplaatsen; beide pagina's blijven zichtbaar
+        // (en een video in het andere paneel speelt gewoon door).
+        if split?.contains(tab.id) == true { focusPane(tab.id); return }
         tab.session.userActivatedAt = Date()   // V22.2: jouw keuze → een herstelde video mag spelen
         leaveCurrent()
         selectedID = tab.id; tab.lastActive = Date(); persist()
     }
+    /// V26: ⌘1…⌘9, volgende/vorige tab: binnen de tabs die je nu ziet (de actieve Space).
     func select(index: Int) {
-        guard !tabs.isEmpty else { return }
-        select(tabs[min(max(index, 0), tabs.count - 1)])
+        let visible = visibleTabs
+        guard !visible.isEmpty else { return }
+        select(visible[min(max(index, 0), visible.count - 1)])
     }
-    func selectNext() { select(index: (selectedIndex + 1) % max(tabs.count, 1)) }
-    func selectPrevious() { select(index: (selectedIndex - 1 + tabs.count) % max(tabs.count, 1)) }
+    private var visibleSelectedIndex: Int { visibleTabs.firstIndex(where: { $0.id == selectedID }) ?? 0 }
+    func selectNext() { select(index: (visibleSelectedIndex + 1) % max(visibleTabs.count, 1)) }
+    func selectPrevious() { select(index: (visibleSelectedIndex - 1 + visibleTabs.count) % max(visibleTabs.count, 1)) }
     /// V22.2: "grafstenen" van gesloten tabs (max. 7 dagen / 300 stuks) voor de sync-samenvoeging.
     static var closedSyncIDs: Set<String> {
         let all = UserDefaults.standard.dictionary(forKey: "closedSyncIDsV22") as? [String: Double] ?? [:]
@@ -1168,17 +1196,23 @@ final class BrowserWorkspace: ObservableObject {
         tab.session.closeTab()
         playbackObservers[tab.id] = nil; urlObservers[tab.id] = nil; resumeObservers[tab.id] = nil; titleObservers[tab.id] = nil
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { persist(); return }
+        // V26: het andere paneel van een Split View krijgt de focus; anders de buurtab in dezelfde Space.
+        let splitPartner = split?.partner(of: tab.id)
+        if split?.contains(tab.id) == true { split = nil }
         tabs.remove(at: index)
-        if selectedID == tab.id, !tabs.isEmpty { selectedID = tabs[min(index, tabs.count - 1)].id }
+        if selectedID == tab.id, !tabs.isEmpty {
+            if let splitPartner, tabs.contains(where: { $0.id == splitPartner }) { selectedID = splitPartner }
+            else { selectedID = nextSelectionAfterClosing(at: index) }
+        }
         persist(); updateIdleTimer()
     }
     func closeOthers(_ keep: BrowserTab) {
-        batching { for tab in tabs where tab.id != keep.id && !tab.pinned { close(tab) } }
+        batching { for tab in tabs where tab.id != keep.id && !tab.pinned && isInActiveSpace(tab) { close(tab) } }   // V26: alleen deze Space
         select(keep)
     }
     func closeToTheRight(of anchor: BrowserTab) {
         guard let index = tabs.firstIndex(where: { $0.id == anchor.id }) else { return }
-        batching { for tab in tabs.suffix(from: index + 1) where !tab.pinned { close(tab) } }
+        batching { for tab in tabs.suffix(from: index + 1) where !tab.pinned && isInActiveSpace(tab) { close(tab) } }   // V26
     }
     /// V22.2: bulk sluiten zonder O(n²): opslaan, schermtimer en grafstenen pas één keer aan het eind.
     private var batchDepth = 0
@@ -1250,12 +1284,16 @@ final class BrowserWorkspace: ObservableObject {
     }
     /// V22: live herordenen tijdens het slepen (Mac): één plek naar links/rechts, binnen de eigen
     /// groep (vastgezet of gewoon). Geeft true als er echt iets verschoof.
+    /// V26: de buurtab is de volgende ZICHTBARE tab (andere Spaces worden overgeslagen).
     @discardableResult
     func stepTab(id: UUID, by offset: Int) -> Bool {
-        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
-        let target = index + offset
+        guard offset != 0, let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        let step = offset > 0 ? 1 : -1
+        var target = index + step
+        while target >= 0, target < tabs.count, !isInActiveSpace(tabs[target]) { target += step }
         guard target >= 0, target < tabs.count, tabs[target].pinned == tabs[index].pinned else { return false }
-        tabs.swapAt(index, target)
+        let tab = tabs.remove(at: index)
+        tabs.insert(tab, at: target)
         return true
     }
     func finishTabDrag() { persist() }
@@ -1264,6 +1302,264 @@ final class BrowserWorkspace: ObservableObject {
         let target = min(max(index + offset, 0), tabs.count - 1)
         guard target != index, tabs[target].pinned == tab.pinned else { return }
         tabs.swapAt(index, target); persist()
+    }
+    // MARK: - V26 — Spaces, Split View en Peek (Arc/Dia)
+
+    /// Alle Spaces (gedeeld door alle vensters, bewaard in UserDefaults).
+    @Published var spaces: [BrowserSpace] = SpaceStore.load() {
+        didSet {
+            guard spaces != oldValue, !reloadingSpaces else { return }
+            SpaceStore.save(spaces)
+            NotificationCenter.default.post(name: SpaceStore.didChange, object: self)
+        }
+    }
+    /// De Space die dit venster nu toont.
+    @Published private(set) var activeSpaceID: UUID = SpaceLogic.resolve(SpaceStore.loadActive(), in: SpaceStore.load())
+    /// Space waarvan het bewerkvenster open staat (naam, icoon, kleur).
+    @Published var editingSpaceID: UUID?
+    /// Twee tabs naast elkaar (nil = geen Split View).
+    @Published private(set) var split: SplitPair?
+    /// Link die in een zwevend voorbeeld (Peek) openstaat; staat NIET in `tabs` (wordt niet bewaard of gesynct).
+    @Published private(set) var peekTab: BrowserTab?
+    /// Pagina-assistent (zijpaneel op Mac/iPad, blad op iPhone).
+    @Published var showAssistant = false
+    /// Boost-bewerker voor de huidige site.
+    @Published var showBoostEditor = false
+    private var lastSelectedBySpace: [UUID: UUID] = [:]
+    private static var newTabPageEnabled: Bool { (UserDefaults.standard.object(forKey: "newTabPageV192") as? Bool) ?? true }
+    private var reloadingSpaces = false
+    private var spacesObserver: AnyCancellable?
+    private var peekObserver: AnyCancellable?
+
+    var activeSpace: BrowserSpace { spaces.first { $0.id == activeSpaceID } ?? spaces[0] }
+    func spaceID(of tab: BrowserTab) -> UUID { SpaceLogic.resolve(tab.spaceID, in: spaces) }
+    func isInActiveSpace(_ tab: BrowserTab) -> Bool {
+        guard V26Prefs.spacesEnabled() else { return true }
+        return SpaceLogic.isVisible(SpaceMember(id: tab.id, spaceID: tab.spaceID, pinned: tab.pinned), active: activeSpaceID,
+                                    spaces: spaces, pinnedEverywhere: V26Prefs.pinnedEverywhere())
+    }
+    /// De tabs in de tabbalk/zijbalk: die van de actieve Space (alles als Spaces uit staan).
+    var visibleTabs: [BrowserTab] { V26Prefs.spacesEnabled() ? tabs.filter(isInActiveSpace) : tabs }
+    private var spaceMembers: [SpaceMember] { tabs.map { SpaceMember(id: $0.id, spaceID: $0.spaceID, pinned: $0.pinned) } }
+
+    /// Gekozen tab buiten de getoonde Space → die Space wordt actief. Split View eindigt als de nieuwe tab
+    /// er niet in zit (het andere paneel pauzeert dan, net als bij een gewone tabwissel).
+    private func selectionChanged(from previous: UUID) {
+        if let pair = split, !pair.contains(selectedID) {
+            split = nil
+            for id in [pair.primary, pair.secondary] where id != previous {
+                guard let other = tabs.first(where: { $0.id == id }), other.session.isPlaying, !other.session.isInPictureInPicture else { continue }
+                other.session.pauseForTabSwitch()
+            }
+        }
+        guard V26Prefs.spacesEnabled(), let tab = tabs.first(where: { $0.id == selectedID }), !isInActiveSpace(tab) else { return }
+        lastSelectedBySpace[activeSpaceID] = previous
+        activeSpaceID = spaceID(of: tab)
+        SpaceStore.saveActive(activeSpaceID)
+    }
+
+    /// Na het sluiten van de geselecteerde tab: de buurtab in dezelfde Space; is de Space nu leeg, dan
+    /// een nieuwe lege tab daarin (zoals Arc), zodat je nooit ongemerkt naar een andere Space springt.
+    private func nextSelectionAfterClosing(at index: Int) -> UUID {
+        let visibleAfter = tabs.suffix(from: min(index, tabs.count)).first(where: isInActiveSpace)
+        let visibleBefore = tabs.prefix(upTo: min(index, tabs.count)).last(where: isInActiveSpace)
+        if let next = visibleAfter ?? visibleBefore { return next.id }
+        guard V26Prefs.spacesEnabled() else { return tabs[min(index, tabs.count - 1)].id }
+        return makeBlankTab(in: activeSpaceID).id
+    }
+
+    /// Lege tab (nieuwe-tab-pagina) in een Space, zonder de huidige tab te verlaten of op te slaan.
+    @discardableResult
+    private func makeBlankTab(in space: UUID) -> BrowserTab {
+        let tab = BrowserTab(saved: SavedBrowserTab(spaceID: space))
+        if Self.newTabPageEnabled { tab.session.showsNewTabPage = true } else { tab.session.focusSearchWhenReady = true }
+        tabs.append(tab); observe(tab)
+        return tab
+    }
+
+    func switchSpace(to id: UUID) {
+        guard V26Prefs.spacesEnabled(), id != activeSpaceID, spaces.contains(where: { $0.id == id }) else { return }
+        Self.active = self
+        if peekTab != nil { closePeek() }
+        lastSelectedBySpace[activeSpaceID] = selectedID
+        let target = SpaceLogic.selectionAfterSwitch(to: id, lastSelected: lastSelectedBySpace, members: spaceMembers,
+                                                     spaces: spaces, pinnedEverywhere: V26Prefs.pinnedEverywhere())
+        leaveCurrent()                    // PiP/pauze zoals bij een gewone tabwissel
+        activeSpaceID = id                // eerst de Space, dan de selectie (die hoort er dan al bij)
+        SpaceStore.saveActive(id)
+        if let target, let tab = tabs.first(where: { $0.id == target }) {
+            selectedID = tab.id; tab.lastActive = Date()
+        } else {
+            selectedID = makeBlankTab(in: id).id
+        }
+        persist()
+    }
+    func switchSpace(index: Int) {
+        guard index >= 0, index < spaces.count else { return }
+        switchSpace(to: spaces[index].id)
+    }
+    func switchToNeighbourSpace(_ offset: Int) {
+        if let id = SpaceLogic.neighbour(of: activeSpaceID, in: spaces, offset: offset) { switchSpace(to: id) }
+    }
+    @discardableResult
+    func addSpace(named name: String = "New Space", switchTo: Bool = true) -> BrowserSpace? {
+        guard spaces.count < SpaceLogic.maximumCount else {
+            selected.session.showNotice(.information, "Maximum number of Spaces", "JoeToep supports up to \(SpaceLogic.maximumCount) Spaces.")
+            return nil
+        }
+        let space = SpaceLogic.makeSpace(named: name, existing: spaces)
+        spaces.append(space)
+        if switchTo { switchSpace(to: space.id) }
+        return space
+    }
+    func updateSpace(_ id: UUID, name: String? = nil, symbol: String? = nil, color: String? = nil) {
+        guard let i = spaces.firstIndex(where: { $0.id == id }) else { return }
+        var space = spaces[i]
+        if let name { space.name = SpaceLogic.cleanName(name) }
+        if let symbol, !symbol.trimmingCharacters(in: .whitespaces).isEmpty { space.symbol = String(symbol.trimmingCharacters(in: .whitespaces).prefix(40)) }
+        if let color, SpaceLogic.palette.contains(color) { space.color = color }
+        spaces[i] = space
+    }
+    func moveSpace(_ id: UUID, by offset: Int) { spaces = SpaceLogic.moving(id, by: offset, in: spaces) }
+    /// Space verwijderen: de tabs gaan naar de Space ervoor (of worden gesloten). De laatste Space blijft.
+    func deleteSpace(_ id: UUID, closingTabs: Bool) {
+        guard let result = SpaceLogic.removing(id, from: spaces) else { return }
+        let members = tabs.filter { SpaceLogic.resolve($0.spaceID, in: spaces) == id }
+        let wasActive = id == activeSpaceID
+        if wasActive { switchSpace(to: result.fallback) }
+        batching {
+            for tab in members {
+                if closingTabs && !tab.pinned && tabs.count > 1 { close(tab) } else { tab.spaceID = result.fallback }
+            }
+            for i in groups.indices where SpaceLogic.resolve(groups[i].spaceID, in: spaces) == id { groups[i].spaceID = result.fallback }
+            spaces = result.spaces
+            if !spaces.contains(where: { $0.id == activeSpaceID }) { activeSpaceID = result.fallback; SpaceStore.saveActive(result.fallback) }
+            lastSelectedBySpace[id] = nil
+            persist()
+        }
+    }
+    /// Tab naar een andere Space verplaatsen. Was hij geselecteerd, dan gaat de Space mee (je raakt hem niet kwijt).
+    func moveTab(_ tab: BrowserTab, toSpace id: UUID) {
+        guard spaces.contains(where: { $0.id == id }), spaceID(of: tab) != id else { return }
+        if split?.contains(tab.id) == true { split = nil }
+        if let group = tab.groupID, let g = groups.first(where: { $0.id == group }), SpaceLogic.resolve(g.spaceID, in: spaces) != id { tab.groupID = nil }
+        tab.spaceID = id
+        if tab.id == selectedID {
+            lastSelectedBySpace[activeSpaceID] = nil
+            activeSpaceID = id; SpaceStore.saveActive(id)
+        }
+        persist()
+    }
+    private func reloadSpacesFromStore() {
+        reloadingSpaces = true
+        spaces = SpaceStore.load()
+        reloadingSpaces = false
+        if !spaces.contains(where: { $0.id == activeSpaceID }) { activeSpaceID = spaces[0].id }
+    }
+
+    // MARK: Split View
+
+    var splitAvailable: Bool { V26Prefs.splitEnabled() }
+    /// Is deze tab nu op het scherm (de geselecteerde, of het andere paneel van Split View)?
+    func isOnScreen(_ tab: BrowserTab) -> Bool { tab.id == selectedID || (split?.contains(tab.id) ?? false) }
+    /// Split View openen: de huidige tab links, rechts `other` (of de vorige recente tab, of een nieuwe tab).
+    func openSplit(with other: BrowserTab? = nil) {
+        guard splitAvailable else { return }
+        if peekTab != nil { closePeek() }
+        let current = selected
+        var partner = other.flatMap { o in tabs.first { $0.id == o.id } }
+        if partner == nil, let id = SplitLayout.partnerCandidate(for: current.id, recent: recent, order: visibleTabs.map(\.id)) {
+            partner = tabs.first { $0.id == id }
+        }
+        if partner == nil || partner?.id == current.id {
+            let blank = BrowserTab(saved: SavedBrowserTab(spaceID: current.spaceID ?? activeSpaceID))
+            if Self.newTabPageEnabled { blank.session.showsNewTabPage = true } else { blank.session.focusSearchWhenReady = true }
+            let index = (tabs.firstIndex { $0.id == current.id } ?? tabs.count - 1) + 1
+            tabs.insert(blank, at: min(max(index, tabs.filter(\.pinned).count), tabs.count)); observe(blank)
+            partner = blank
+        }
+        guard let partner, partner.id != current.id else { return }
+        if spaceID(of: partner) != spaceID(of: current) && !(partner.pinned && V26Prefs.pinnedEverywhere()) { partner.spaceID = current.spaceID }
+        split = SplitPair(primary: current.id, secondary: partner.id, fraction: V26Prefs.splitFraction(), vertical: V26Prefs.splitVertical())
+        partner.lastActive = Date()
+        persist()
+    }
+    func toggleSplit() { if split == nil { openSplit() } else { closeSplit() } }
+    /// Split View sluiten; `keeping` (standaard de tab met focus) blijft over, het andere paneel pauzeert.
+    func closeSplit(keeping id: UUID? = nil) {
+        guard let pair = split else { return }
+        let keep = id.flatMap { pair.contains($0) ? $0 : nil } ?? selectedID
+        split = nil
+        if keep != selectedID, tabs.contains(where: { $0.id == keep }) { selectedID = keep }
+        if let otherID = pair.partner(of: keep), let other = tabs.first(where: { $0.id == otherID }),
+           other.session.isPlaying, !other.session.isInPictureInPicture {
+            other.session.pauseForTabSwitch()
+        }
+    }
+    /// Focus naar het andere paneel: geen pauze, geen PiP — beide pagina's blijven zichtbaar.
+    func focusPane(_ id: UUID) {
+        guard let pair = split, pair.contains(id), id != selectedID, let tab = tabs.first(where: { $0.id == id }) else { return }
+        Self.active = self
+        selected.lastActive = Date()
+        recent.removeAll { $0 == selectedID }; recent.append(selectedID)
+        selectedID = id; tab.lastActive = Date(); persist()
+    }
+    func swapSplitPanes() { if let pair = split { split = pair.swapped() } }
+    func toggleSplitOrientation() { if var pair = split { pair.vertical.toggle(); split = pair } }
+    func setSplitFraction(_ fraction: Double) {
+        guard var pair = split else { return }
+        pair.fraction = SplitLayout.clamp(fraction)
+        if pair != split { split = pair }
+    }
+
+    // MARK: Peek
+
+    /// Link in een zwevend voorbeeld openen (⇧-klik op de Mac, "Open in Peek" in het linkmenu).
+    func openPeek(_ url: URL, from source: BrowserTab?) {
+        guard V26Prefs.peekEnabled() else { openInNewTab(url, activate: true, from: source); return }
+        Self.active = self
+        if peekTab != nil { closePeek() }
+        let opener = source ?? selected
+        let tab = BrowserTab(saved: SavedBrowserTab(url: url, spaceID: opener.spaceID ?? activeSpaceID), privateMode: opener.isPrivate)
+        tab.session.userActivatedAt = Date()
+        tab.openerID = opener.id
+        tab.session.onOpenInNewTab = { [weak self] url, activate in self?.openInNewTab(url, activate: activate, from: opener) }
+        tab.session.onPeek = { [weak tab] url in tab?.session.load(url) }   // ⇧-klik ín Peek: daar verder
+        tab.session.onCannotGoBack = { [weak self] in self?.closePeek() }
+        // Speelt er iets in Peek, dan pauzeren de andere tabs (één video tegelijk).
+        peekObserver = tab.session.$isPlaying.removeDuplicates().sink { [weak self, weak tab] playing in
+            guard playing, let self, let tab else { return }
+            self.handOver(to: tab)
+            self.pauseOtherWindows(for: tab)
+        }
+        peekTab = tab
+    }
+    func closePeek() {
+        guard let tab = peekTab else { return }
+        peekObserver = nil
+        peekTab = nil
+        tab.session.closeTab()
+    }
+    /// Peek wordt een gewone tab (rechts naast de tab waaruit hij kwam) en krijgt de focus.
+    func expandPeek(split splitWithOpener: Bool = false) {
+        guard let tab = peekTab else { return }
+        peekObserver = nil
+        peekTab = nil
+        let opener = tab.openerID.flatMap { id in tabs.first { $0.id == id } } ?? selected
+        tab.session.onPeek = nil; tab.session.onCannotGoBack = nil
+        let index = (tabs.firstIndex { $0.id == opener.id } ?? tabs.count - 1) + 1
+        tabs.insert(tab, at: min(max(index, tabs.filter(\.pinned).count), tabs.count))
+        observe(tab)
+        if splitWithOpener && splitAvailable {
+            if opener.id != selectedID { leaveCurrent(); selectedID = opener.id }
+            openSplit(with: tab)
+            focusPane(tab.id)
+        } else {
+            leaveCurrent()
+            selectedID = tab.id
+        }
+        tab.lastActive = Date()
+        persist()
     }
 }
 
@@ -1293,6 +1589,15 @@ struct WorkspaceActions {
     var forceRefresh: () -> Void = {}
     var duplicateTab: () -> Void = {}
     var copyLink: () -> Void = {}
+    // V26: Arc/Dia-functies.
+    var toggleSplit: () -> Void = {}
+    var toggleAssistant: () -> Void = {}
+    var editBoost: () -> Void = {}
+    var zap: () -> Void = {}
+    var newSpace: () -> Void = {}
+    var nextSpace: () -> Void = {}
+    var previousSpace: () -> Void = {}
+    var selectSpace: (Int) -> Void = { _ in }
 }
 extension Notification.Name {
     /// Object: the WebSession whose tab should present Settings (Cmd+,).
@@ -1322,6 +1627,18 @@ struct PlayerShellView: View {
     @State private var sidebarPeek = false
     private var useSidebar: Bool { SidebarPrefs.enabled(sidebarSetting) }
     @State private var windowIsFullscreen = false
+    @AppStorage(V26Prefs.Key.assistantWidth) private var assistantWidthSetting = 340.0
+    /// V26: assistent als zijpaneel (Mac/iPad) of als blad (iPhone).
+    private var assistantAsSidePanel: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom != .phone
+        #else
+        true
+        #endif
+    }
+    private var assistantWidth: CGFloat { CGFloat(min(max(assistantWidthSetting, 280), 560)) }
+    /// V26: verandert alleen bij openen/sluiten/draaien van Split View (niet tijdens het slepen van de lijn).
+    private var splitShape: String { workspace.split.map { "\($0.primary)|\($0.secondary)|\($0.vertical)" } ?? "" }
     private var oneBar: Bool { LayoutPrefs.oneBar(oneBarSetting) }
     private var oneBarInTitlebar: Bool {
         #if os(macOS)
@@ -1362,13 +1679,21 @@ struct PlayerShellView: View {
             editAddress: { if CommandBarPrefs.overlayForAddress { workspace.requestEditAddress() } else { editingAddress = true } }, find: showFind,
             toggleBookmark: toggleBookmark, showLibrary: { showingLibrary = true },
             nextTab: workspace.selectNext, previousTab: workspace.selectPrevious,
-            selectTab: { index in index >= 8 ? workspace.select(index: workspace.tabs.count - 1) : workspace.select(index: index) },
+            selectTab: { index in index >= 8 ? workspace.select(index: workspace.visibleTabs.count - 1) : workspace.select(index: index) },
             goBack: { workspace.selected.session.goBack() }, goForward: { workspace.selected.session.goForward() },
             zoomIn: { workspace.selected.session.zoom(by: 0.1) }, zoomOut: { workspace.selected.session.zoom(by: -0.1) },
             resetZoom: { workspace.selected.session.resetZoom() }, togglePin: { workspace.togglePin(workspace.selected) },
             recentTab: workspace.selectRecent, forceRefresh: { workspace.selected.session.forceRefresh() },
             duplicateTab: { workspace.duplicate(workspace.selected) },
-            copyLink: { if let url = workspace.selected.currentURL { Clipboard.copy(url) } })
+            copyLink: { if let url = workspace.selected.currentURL { Clipboard.copy(url) } },
+            toggleSplit: { if V26Prefs.splitEnabled() { withAnimation(Motion.quick(0.22)) { workspace.toggleSplit() } } },
+            toggleAssistant: { if V26Prefs.assistantEnabled() { withAnimation(Motion.quick()) { workspace.showAssistant.toggle() } } },
+            editBoost: { if workspace.selected.session.boostSite != nil { workspace.showBoostEditor = true } },
+            zap: { workspace.selected.session.isZapping ? workspace.selected.session.stopZap() : workspace.selected.session.startZap() },
+            newSpace: { if V26Prefs.spacesEnabled() { withAnimation(Motion.quick()) { workspace.addSpace() } } },
+            nextSpace: { if V26Prefs.spaceShortcuts() { withAnimation(Motion.quick()) { workspace.switchToNeighbourSpace(1) } } },
+            previousSpace: { if V26Prefs.spaceShortcuts() { withAnimation(Motion.quick()) { workspace.switchToNeighbourSpace(-1) } } },
+            selectSpace: { index in if V26Prefs.spaceShortcuts() { withAnimation(Motion.quick()) { workspace.switchSpace(index: index) } } })
     }
     /// V21: linker- of rechterdeel van de knoppen, voor de ene balk.
     private func oneBarPart(_ part: PlayerControlBar.Part) -> some View {
@@ -1459,15 +1784,9 @@ struct PlayerShellView: View {
                     .transition(autoHideAnimated ? .move(edge: .top).combined(with: .opacity) : .identity)
             }
             ZStack(alignment: .top) {
-                ForEach(workspace.tabs) { tab in
-                    TabPlayerView(settings: settings, session: tab.session, selected: workspace.selectedID == tab.id,
-                                  actions: actions)
-                        .opacity(workspace.selectedID == tab.id ? 1 : 0)
-                        .allowsHitTesting(workspace.selectedID == tab.id)
-                        .accessibilityHidden(workspace.selectedID != tab.id)
-                        .zIndex(workspace.selectedID == tab.id ? 1 : 0)
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                }
+                // V26: één tab, of twee in Split View (zie Views/V26Views.swift). Elke tab behoudt zijn webview.
+                WorkspaceTabStack(workspace: workspace, settings: settings, actions: actions)
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 if editingAddress {
                     // V16: tapping/clicking anywhere else closes the address bar.
                     Color.black.opacity(0.001).contentShape(Rectangle())
@@ -1487,6 +1806,7 @@ struct PlayerShellView: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity).clipped()
             .animation(theme.anim(.tabs), value: workspace.selectedID)
+            .animation(Motion.quick(0.22), value: splitShape)
             .animation(theme.anim(.findBar), value: findVisible)
             .overlay(alignment: .top) {
                 if chrome.hidden && autoHideRevealEdge { AutoHideRevealZone(height: 8) }
@@ -1502,7 +1822,15 @@ struct PlayerShellView: View {
                 }
             }
         }
+        // V26: pagina-assistent als zijpaneel rechts (Mac/iPad; op iPhone een blad).
+        if workspace.showAssistant && assistantAsSidePanel {
+            Rectangle().fill(theme.style.separator.opacity(0.4)).frame(width: 0.5)
+            PageAssistantPanel(workspace: workspace)
+                .frame(width: assistantWidth)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         }
+        }
+        .animation(Motion.quick(0.22), value: workspace.showAssistant)
         .animation(Motion.quick(0.22), value: sidebarHidden)
         .animation(Motion.quick(0.18), value: sidebarPeek)
         .onReceive(NotificationCenter.default.publisher(for: .joeToepToggleSidebar)) { _ in
@@ -1511,6 +1839,15 @@ struct PlayerShellView: View {
         }
         // V22.2: via Motion → respecteert "Animaties uit" en de snelheid.
         .animation(autoHideAnimated ? Motion.fade(0.25) : nil, value: chrome.hidden)
+        // V26: Peek — zwevend voorbeeld van een link (onder de zoekbalk, boven al het andere).
+        .overlay {
+            if let peek = workspace.peekTab {
+                PeekOverlay(workspace: workspace, tab: peek, settings: settings)
+                    .transition(.scale(scale: 0.97).combined(with: .opacity))
+                    .zIndex(15)
+            }
+        }
+        .animation(Motion.fade(0.18), value: workspace.peekTab?.id)
         // V21: zwevende zoekbalk (Arc-stijl) boven de pagina.
         .overlay {
             if workspace.showCommandBar {
@@ -1539,6 +1876,31 @@ struct PlayerShellView: View {
                 #endif
         }
         .focusedSceneValue(\.workspaceActions, actions)
+        // V26: Space bewerken, Boost-bewerker en (iPhone) de pagina-assistent als blad.
+        .sheet(isPresented: Binding(get: { workspace.editingSpaceID != nil }, set: { if !$0 { workspace.editingSpaceID = nil } })) {
+            if let id = workspace.editingSpaceID {
+                SpaceEditorSheet(workspace: workspace, spaceID: id)
+                    .environment(\.joeToepTheme, theme)
+                    .preferredColorScheme(theme.style.colorScheme)
+                    .tint(theme.accent)
+            }
+        }
+        .sheet(isPresented: $workspace.showBoostEditor) {
+            BoostEditorView(workspace: workspace, session: workspace.selected.session)
+                .environment(\.joeToepTheme, theme)
+                .preferredColorScheme(theme.style.colorScheme)
+                .tint(theme.accent)
+        }
+        .sheet(isPresented: Binding(get: { workspace.showAssistant && !assistantAsSidePanel },
+                                    set: { if !$0 { workspace.showAssistant = false } })) {
+            PageAssistantPanel(workspace: workspace)
+                .environment(\.joeToepTheme, theme)
+                .preferredColorScheme(theme.style.colorScheme)
+                .tint(theme.accent)
+                #if os(iOS)
+                .presentationDetents([.medium, .large])
+                #endif
+        }
         // V17: dit venster wordt "actief" zodra het verschijnt; op de Mac starten we dan ook de
         // monitors voor muis-zijknoppen, ⌘←/⌘→ en trackpad-vegen (één keer voor de hele app).
         // V17.1: een link van buitenaf (JoeToep als standaardbrowser, of "Open met") → nieuwe tab.
@@ -1610,6 +1972,17 @@ struct PlayerShellView: View {
                 Button("Previous tab") { workspace.selectPrevious() }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Back") { workspace.selected.session.goBack() }.keyboardShortcut("[", modifiers: .command)
                 Button("Forward") { workspace.selected.session.goForward() }.keyboardShortcut("]", modifiers: .command)
+                // V26: Arc/Dia-sneltoetsen (iPad met toetsenbord).
+                Button("Split View") { actions.toggleSplit() }.keyboardShortcut("\\", modifiers: [.command, .shift])
+                Button("Page Assistant") { actions.toggleAssistant() }.keyboardShortcut("e", modifiers: .command)
+                Button("Boost") { actions.editBoost() }.keyboardShortcut("b", modifiers: [.command, .option])
+                Button("New Space") { actions.newSpace() }.keyboardShortcut("n", modifiers: [.command, .control])
+                Button("Next Space") { actions.nextSpace() }.keyboardShortcut("]", modifiers: [.command, .control])
+                Button("Previous Space") { actions.previousSpace() }.keyboardShortcut("[", modifiers: [.command, .control])
+                ForEach(1..<10) { number in
+                    Button("Space \(number)") { actions.selectSpace(number - 1) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .control)
+                }
                 ForEach(1..<10) { number in
                     Button("Tab \(number)") { actions.selectTab(number - 1) }
                         .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command)
