@@ -1347,6 +1347,7 @@ final class BrowserWorkspace: ObservableObject {
     private func selectionChanged(from previous: UUID) {
         if let pair = split, !pair.contains(selectedID) {
             split = nil
+            defer { discardUntouchedSplitBlank(keeping: selectedID) }
             for id in [pair.primary, pair.secondary] where id != previous {
                 guard let other = tabs.first(where: { $0.id == id }), other.session.isPlaying, !other.session.isInPictureInPicture else { continue }
                 other.session.pauseForTabSwitch()
@@ -1467,6 +1468,7 @@ final class BrowserWorkspace: ObservableObject {
         guard splitAvailable else { return }
         if peekTab != nil { closePeek() }
         let current = selected
+        splitBlankID = nil
         var partner = other.flatMap { o in tabs.first { $0.id == o.id } }
         if partner == nil, let id = SplitLayout.partnerCandidate(for: current.id, recent: recent, order: visibleTabs.map(\.id)) {
             partner = tabs.first { $0.id == id }
@@ -1477,6 +1479,7 @@ final class BrowserWorkspace: ObservableObject {
             let index = (tabs.firstIndex { $0.id == current.id } ?? tabs.count - 1) + 1
             tabs.insert(blank, at: min(max(index, tabs.filter(\.pinned).count), tabs.count)); observe(blank)
             partner = blank
+            splitBlankID = blank.id   // V26.1: door de split gemaakt → bij sluiten weer opruimen als hij leeg bleef
         }
         guard let partner, partner.id != current.id else { return }
         if spaceID(of: partner) != spaceID(of: current) && !(partner.pinned && V26Prefs.pinnedEverywhere()) { partner.spaceID = current.spaceID }
@@ -1485,12 +1488,25 @@ final class BrowserWorkspace: ObservableObject {
         persist()
     }
     func toggleSplit() { if split == nil { openSplit() } else { closeSplit() } }
+    /// V26.1: de lege tab die `openSplit` zelf als tweede paneel maakte. Bleef hij leeg (nooit een pagina geopend),
+    /// dan verdwijnt hij weer als de split eindigt — anders bleef bij elke split een lege Home-tab achter.
+    private var splitBlankID: UUID?
+    private func discardUntouchedSplitBlank(keeping keep: UUID) {
+        guard let id = splitBlankID else { return }
+        splitBlankID = nil
+        // Onaangeroerd = toont nog de nieuwe-tabpagina (daaronder laadt wel de startpagina, dus currentURL is niet nil)
+        // of heeft nog helemaal niets geladen.
+        guard id != keep, let blank = tabs.first(where: { $0.id == id }), !blank.pinned,
+              blank.session.showsNewTabPage || blank.currentURL == nil else { return }
+        close(blank, remember: false)
+    }
     /// Split View sluiten; `keeping` (standaard de tab met focus) blijft over, het andere paneel pauzeert.
     func closeSplit(keeping id: UUID? = nil) {
         guard let pair = split else { return }
         let keep = id.flatMap { pair.contains($0) ? $0 : nil } ?? selectedID
         split = nil
         if keep != selectedID, tabs.contains(where: { $0.id == keep }) { selectedID = keep }
+        defer { discardUntouchedSplitBlank(keeping: keep) }
         if let otherID = pair.partner(of: keep), let other = tabs.first(where: { $0.id == otherID }),
            other.session.isPlaying, !other.session.isInPictureInPicture {
             other.session.pauseForTabSwitch()

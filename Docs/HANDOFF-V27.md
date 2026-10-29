@@ -51,7 +51,7 @@ Herstelde videotab ging fullscreen tijdens YouTube's korte autoplay-blip (vóór
 ## Mac-tests ronde 2 (26.1)
 OK: fullscreen F/Esc/spatie, Zap (na fix), Undo/Done, instellingenpagina V26, stresstest (geen crash, geheugen stabiel).
 Opgelost: Zap koos YouTube's onzichtbare `yt-touch-feedback-shape` → `meaningful()` in `boosts.js`.
-Open: Split View in een Space met één tab laat een lege Home-tab achter; Peek niet getest (⇧-klik/rechtsklik kan niet op de achtergrond).
+Opgelost: lege Home-tab na Split View (`splitBlankID` + `discardUntouchedSplitBlank` in `BrowserWorkspace`). Wisselvallig: `testPaletteCommandsAreUniqueAndFindable` (1× rood in volle run). Open: Peek niet getest (⇧-klik/rechtsklik kan niet op de achtergrond).
 Les voor computer use: een tab kiezen met een AX-klik werkt niet (raakt een binnenknop); gebruik het menu Tabs › Show Next/Previous Tab.
 
 ## Afvinklijst voor Tijn (eiFoon, iPad, Watch)

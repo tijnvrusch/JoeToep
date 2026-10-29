@@ -142,6 +142,20 @@ final class V26FeatureTests: XCTestCase {
         XCTAssertNil(ws.split, "Split View off in Settings → nothing happens")
     }
 
+    // V26.1: de lege tab die Split View zelf maakte, blijft na sluiten niet als lege Home-tab achter.
+    func testSplitRemovesItsUntouchedBlankTabWhenClosed() {
+        let ws = makeWorkspace()
+        let only = ws.selected
+        for _ in 0..<5 { ws.openSplit(); ws.closeSplit(keeping: only.id) }
+        XCTAssertEqual(ws.tabs.count, 1, "5× open/close → still just the one tab")
+        XCTAssertEqual(ws.selectedID, only.id)
+        ws.openSplit()
+        let blank = ws.tabs.first { $0.id != only.id }!
+        ws.select(blank)                      // focus naar het lege paneel en dat houden
+        ws.closeSplit()
+        XCTAssertTrue(ws.tabs.contains { $0.id == blank.id }, "the pane you keep is never thrown away")
+    }
+
     func testPeekIsNotATabUntilExpanded() throws {
         let ws = makeWorkspace()
         let opener = ws.selected
