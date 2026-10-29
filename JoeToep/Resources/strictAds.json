@@ -1,0 +1,68 @@
+[
+  {
+    "trigger": {
+      "url-filter": "^https?://([a-z0-9-]+\\.)*youtube\\.com/pcs/activeview[/?]",
+      "if-domain": [
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com"
+      ]
+    },
+    "action": {
+      "type": "block"
+    }
+  },
+  {
+    "trigger": {
+      "url-filter": "^https?://([a-z0-9-]+\\.)*youtube\\.com/pcs/activeview$",
+      "if-domain": [
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com"
+      ]
+    },
+    "action": {
+      "type": "block"
+    }
+  },
+  {
+    "trigger": {
+      "url-filter": "^https?://([a-z0-9-]+\\.)*youtube\\.com/api/stats/atr[/?]",
+      "if-domain": [
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com"
+      ]
+    },
+    "action": {
+      "type": "block"
+    }
+  },
+  {
+    "trigger": {
+      "url-filter": "^https?://([a-z0-9-]+\\.)*youtube\\.com/api/stats/atr$",
+      "if-domain": [
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com"
+      ]
+    },
+    "action": {
+      "type": "block"
+    }
+  },
+  {
+    "trigger": {
+      "url-filter": ".*",
+      "if-domain": [
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com"
+      ]
+    },
+    "action": {
+      "type": "css-display-none",
+      "selector": "ytd-promoted-sparkles-text-search-renderer, ytm-promoted-sparkles-text-search-renderer, ytd-search-pyv-renderer"
+    }
+  }
+]

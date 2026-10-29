@@ -1,0 +1,4 @@
+Pillow==12.3.0
+cssselect2==0.10.1
+tree-sitter==0.26.0
+tree-sitter-swift==0.7.3

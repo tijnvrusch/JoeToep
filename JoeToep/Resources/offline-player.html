@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>JoeToep offline test fixture</title>
+<style>
+html,body { margin:0; background:#0c0c0e; color:#eee; font:16px system-ui; width:100%; }
+main { max-width:960px; margin:auto; padding:12px; box-sizing:border-box; }
+video { display:block; width:100%; max-height:65vh; background:black; }
+button { font:inherit; padding:12px 18px; margin:8px 4px; color:white; background:#2b2b30; border:0; border-radius:8px; }
+#state { overflow-wrap:anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>Offline player fixture</h1>
+<video id="fixture" class="html5-main-video" controls playsinline loop preload="metadata" src="fixture.mp4"></video>
+<button id="play">Play test video</button>
+<button id="pause">Pause test video</button>
+<button id="reset-clock">Reset test clock</button>
+<button id="fullscreen">Fullscreen test video</button>
+<button id="safe-fullscreen">Safe fullscreen test</button>
+<button id="pip">Native PiP gesture</button>
+<p id="state">Ready · no network required</p>
+</main>
+<script>
+const video = document.getElementById("fixture");
+const state = document.getElementById("state");
+document.getElementById("play").onclick = () => { video.play().catch(e => { state.textContent = e.message; }); };
+document.getElementById("pause").onclick = () => video.pause();
+document.getElementById("reset-clock").onclick = () => { window.JoeToepMedia.remoteAction("pause");video.currentTime=0;video.volume=.7; };
+document.getElementById("safe-fullscreen").onclick = () => window.JoeToepStage?.enter();
+document.getElementById("fullscreen").onclick = () => {
+  if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  else video.requestFullscreen?.().catch(e => { state.textContent = e.message; });
+};
+document.getElementById("pip").onclick = () => {
+  try {
+    if (video.webkitSupportsPresentationMode?.("picture-in-picture")) video.webkitSetPresentationMode("picture-in-picture");
+    else video.requestPictureInPicture?.().catch(e => { state.textContent = e.message; });
+  } catch(e) { state.textContent = e.message; }
+};
+for (const event of ["play","playing","pause","ended"]) video.addEventListener(event, () => { state.textContent = "State: " + event; });
+</script>
+</body>
+</html>
