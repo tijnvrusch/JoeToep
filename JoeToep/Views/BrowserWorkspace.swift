@@ -153,6 +153,7 @@ final class BrowserWorkspace: ObservableObject {
         sync.owner = self
         sync.onSnapshot = { [weak self] snapshot, merge in self?.applyRemote(snapshot, merge: merge) }
         sync.onCommand = { [weak self] command in self?.perform(command) }
+        sync.onPlaybackState = { [weak self] snapshot in self?.notePlayback(from: snapshot) }
     }
 
     /// V19.1 — Apparaatwissel: begin je hier een video die op een ander apparaat nog speelt
@@ -205,7 +206,9 @@ final class BrowserWorkspace: ObservableObject {
         case .handoffRequest:
             // Een ander apparaat neemt het over: hier pauzeren en de exacte tijd terugsturen.
             guard let from = command.from else { return }
-            let tab = tabs.first { SyncDiff.sameDestination($0.currentURL, command.url) && $0.session.isPlaying } ?? mediaTab
+            // V22.2: alleen de tab met DEZE video — nooit een andere video pauzeren of zijn tijd terugsturen.
+            guard let tab = tabs.first(where: { SyncDiff.sameDestination($0.currentURL, command.url) && ($0.session.isPlaying || $0.session.isInPictureInPicture) })
+                    ?? tabs.first(where: { SyncDiff.sameDestination($0.currentURL, command.url) }) else { return }
             let url = command.url
             tab.session.pauseAndReportTime { time in
                 guard let time else { return }
@@ -278,6 +281,28 @@ final class BrowserWorkspace: ObservableObject {
         localHandoff = nil; forceNextPublish = true; publishSync()
     }
 
+    /// V22.2: per apparaat het laatst ontvangen tijdstip (sentAt), zodat een oud bericht de stand niet terugdraait.
+    private var playbackSeenAt: [String: Date] = [:]
+    /// V22.2: wat speelt het andere apparaat? Ook bijgewerkt uit snapshots die de tab-vergelijking verloren
+    /// (anders bleef een pauze daar onopgemerkt en nam dit apparaat later op een verkeerde tijd over).
+    func notePlayback(from snapshot: SyncSnapshot) {
+        if let seen = playbackSeenAt[snapshot.origin], snapshot.sentAt < seen { return }
+        playbackSeenAt[snapshot.origin] = snapshot.sentAt
+        // V21: onthoud wat het andere apparaat NU speelt (voor automatisch overnemen bij wisselen).
+        if let playing = snapshot.playingID, let remote = snapshot.tabs.first(where: { $0.id == playing }), let url = remote.url {
+            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: playing, url: url, time: remote.time ?? 0, receivedAt: Date())
+        } else if let hid = snapshot.handoffID, let remote = snapshot.tabs.first(where: { $0.id == hid }), let url = remote.url,
+                  !Self.consumedHandoffs.contains("\(snapshot.origin):\(hid)") {
+            // V22: het andere apparaat ging naar de achtergrond terwijl dit speelde → hier verder, exact op die tijd.
+            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: hid, url: url,
+                                            time: snapshot.handoffTime ?? remote.time ?? 0, receivedAt: Date(), paused: true,
+                                            handoffKey: "\(snapshot.origin):\(hid)")
+        } else if remotePlayback?.device == snapshot.origin {
+            remotePlayback = nil          // daar gepauzeerd/gestopt → niets over te nemen
+            if sentAway?.device == snapshot.origin { sentAway = nil }
+        }
+    }
+
     /// Past de tabs van een ander apparaat hier toe: nieuwe tabs erbij, gesloten tabs weg,
     /// dezelfde volgorde en selectie, en de video op dezelfde plek.
     func applyRemote(_ snapshot: SyncSnapshot, merge: Bool = false) {
@@ -288,19 +313,7 @@ final class BrowserWorkspace: ObservableObject {
             // zodat iedereen op dezelfde (volledige) lijst uitkomt.
             if merge { publishSync() }
         }
-        // V21: onthoud wat het andere apparaat NU speelt (voor automatisch overnemen bij wisselen).
-        if let playing = snapshot.playingID, let remote = snapshot.tabs.first(where: { $0.id == playing }), let url = remote.url {
-            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: playing, url: url, time: remote.time ?? 0, receivedAt: Date())
-        } else if let hid = snapshot.handoffID, let remote = snapshot.tabs.first(where: { $0.id == hid }), let url = remote.url,
-                  !Self.consumedHandoffs.contains("\(snapshot.origin):\(hid):\(Int(snapshot.handoffTime ?? 0))") {
-            // V22: het andere apparaat ging naar de achtergrond terwijl dit speelde → hier verder, exact op die tijd.
-            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: hid, url: url,
-                                            time: snapshot.handoffTime ?? remote.time ?? 0, receivedAt: Date(), paused: true,
-                                            handoffKey: "\(snapshot.origin):\(hid):\(Int(snapshot.handoffTime ?? 0))")
-        } else if remotePlayback?.device == snapshot.origin {
-            remotePlayback = nil          // daar gepauzeerd/gestopt → niets over te nemen
-            if sentAway?.device == snapshot.origin { sentAway = nil }
-        }
+        notePlayback(from: snapshot)
         // 1. Speelt het andere apparaat? Dan stoppen we hier (één apparaat tegelijk).
         if snapshot.playingID != nil {
             for tab in tabs where tab.session.isPlaying || tab.session.isInPictureInPicture { tab.session.pauseForRemotePlayback() }
@@ -308,7 +321,10 @@ final class BrowserWorkspace: ObservableObject {
         let locals = tabs.filter { !$0.isPrivate }
         let diff = SyncDiff.plan(local: locals.map { ($0.id, $0.currentURL) }, remote: snapshot.tabs)
         // 2. Nieuwe tabs (eerst toevoegen, zodat er nooit nul tabs zijn).
-        for remote in diff.add {
+        // V22.2: bij het samenvoegen (eerste contact na een herstart) geen tabs terugbrengen die hier
+        // al gesloten waren — het andere apparaat had die sluiting gewoon nog niet gezien.
+        let closedHere = merge ? Self.closedSyncIDs : []
+        for remote in diff.add where !closedHere.contains(remote.id.uuidString) {
             let tab = BrowserTab(saved: SavedBrowserTab(id: remote.id, url: remote.url, time: remote.time, playing: false,
                                                         lastActive: Date(), pinned: remote.pinned ? true : nil, title: remote.title))
             tab.session.syncedStartPaused = true
@@ -390,9 +406,12 @@ final class BrowserWorkspace: ObservableObject {
         let tab = snap.playingID.flatMap { id in snap.tabs.first { $0.id == id } } ?? snap.tabs.first { $0.id == snap.selectedID }
         guard let tab, let url = tab.url else { return }
         // Speelt het daar nog: vanaf wanneer we die tijd kennen doorrekenen; anders precies die tijd.
-        let known = remotePlayback?.device == device ? remotePlayback?.receivedAt : nil
-        takeOver(RemotePlayback(device: device, tabID: tab.id, url: url, time: tab.time ?? 0,
-                                receivedAt: snap.playingID != nil ? (known ?? Date()) : Date()))
+        // V22.2: tijd én ontvangstmoment uit dezelfde bron (anders telde de verstreken tijd dubbel).
+        if let known = remotePlayback, known.device == device, known.tabID == tab.id {
+            takeOver(known); return
+        }
+        takeOver(RemotePlayback(device: device, tabID: tab.id, url: url, time: tab.time ?? 0, receivedAt: Date(),
+                                paused: snap.playingID == nil))
     }
 
     /// Pak de video over: tab kiezen, meteen spelen op de geschatte tijd, het andere apparaat laten
@@ -402,6 +421,8 @@ final class BrowserWorkspace: ObservableObject {
         get { UserDefaults.standard.stringArray(forKey: "consumedHandoffsV22") ?? [] }
         set { UserDefaults.standard.set(Array(newValue.suffix(20)), forKey: "consumedHandoffsV22") }
     }
+    /// V22.2: laatste automatische overname (tab + moment).
+    private var lastTakeover: (id: UUID, at: Date)?
     private func takeOver(_ remote: RemotePlayback) {
         remotePlayback = nil
         if let key = remote.handoffKey { Self.consumedHandoffs.append(key) }
@@ -412,6 +433,7 @@ final class BrowserWorkspace: ObservableObject {
         if let tab { target = tab } else {
             addTab(url: remote.url, activate: true, after: selected); target = selected
         }
+        lastTakeover = (target.id, Date())
         if target.id != selectedID { selected.session.leaveFullscreenForTabSwitch(); select(target) }
         pendingNavigation[target.id] = nil; pendingPosition[target.id] = nil
         let estimate = remote.estimatedTime() + (remote.paused ? 0 : HandoffPrefs.latencyCompensation)
@@ -603,7 +625,8 @@ final class BrowserWorkspace: ObservableObject {
     private func handOver(to tab: BrowserTab) {
         var closingPiP: [BrowserTab] = []      // tabs whose PiP window we are closing
         for other in tabs where other.id != tab.id {          // every tab except the new one
-            if other.session.isInPictureInPicture {
+            // V22.2: een lopend PiP-verzoek of startende native PiP telt ook als PiP.
+            if other.session.isInPictureInPicture || other.session.isPiPRequesting || other.session.isNativePiPStarting {
                 other.session.stopPiPAndPause()               // steps 1 + 2 for that tab
                 closingPiP.append(other)
             } else {
@@ -821,6 +844,14 @@ final class BrowserWorkspace: ObservableObject {
         // Eigen keuze gaat voor; de rest van wat het andere apparaat deed nu toepassen.
         pendingSelection = nil
         resumeFromOtherDevice(trigger: .tabSelection)
+        // V22.2: dezelfde tik startte net een automatische overname in een ándere tab, maar je kiest
+        // zelf deze tab → die overname terugdraaien (anders bleef hij op de achtergrond spelen).
+        if let t = lastTakeover, t.id != tab.id, Date().timeIntervalSince(t.at) < 2.5,
+           let other = tabs.first(where: { $0.id == t.id }) {
+            lastTakeover = nil
+            other.session.cancelPendingAutoplay()
+            TabSyncService.shared.noteHandoff("takeover cancelled: you picked another tab")
+        }
         guard tab.id != selectedID else { return }
         leaveCurrent()
         selectedID = tab.id; tab.lastActive = Date(); persist()
@@ -831,6 +862,23 @@ final class BrowserWorkspace: ObservableObject {
     }
     func selectNext() { select(index: (selectedIndex + 1) % max(tabs.count, 1)) }
     func selectPrevious() { select(index: (selectedIndex - 1 + tabs.count) % max(tabs.count, 1)) }
+    /// V22.2: "grafstenen" van gesloten tabs (max. 7 dagen / 300 stuks) voor de sync-samenvoeging.
+    static var closedSyncIDs: Set<String> {
+        let all = UserDefaults.standard.dictionary(forKey: "closedSyncIDsV22") as? [String: Double] ?? [:]
+        let cutoff = Date().timeIntervalSince1970 - 7 * 86_400
+        return Set(all.filter { $0.value > cutoff }.keys)
+    }
+    static func markClosed(_ id: UUID) {
+        var all = UserDefaults.standard.dictionary(forKey: "closedSyncIDsV22") as? [String: Double] ?? [:]
+        all[id.uuidString] = Date().timeIntervalSince1970
+        if all.count > 300 { for key in all.sorted(by: { $0.value < $1.value }).prefix(all.count - 300).map(\.key) { all[key] = nil } }
+        UserDefaults.standard.set(all, forKey: "closedSyncIDsV22")
+    }
+    static func unmarkClosed(_ id: UUID) {
+        var all = UserDefaults.standard.dictionary(forKey: "closedSyncIDsV22") as? [String: Double] ?? [:]
+        all[id.uuidString] = nil
+        UserDefaults.standard.set(all, forKey: "closedSyncIDsV22")
+    }
     func close(_ tab: BrowserTab) { close(tab, remember: true) }
     func close(_ tab: BrowserTab, remember: Bool) {
         guard tabs.count > 1 else {
@@ -840,6 +888,7 @@ final class BrowserWorkspace: ObservableObject {
             closedTabs.insert(Self.saved(tab), at: 0)
             if closedTabs.count > 25 { closedTabs.removeLast() }
         }
+        if !tab.isPrivate { Self.markClosed(tab.id) }
         tab.session.closeTab()
         playbackObservers[tab.id] = nil; urlObservers[tab.id] = nil; resumeObservers[tab.id] = nil; titleObservers[tab.id] = nil
         let index = tabs.firstIndex(where: { $0.id == tab.id })!
@@ -859,6 +908,7 @@ final class BrowserWorkspace: ObservableObject {
         guard !closedTabs.isEmpty else { return }
         var saved = closedTabs.removeFirst()
         saved.lastActive = Date()
+        Self.unmarkClosed(saved.id)
         leaveCurrent()
         let tab = BrowserTab(saved: saved)
         tabs.append(tab); observe(tab); selectedID = tab.id; persist()
@@ -877,6 +927,13 @@ final class BrowserWorkspace: ObservableObject {
         let pinnedCount = tabs.filter(\.pinned).count
         tabs.insert(tab, at: min(pinnedCount, tabs.count))
         persist()
+    }
+    /// V22.2: vastzetten/losmaken naar een vaste waarde (slepen in de zijbalk): herordent zoals
+    /// togglePin (op de grens van de vastgezette tabs) en slaat op.
+    func setPinned(_ tab: BrowserTab, _ pinned: Bool) {
+        if pinned { tab.groupID = nil }
+        guard tab.pinned != pinned else { persist(); return }
+        togglePin(tab)
     }
     /// V19.1: sleep-herordenen. Zet tab `id` op de plek van `target` (pinned en gewone tabs
     /// blijven elk in hun eigen groep). Geeft false terug als het niet kon.
@@ -1085,7 +1142,7 @@ struct PlayerShellView: View {
                         leadingInset: oneBarInTitlebarForSidebar && !windowIsFullscreen ? 70 : 0)
                 .transition(.move(edge: .leading).combined(with: .opacity))
                 #if os(macOS)
-                .onHover { inside in if !inside && sidebarHidden { withAnimation(.snappy) { sidebarPeek = false } } }
+                .onHover { inside in if !inside && sidebarHidden { withAnimation(Motion.quick()) { sidebarPeek = false } } }
                 #endif
             Rectangle().fill(theme.style.separator.opacity(0.4)).frame(width: 0.5)
         }
@@ -1143,27 +1200,28 @@ struct PlayerShellView: View {
                 if useSidebar && sidebarHidden && !sidebarPeek {
                     Color.black.opacity(0.001).frame(width: 6).contentShape(Rectangle())
                         #if os(macOS)
-                        .onHover { if $0 { withAnimation(.snappy) { sidebarPeek = true } } }
+                        .onHover { if $0 { withAnimation(Motion.quick()) { sidebarPeek = true } } }
                         #endif
-                        .onTapGesture { withAnimation(.snappy) { sidebarPeek = true } }
+                        .onTapGesture { withAnimation(Motion.quick()) { sidebarPeek = true } }
                 }
             }
         }
         }
-        .animation(.snappy(duration: 0.22), value: sidebarHidden)
-        .animation(.snappy(duration: 0.18), value: sidebarPeek)
+        .animation(Motion.quick(0.22), value: sidebarHidden)
+        .animation(Motion.quick(0.18), value: sidebarPeek)
         .onReceive(NotificationCenter.default.publisher(for: .joeToepToggleSidebar)) { _ in
             guard BrowserWorkspace.active === workspace || BrowserWorkspace.active == nil else { return }
             sidebarPeek = false; sidebarHidden.toggle()
         }
-        .animation(autoHideAnimated ? .easeInOut(duration: 0.25) : nil, value: chrome.hidden)
+        // V22.2: via Motion → respecteert "Animaties uit" en de snelheid.
+        .animation(autoHideAnimated ? Motion.fade(0.25) : nil, value: chrome.hidden)
         // V21: zwevende zoekbalk (Arc-stijl) boven de pagina.
         .overlay {
             if workspace.showCommandBar {
                 CommandBarOverlay(workspace: workspace, settings: settings).zIndex(20)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: workspace.showCommandBar)
+        .animation(Motion.fade(0.15), value: workspace.showCommandBar)
         // V21 (Mac): de ene balk staat helemaal bovenin, naast de venster-knopjes (zoals Safari).
         .ignoresSafeArea(.container, edges: (oneBarInTitlebar || oneBarInTitlebarForSidebar) && !chrome.tabsHidden ? .top : [])
         #if os(macOS)

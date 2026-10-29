@@ -93,7 +93,7 @@ struct TabBarView: View {
         while abs(remaining) > stride * 0.5 {
             let step = remaining > 0 ? 1 : -1
             var moved = false
-            withAnimation(.snappy(duration: 0.18)) { moved = workspace.stepTab(id: tab.id, by: step) }
+            withAnimation(Motion.quick(0.18)) { moved = workspace.stepTab(id: tab.id, by: step) }
             guard moved else { break }
             dragConsumed += CGFloat(step) * stride
             remaining = value.translation.width - dragConsumed
@@ -102,7 +102,7 @@ struct TabBarView: View {
         dragLift = max(-4, min(4, value.translation.height * 0.15))   // voelt mee, maar blijft in de balk
     }
     private func dragEnded() {
-        withAnimation(.snappy(duration: 0.2)) { dragOffset = 0; dragLift = 0; dragID = nil }
+        withAnimation(Motion.quick(0.2)) { dragOffset = 0; dragLift = 0; dragID = nil }
         dragConsumed = 0
         workspace.finishTabDrag()
     }

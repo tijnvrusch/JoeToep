@@ -1,3 +1,57 @@
+# 22.2.0 (32)
+
+## Fixes na uitgebreid testen (Mac, iPhone, iPad)
+- **Esc op de Mac** sluit nu altijd eerst de zoekbalk/overlay, Instellingen of de zoekbalk in de bibliotheek — ook als de video/webpagina de focus heeft. Alleen in het venster waar je drukt; zonder open paneel verlaat Esc gewoon fullscreen.
+- **Zwarte tab op iPhone/iPad opgelost**: als iOS het webproces van een tab op de achtergrond afsloot, bleef die tab leeg. Nu herstelt hij vanzelf (gepauzeerd, zonder fullscreen) zodra je hem weer ziet; met een rem tegen herstel-lussen.
+- **Webview raakt nooit meer "los"** na een mislukte fullscreen-/PiP-terugkeer (iOS en Mac): de tab pakt hem stil terug.
+- **"Pause Everything"** pauzeert nu écht alles, ook een video die net begon (wachtte eerst op een trage scan).
+- **Overdracht**: een overname-verzoek pauzeert alleen díe video, nooit een andere video op het andere apparaat; een overdracht wordt maar één keer overgenomen (ook als de exacte tijd later nog binnenkomt).
+- **Geen video meer op de achtergrond** na een tik: tikte je (na even weg te zijn) op een andere tab terwijl de Mac speelde, dan nam de iPhone de video over in een andere tab die op de achtergrond bleef spelen. Nu wint je eigen tabkeuze en wordt die overname netjes ingetrokken.
+- **Achtergrondtabs gaan nooit meer vanzelf fullscreen** (alleen de tab die je ziet).
+- **Gesloten tabs blijven gesloten**, ook als een ander apparaat uit stond en daarna opnieuw verbindt.
+- **Pauzeren op het andere apparaat wordt altijd opgemerkt**, ook als dat bericht de tab-vergelijking "verloor" — geen overname meer op een verkeerde (doorgerekende) tijd.
+- **Instellingen via zoeken** (bijv. "Sync & devices") hebben weer de nette gegroepeerde opmaak; tekst steekt niet meer buiten het paneel.
+
+## Grote reviewronde (afspelen, PiP, UI, Watch, widgets)
+**Afspelen & PiP**
+- iOS-native PiP is nu echt te stoppen (Pause Everything, één-video-tegelijk, sync, tab-icoon) — er speelden soms twee video's.
+- Een PiP-verzoek dat nog loopt telt als PiP; wordt netjes geannuleerd bij pauzeren.
+- Achtergrondtabs gaan nooit fullscreen, ook niet bij terugkeer uit PiP; een verborgen tab herstelt een gecrasht webproces pas als je hem bekijkt.
+- "Fullscreen bij afspelen" werkt ook na fullscreen verlaten terwijl gepauzeerd.
+- Standaard "fullscreen verlaten bij pauze" = uit, nu ook in de pagina zelf (was even "aan" vóór de instellingen binnen waren).
+- Status van een tab die (weer) zichtbaar wordt klopt altijd (fullscreen bij laden/afspelen faalde soms na PiP-sluiten op de achtergrond).
+
+**Interface & instellingen**
+- Zijbalk-breedte slepen schiet niet meer door naar min/max.
+- Vastpinnen door te slepen in de zijbalk zet de tab op de juiste plek en wordt bewaard.
+- Instellingen zoeken: ±30 resultaten openden de verkeerde pagina — alles klopt nu, ook geavanceerde opties (alleen zichtbaar in Geavanceerde modus).
+- Animaties "uit" = écht overal uit (ook auto-verbergen, nieuwe-tabpagina, per-onderdeel-stijlen).
+- Return in een lege nieuwe-tab-overlay springt niet meer naar een onzichtbare suggestie; ⌘L terwijl de overlay open is vult het adres.
+- "Reset animations" gebruikt de juiste standaardsnelheid (1,6×); diverse schakelaars werken nu direct zichtbaar bij.
+- Klik op het geluid-icoon in een zijbalkrij wisselt niet ook nog van tab.
+- Opgeslagen overlay-indeling blijft bewaard bij toekomstige updates.
+- Esc: sluit het paneel in het juiste venster (registratie per venster gerepareerd).
+
+**Apple Watch, widgets & Live Activity**
+- Bediening voor een offline apparaat stuurt niet stiekem de iPhone aan; offline apparaten tonen "Offline".
+- Je gekozen apparaat op de Watch springt niet meer elke 2 s terug naar "wat speelt".
+- Live Activity verschijnt ook als de eerste poging op de achtergrond mislukte, en verdwijnt 10 min na stoppen.
+- Watch- en widgetknoppen werken ook als iOS de app op de achtergrond start (of geven een duidelijke melding).
+- "Ontvangen…" op de Watch blijft niet meer hangen; mislukte overdrachten worden gemeld.
+- Offline audio op de Watch speelt door met scherm uit; foutmelding als audio niet start.
+- Spotify-scherm stuurt niet meer onbedoeld een volume-commando; snelheid/duur/positie-wijzigingen komen door.
+- Complicatie "Zoeken" opent echt zoeken; complicaties krijgen ook gegevens zonder dat de app open is.
+
+## Wat is er nieuw
+
+- Animaties overal sneller (standaardsnelheid 1.6×, alle stijlen ~30% korter); met animaties 'uit' geen vertraging meer in fullscreen/rotatie/overdracht.
+- Sync: overdracht wordt maar één keer overgenomen, positie elke 0,5 s, reconnect elke 2 s, 'quiet'-bewaking zodat geen andere tab gaat spelen.
+- PiP ✕ stopt de video op alle apparaten zonder terug naar fullscreen; iPad gaat bij terughalen direct fullscreen.
+- iPhone: pagina sluit links en rechts precies aan (zoom- en x-vergrendeling, smalle desktop-layout).
+- Tab-geluidsicoon: pauzeren/afspelen + automatisch wisselen, met instellingen; Geavanceerde modus verbergt nerd-opties.
+- Watch-app, complicaties, widgets en Live Activity afgerond.
+
+
 # 22.1.0 (31)
 
 ## iPhone: pagina van rand tot rand (echt opgelost)

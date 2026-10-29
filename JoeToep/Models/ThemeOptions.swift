@@ -215,13 +215,13 @@ enum AnimationStyle: String, CaseIterable, Identifiable, Codable, Sendable {
         let s = max(0.0025, min(speed, 400))
         switch self {
         case .off: return nil
-        case .snappy: return .snappy(duration: 0.2 / s)
-        case .smooth: return .smooth(duration: 0.26 / s)
-        case .bouncy: return .bouncy(duration: 0.34 / s, extraBounce: 0.08)
-        case .relaxed: return .easeInOut(duration: 0.42 / s)
-        case .spring: return .spring(response: 0.3 / s, dampingFraction: 0.82)
-        case .easeOut: return .easeOut(duration: 0.2 / s)
-        case .linear: return .linear(duration: 0.18 / s)
+        case .snappy: return .snappy(duration: 0.14 / s)
+        case .smooth: return .smooth(duration: 0.18 / s)
+        case .bouncy: return .bouncy(duration: 0.24 / s, extraBounce: 0.08)
+        case .relaxed: return .easeInOut(duration: 0.3 / s)
+        case .spring: return .spring(response: 0.21 / s, dampingFraction: 0.84)
+        case .easeOut: return .easeOut(duration: 0.14 / s)
+        case .linear: return .linear(duration: 0.12 / s)
         }
     }
 }

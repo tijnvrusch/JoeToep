@@ -18,6 +18,7 @@ final class LiveActivityManager {
     private var activity: Activity<NowPlayingActivityAttributes>?
     private var lastState: NowPlayingActivityAttributes.ContentState?
     private var idleSince: Date?
+    private var idleEnd: Task<Void, Never>?     // V22.2
 
     private init() {
         // Een activiteit van een vorige keer (app herstart) overnemen in plaats van een tweede starten.
@@ -31,7 +32,16 @@ final class LiveActivityManager {
         guard Self.enabled, ActivityAuthorizationInfo().areActivitiesEnabled else { endIfNeeded(); return }
         let device = snapshot.nowPlaying
         let anyPlaying = snapshot.devices.contains { $0.playing } || snapshot.spotify?.playing == true
-        if anyPlaying { idleSince = nil } else if idleSince == nil { idleSince = Date() }
+        if anyPlaying { idleSince = nil; idleEnd?.cancel(); idleEnd = nil } else if idleSince == nil {
+            idleSince = Date()
+            // V22.2: zelf na 10 min beëindigen — niet pas bij de volgende update (die komt bij stilstand niet).
+            idleEnd?.cancel()
+            idleEnd = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(600))
+                guard !Task.isCancelled else { return }
+                LiveActivityManager.shared.endIfNeeded()
+            }
+        }
         // Niets meer aan het spelen sinds 10 min → activiteit weg.
         if let idleSince, Date().timeIntervalSince(idleSince) > 600 { endIfNeeded(); return }
         guard let device, let title = device.title else {
@@ -43,13 +53,22 @@ final class LiveActivityManager {
             playing: device.playing, time: device.livePosition() ?? 0, duration: device.duration ?? 0, updated: Date(),
             thumbnail: WidgetShared.thumbnail(for: device.url),
             spotifyTrack: snapshot.spotify?.track, spotifyArtist: snapshot.spotify?.artist, spotifyPlaying: snapshot.spotify?.playing)
-        if let lastState, Self.similar(lastState, state) { return }
-        lastState = state
-        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(state.playing ? 900 : 3600))
-        if let activity, activity.activityState == .active || activity.activityState == .stale {
+        // V22.2: de "bijna gelijk"-snelweg alleen als er echt een lopende activiteit is.
+        let live = activity.map { $0.activityState == .active || $0.activityState == .stale } ?? false
+        if live, let lastState, Self.similar(lastState, state) { return }
+        // V22.2: niets meer aan het spelen → na 10 min verouderd (sluit aan op het automatisch beëindigen).
+        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(!anyPlaying ? 600 : (state.playing ? 900 : 3600)))
+        if live, let activity {
+            lastState = state
             Task { await activity.update(content) }
         } else if anyPlaying {
-            activity = try? Activity.request(attributes: NowPlayingActivityAttributes(), content: content, pushType: nil)
+            // V22.2: lastState pas bewaren na een geslaagde start (op de achtergrond kan request mislukken).
+            do {
+                activity = try Activity.request(attributes: NowPlayingActivityAttributes(), content: content, pushType: nil)
+                lastState = state
+            } catch {
+                activity = nil; lastState = nil
+            }
         }
     }
 

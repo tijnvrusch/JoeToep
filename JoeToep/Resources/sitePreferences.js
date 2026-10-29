@@ -151,6 +151,19 @@
     if (e.target !== v || v.ended) return;
     wasPausedInline = !(document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen);
   }, true);
+  // V22.2: fullscreen verlaten terwijl de video gepauzeerd is → telt ook als "inline gepauzeerd",
+  // anders werkt "fullscreen bij afspelen" daarna niet.
+  const notePausedInline = e => {
+    const v = video();
+    if (!v || !v.paused || v.ended) return;
+    if (e && e.type === 'webkitpresentationmodechanged' && e.target === v && v.webkitPresentationMode !== 'inline') return;
+    if (document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen) return;
+    wasPausedInline = true;
+  };
+  document.addEventListener('fullscreenchange', notePausedInline);
+  document.addEventListener('webkitfullscreenchange', notePausedInline);
+  window.addEventListener('webkitendfullscreen', notePausedInline, true);
+  window.addEventListener('webkitpresentationmodechanged', notePausedInline, true);
   // V19.3: na het VERLATEN van fullscreen altijd weer theatermodus (als die instelling aan staat).
   // YouTube zet theater soms uit bij het verlaten van fullscreen; dan zie je een kleine speler.
   document.addEventListener('fullscreenchange', () => {

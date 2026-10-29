@@ -54,6 +54,33 @@ final class V22FeatureTests: XCTestCase {
         XCTAssertTrue(TabAudioIconPrefs.switchOnPlay)
     }
 
+    func testEscapeClosesTopmostPanelOnly() {
+        EscapeStack.handlers.removeAll()
+        var closed: [String] = []
+        let a = UUID(), b = UUID()
+        EscapeStack.push(a) { closed.append("settings") }
+        EscapeStack.push(b) { closed.append("commandBar") }
+        XCTAssertTrue(EscapeStack.handle())
+        XCTAssertEqual(closed, ["commandBar"], "Esc closes only the panel on top")
+        EscapeStack.pop(b)
+        XCTAssertTrue(EscapeStack.handle())
+        XCTAssertEqual(closed, ["commandBar", "settings"])
+        EscapeStack.pop(a)
+        XCTAssertFalse(EscapeStack.handle(), "nothing open: Esc goes to the page (e.g. leave fullscreen)")
+        EscapeStack.push(a, windowNumber: 1) { closed.append("w1") }
+        XCTAssertFalse(EscapeStack.handle(in: 2), "Esc in another window leaves window 1's panel alone")
+        XCTAssertTrue(EscapeStack.handle(in: 1))
+        EscapeStack.pop(a)
+    }
+
+    func testClosedTabsAreRememberedForSyncMergeAndForgottenOnReopen() {
+        let id = UUID()
+        BrowserWorkspace.markClosed(id)
+        XCTAssertTrue(BrowserWorkspace.closedSyncIDs.contains(id.uuidString), "a closed tab must not come back at the next merge")
+        BrowserWorkspace.unmarkClosed(id)
+        XCTAssertFalse(BrowserWorkspace.closedSyncIDs.contains(id.uuidString), "reopening a tab lifts the tombstone")
+    }
+
     func testWatchStateRoundTripAndLivePosition() throws {
         var s = WatchState()
         s.devices = [WatchDeviceState(id: "m", name: "Mac", kind: "mac", isPhone: false, connected: true, title: "T",

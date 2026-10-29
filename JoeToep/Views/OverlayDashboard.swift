@@ -108,6 +108,23 @@ struct OverlayLayout: Codable, Equatable {
     }
 }
 
+// V22.2: soepel decoderen (in een extensie, zodat OverlayLayout() blijft bestaan). Ontbrekende
+// velden krijgen hun standaardwaarde en onbekende secties/acties (uit een andere versie) worden
+// overgeslagen, i.p.v. dat de hele opgeslagen indeling wegvalt. encode(to:) blijft gesynthetiseerd.
+extension OverlayLayout {
+    private enum LenientKeys: String, CodingKey { case order, hidden, actions, favouriteCount, recentCount, compact }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: LenientKeys.self)
+        if let raw = try? c.decodeIfPresent([String].self, forKey: .order) { order = raw.compactMap(OverlaySection.init(rawValue:)) }
+        if let raw = try? c.decodeIfPresent([String].self, forKey: .hidden) { hidden = Set(raw.compactMap(OverlaySection.init(rawValue:))) }
+        if let raw = try? c.decodeIfPresent([String].self, forKey: .actions) { actions = raw.compactMap(OverlayAction.init(rawValue:)) }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .favouriteCount) { favouriteCount = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .recentCount) { recentCount = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .compact) { compact = v }
+    }
+}
+
 @MainActor
 final class OverlayLayoutStore: ObservableObject {
     static let shared = OverlayLayoutStore()
@@ -170,13 +187,13 @@ struct OverlayDashboard: View {
                     .draggable(section.rawValue) { Label(section.title, systemImage: section.symbol).padding(8).background(.thinMaterial, in: Capsule()) }
                     .dropDestination(for: String.self) { items, _ in
                         guard editing, let raw = items.first, let s = OverlaySection(rawValue: raw) else { return false }
-                        withAnimation(.snappy) { store.move(s, before: section) }
+                        withAnimation(Motion.quick()) { store.move(s, before: section) }
                         return true
                     }
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
-        .animation(.snappy(duration: 0.2), value: store.layout)
+        .animation(Motion.quick(0.2), value: store.layout)
         .onAppear { spotify.beginObserving() }
         .onDisappear { spotify.endObserving() }
     }
@@ -202,7 +219,7 @@ struct OverlayDashboard: View {
                 Spacer()
                 Toggle("Compact", isOn: $store.layout.compact).toggleStyle(.switch).controlSize(.mini).fixedSize()
                 Button("Reset") { store.reset() }.buttonStyle(.borderless)
-                Button("Done") { withAnimation(.snappy) { editing = false } }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Done") { withAnimation(Motion.quick()) { editing = false } }.buttonStyle(.borderedProminent).controlSize(.small)
             }
             Text("Drag blocks to reorder, tap the eye to show or hide.").font(.caption).foregroundStyle(theme.secondary)
         }
@@ -252,7 +269,7 @@ struct OverlayDashboard: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(MediaPlatform.allCases) { p in
-                    Button { withAnimation(.snappy) { token = (token == p ? nil : p) } } label: {
+                    Button { withAnimation(Motion.quick()) { token = (token == p ? nil : p) } } label: {
                         Label(p.title, systemImage: p.symbol).font(.caption.weight(.medium))
                             .padding(.horizontal, 9).padding(.vertical, 5)
                             .background(Capsule().fill(token == p ? theme.accent.opacity(0.85) : theme.foreground.opacity(0.07)))

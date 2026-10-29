@@ -75,15 +75,25 @@ final class MacNavigationMonitor {
             }
             return nil
         }) { monitors.append(m) }
+        // V22.2: Esc sluit ALTIJD eerst de zoekbalk/overlay — wat de focus ook is (webview, knop, niets).
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { event in
+            // Esc: hardwaretoets 53, of het Esc-teken (externe/assistieve toetsenborden sturen soms keyCode 0).
+            guard event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}", !event.isARepeat else { return event }
+            let number = event.window?.windowNumber
+            let handled = MainActor.assumeIsolated { EscapeStack.handle(in: number) }
+            return handled ? nil : event
+        }) { monitors.append(m) }
         // V19.2: "vast in fullscreen"-fix. Staat het VENSTER in macOS-fullscreen (eigen Space) terwijl
         // de pagina zelf niet fullscreen is, dan deden F, dubbelklik en Esc niets zichtbaars. Nu verlaten
         // ze dan het macOS-fullscreen van het venster.
         if let m = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown], handler: { event in
+            if event.type == .keyDown, event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}",
+               MainActor.assumeIsolated({ EscapeStack.hasPanel(in: event.window?.windowNumber) }) { return event }
             guard let window = event.window, window.styleMask.contains(.fullScreen),
                   !(window.firstResponder is NSTextView) else { return event }
             let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
             let isF = event.type == .keyDown && event.keyCode == 3 && flags.isEmpty
-            let isEsc = event.type == .keyDown && event.keyCode == 53
+            let isEsc = event.type == .keyDown && (event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}")
             let isDouble = event.type == .leftMouseDown && event.clickCount == 2
             guard isF || isEsc || isDouble else { return event }
             MainActor.assumeIsolated { MacNavigationMonitor.exitWindowFullscreenIfPageIsInline(window) }

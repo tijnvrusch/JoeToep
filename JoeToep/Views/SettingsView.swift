@@ -49,10 +49,10 @@ struct SettingsView: View {
             Form {
                 // V19.2: zoekresultaten (naam + uitleg + pagina) zolang er iets in het zoekveld staat.
                 if !search.trimmingCharacters(in: .whitespaces).isEmpty {
-                    let results = SettingHelp.search(search)
+                    let results = SettingHelp.search(search, advanced: advancedMode)  // V22.2
                     Section(results.isEmpty ? "No settings match “\(search)”" : "\(results.count) result\(results.count == 1 ? "" : "s")") {
                         ForEach(results, id: \.title) { result in
-                            NavigationLink { page(result.page) } label: {
+                            NavigationLink { page(result.page).formStyle(.grouped) } label: {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(result.title)
                                     Text(result.help).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -127,7 +127,7 @@ struct SettingsView: View {
                 // V22: geen losse "advanced"-hoek meer voor iedereen: één schakelaar. Uit = alleen wat een
                 // gewone gebruiker nodig heeft; aan = élke optie (ook de nerd-opties) op zijn eigen pagina.
                 Section {
-                    Toggle(isOn: $advancedMode.animation(.snappy)) {
+                    Toggle(isOn: $advancedMode.animation(Motion.quick())) {
                         VStack(alignment: .leading, spacing: 2) { Text("Advanced mode"); Text("Show every option, including the technical ones").font(.caption).foregroundStyle(.secondary) }
                     }
                     .accessibilityIdentifier("settings.advancedMode")
@@ -170,6 +170,7 @@ struct SettingsView: View {
             // "Done"-knop rechtsboven die het scherm sluit met dismiss().
         }
         // V20: altijd zichtbaar kruisje rechtsboven (ook op elke subpagina); Esc sluit ook.
+        .closesOnEscape { close() }
         .overlay(alignment: .topTrailing) {
             // V21: even groot als de terugknop (Mac: 28 pt toolbarknop; iPhone/iPad: 44 pt glasknop).
             Button { close() } label: {
@@ -215,6 +216,12 @@ struct SettingsView: View {
         case "Top bar auto-hide": AutoHideSettings().navigationTitle(name)
         case "Tabs, sidebar & search bar": SidebarAndCommandBarSettings().navigationTitle(name)
         case "Ad blocking & SponsorBlock": AdBlockSettings(settings: settings, session: session).navigationTitle("Ad blocking")
+        // V22.2: ook de pagina's waar zoekresultaten écht staan (subpagina's en Internals).
+        case "SponsorBlock": SponsorBlockSettingsView(settings: settings, session: session).navigationTitle(name)
+        case "Tabs": TabSettings(settings: settings).navigationTitle(name)
+        case "Audio visualizer": VisualizerSettings(settings: settings).navigationTitle(name)
+        case "Focus filters": FocusSettings(settings: settings).navigationTitle(name)
+        case "Internals & diagnostics": AdvancedSettings(settings: settings, session: session).navigationTitle(name)
         default: PlaybackSettings(settings: settings, session: session).navigationTitle("Playback & Picture in Picture")
         }
     }
@@ -478,6 +485,11 @@ private struct TabSettings: View {
 private struct PlaybackSettings: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var session: WebSession
+    // V22.2: zelfde sleutels/standaardwaarden als WebSession en BrowserWorkspace lezen.
+    @AppStorage("newTabPageV192") private var newTabPage = true
+    @AppStorage("pullActionV192") private var pullAction = "fullscreen"
+    @AppStorage("backSwipeV192") private var backSwipe = false
+    @AppStorage("advancedModeV22") private var advancedMode = false
     var body: some View {
         Form {
             Section("Picture in Picture") {
@@ -533,25 +545,20 @@ private struct PlaybackSettings: View {
                 detail("Fullscreen: swipe sideways with two fingers (or Mac Mouse Fix) to scrub, up/down for volume. Arrow keys: ←/→ 5 s, ⌥ 30 s, ⌥⌘ 60 s; ↑/↓ five volume steps.")
             }
             #if os(macOS)
-            if UserDefaults.standard.bool(forKey: "advancedModeV22") { AdvancedGestureSettings() }
+            if advancedMode { AdvancedGestureSettings() }
             #else
             TouchGestureSettings()
             #endif
             GesturePresetSection()
             Section("Browsing & fullscreen") {
-                SettingToggle("Show new tab page (search & shortcuts)", isOn: Binding(
-                    get: { UserDefaults.standard.object(forKey: "newTabPageV192") as? Bool ?? true },
-                    set: { UserDefaults.standard.set($0, forKey: "newTabPageV192") }))
-                SettingPicker("Pull down action", selection: Binding(
-                    get: { UserDefaults.standard.string(forKey: "pullActionV192") ?? "fullscreen" },
-                    set: { UserDefaults.standard.set($0, forKey: "pullActionV192") })) {
+                // V22.2: @AppStorage i.p.v. Binding(get: UserDefaults…) → de bediening ververst meteen.
+                SettingToggle("Show new tab page (search & shortcuts)", isOn: $newTabPage)
+                SettingPicker("Pull down action", selection: $pullAction) {
                     Text("Fullscreen (video pages)").tag("fullscreen")
                     Text("Refresh").tag("refresh")
                     Text("Off").tag("off")
                 }
-                SettingToggle("Swipe back to previous page", isOn: Binding(
-                    get: { UserDefaults.standard.object(forKey: "backSwipeV192") as? Bool ?? false },
-                    set: { UserDefaults.standard.set($0, forKey: "backSwipeV192") }))
+                SettingToggle("Swipe back to previous page", isOn: $backSwipe)
                 detail("Horizontal swipes scrub the video by default, so swiping back is off. The Back button is always in the menu bar. Changes to swiping back apply to new tabs.")
             }
             AdvancedSection("Playback speed steps") {
@@ -657,7 +664,8 @@ private struct AdvancedSettings: View {
                 }
                 // Zet alle per-onderdeel profielen leeg en de algemene
                 // stijl/snelheid terug naar hun standaardwaarde.
-                Button("Reset animations") { settings.animationProfiles = [:]; settings.animationSpeed = 1.25; settings.animationStyle = .smooth }
+                // V22.2: standaardsnelheid is 1,6× (zoals resetPreferences en Motion), niet 1,25×.
+                Button("Reset animations") { settings.animationProfiles = [:]; settings.animationSpeed = 1.6; settings.animationStyle = .smooth }
                 detail("System transitions (Apple's fullscreen and PiP windows) are animated by iOS/macOS itself; JoeToep starts them as early as possible.")
             }
             Section("Picture in Picture internals") {

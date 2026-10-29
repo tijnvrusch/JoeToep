@@ -413,7 +413,7 @@ final class AppSettings: ObservableObject {
         visualizerConfig = defaults.data(forKey: "visualizerConfigV171").flatMap { try? JSONDecoder().decode(VisualizerConfig.self, from: $0) } ?? VisualizerConfig()
         visualizerIntensity = (defaults.object(forKey: "visualizerIntensityV16") as? Double) ?? 0.6
         visualizerInTabBar = flag("visualizerInTabBarV16", true)
-        animationSpeed = (defaults.object(forKey: "animationSpeedV16") as? Double) ?? 1.25
+        animationSpeed = (defaults.object(forKey: "animationSpeedV16") as? Double) ?? 1.6
         // Het omgekeerde van het encoderen bij de animationProfiles-property
         // hierboven: eerst de ruwe data (Data) ophalen, dan proberen te
         // decoderen (terugzetten) naar het dictionary-type. flatMap voert de
@@ -534,7 +534,7 @@ final class AppSettings: ObservableObject {
         portraitLockForRotation = true; instantTransitions = true; sponsorBlock = SponsorBlockSettings()
         theaterMode = true; dataSaverOnCellular = false; cellularQuality = .p720; pipOnTabSwitch = true
         fullscreenNewVideoFromPiP = true; visualizerStyle = .off; visualizerIntensity = 0.6; visualizerInTabBar = true; visualizerConfig = VisualizerConfig()
-        animationSpeed = 1.25; animationProfiles = [:]
+        animationSpeed = 1.6; animationProfiles = [:]
         showRefreshButton = true; showHomeButton = true; showSubscriptionsButton = true; showLibraryButton = true
         showQualityButton = true; showAirPlayButton = true; showSettingsButton = true; showNewTabButton = true
     }
@@ -552,6 +552,8 @@ final class AppSettings: ObservableObject {
     var animation: Animation? { animation(.tabs) }
     /// V16: curve and speed for one part of the app (global style/speed unless overridden).
     func animation(_ kind: AnimationKind) -> Animation? {
+        // V22.2: "Animaties uit" betekent overal uit, ook als een onderdeel een eigen profiel heeft.
+        if animationStyle == .off { return nil }
         // Zoek het eigen profiel voor dit onderdeel op; is er nog geen
         // aangepast profiel, gebruik dan een leeg/standaard AnimationProfile.
         let profile = animationProfiles[kind.rawValue] ?? AnimationProfile()

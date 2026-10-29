@@ -213,6 +213,7 @@ struct FindBar: View {
                 #if os(macOS)
                 .onExitCommand { close() }
                 #endif
+                .closesOnEscape { close() }
                 .accessibilityIdentifier("find.field")
             // Toont "3/12" (huidige/aantal resultaten) of "No results".
             Text(text.isEmpty ? "" : (state.count == 0 ? "No results" : "\(state.index)/\(state.count)"))

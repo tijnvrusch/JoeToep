@@ -79,7 +79,13 @@ final class WatchStore: NSObject, ObservableObject {
         state.devices.first { $0.id == target } ?? state.nowPlaying
     }
 
+    /// V22.2: één gedeelde store, zodat de app-delegate de verbinding al bij het starten kan openen.
+    static let shared = WatchStore()
+    private var started = false
+
     func start() {
+        guard !started else { return }     // V22.2: idempotent (delegate én onAppear)
+        started = true
         loadLocal()
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
@@ -138,9 +144,17 @@ final class WatchStore: NSObject, ObservableObject {
     }
     /// V22: een iPhone-download op de Watch zetten.
     func sendToWatch(_ item: WatchVideo) async {
-        incoming += 1
         message = "Sending “\(item.title)” to your Watch…"
-        _ = await send(["op": "sendToWatch", "id": item.id, "quality": quality], timeout: 6)
+        let reply = await send(["op": "sendToWatch", "id": item.id, "quality": quality], timeout: 6)
+        // V22.2: pas meetellen als de iPhone bevestigt dat het overzetten echt begon.
+        if reply?["ok"] as? Bool == true { incoming += 1 }
+        else if let error = reply?["error"] as? String { message = error }
+        else if reply != nil { message = "Couldn't send “\(item.title)” to your Watch." }
+    }
+    /// V22.2: de iPhone meldt een mislukte overdracht → teller omlaag en foutmelding tonen.
+    func transferFailed(_ title: String) {
+        incoming = max(0, incoming - 1)
+        message = title.isEmpty ? "A download couldn't be sent to your Watch." : "Couldn't send “\(title)” to your Watch."
     }
     /// V22: de video op de huidige iPhone-pagina downloaden en op de Watch zetten.
     func downloadCurrentPage() async {
@@ -195,9 +209,15 @@ final class WatchStore: NSObject, ObservableObject {
     /// Nieuwe live toestand: tonen, bewaren voor de complicaties, en (optioneel) het spelende
     /// apparaat automatisch als doel kiezen.
     private var lastWidgetKey = ""
+    /// V22.2: laatst spelende apparaat — "volgen" wisselt alleen als dát verandert, niet elke 2 s
+    /// (anders wordt een zelf gekozen apparaat steeds teruggezet).
+    private var lastPlayingID: String?
     func apply(state new: WatchState) {
         state = new
-        if followPlaying, let playing = new.devices.first(where: { $0.playing }), playing.id != target { target = playing.id }
+        if let playingID = new.devices.first(where: { $0.playing })?.id, playingID != lastPlayingID {
+            lastPlayingID = playingID
+            if followPlaying, playingID != target { target = playingID }
+        }
         if let t = targetState {
             if let title = t.title { nowTitle = title }
             playing = t.playing
@@ -322,6 +342,11 @@ extension WatchStore: WCSessionDelegate {
         Task { @MainActor in if let s = WatchState.decode(data) { self.apply(state: s) } }
     }
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        // V22.2: mislukte overdracht vanaf de iPhone.
+        if let failed = userInfo["transferFailed"] as? String {
+            Task { @MainActor in self.transferFailed(failed) }
+            return
+        }
         guard let data = userInfo[WatchState.contextKey] as? Data else { return }
         Task { @MainActor in if let s = WatchState.decode(data) { self.apply(state: s) } }
     }

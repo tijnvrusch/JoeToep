@@ -27,7 +27,9 @@ final class WidgetBridge {
     private init() {}
 
     private var started = false
-    func startOnce() { guard !started else { return }; started = true; start() }
+    /// V22.2: veilig om vaker aan te roepen (app-delegate bij achtergrondstart én het venster);
+    /// een latere aanroep verwerkt alleen nog de opdrachten die op een venster wachtten.
+    func startOnce() { guard !started else { processQueuedCommands(); return }; started = true; start() }
     /// Eén keer bij het starten.
     func start() {
         WidgetIntentRouter.handler = { command in Task { @MainActor in WidgetBridge.shared.perform(command) } }
@@ -159,6 +161,8 @@ final class WidgetBridge {
     // MARK: Opdrachten uit widgets
 
     func processQueuedCommands() {
+        // V22.2: zonder venster (achtergrondstart) laten staan; startOnce() vanuit het venster pakt ze op.
+        guard !BrowserWorkspace.registry.allObjects.isEmpty else { return }
         for command in WidgetShared.drain() { perform(command) }
     }
 

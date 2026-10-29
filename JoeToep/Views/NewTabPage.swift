@@ -249,9 +249,10 @@ struct NewTabPage: View {
             if editing {
                 Button("Reset") { store.reset() }.buttonStyle(.bordered)
                 Button { showingCustomize = true } label: { Label("More options", systemImage: "slider.horizontal.3") }.buttonStyle(.bordered)
-                Button("Done") { withAnimation { editing = false } }.buttonStyle(.borderedProminent)
+                // V22.2: Motion.quick() → "Animaties uit" geldt ook hier.
+                Button("Done") { withAnimation(Motion.quick()) { editing = false } }.buttonStyle(.borderedProminent)
             } else {
-                Button { withAnimation { editing = true } } label: { Image(systemName: "square.and.pencil") }
+                Button { withAnimation(Motion.quick()) { editing = true } } label: { Image(systemName: "square.and.pencil") }
                     .buttonStyle(.bordered).help("Customize this page: turn sections on or off and drag to reorder")
                     .accessibilityLabel("Customize new tab page")
             }
@@ -282,7 +283,7 @@ struct NewTabPage: View {
             .draggable(item.section.rawValue) { Label(item.section.title, systemImage: item.section.symbol).padding(8) }
             .dropDestination(for: String.self) { values, _ in
                 guard let raw = values.first, let moved = NewTabSection(rawValue: raw) else { return false }
-                withAnimation(.snappy) { store.move(moved, before: item.section) }
+                withAnimation(Motion.quick()) { store.move(moved, before: item.section) }
                 return true
             } isTargeted: { over in if over { dragging = item.section } else if dragging == item.section { dragging = nil } }
         } else {

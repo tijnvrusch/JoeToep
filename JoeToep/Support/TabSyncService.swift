@@ -63,13 +63,15 @@ final class TabSyncService: NSObject, ObservableObject {
     /// Laatste gebeurtenissen (nieuwste bovenaan), max. 30 — voor de diagnose in Instellingen.
     @Published private(set) var log: [String] = []
     var currentVersion: UInt64 { ledger.current?.version ?? 0 }
-    private func note(_ text: String) {
+    func note(_ text: String) {
         let stamp = Date().formatted(date: .omitted, time: .standard)
         log.insert("\(stamp)  \(text)", at: 0)
         if log.count > 30 { log.removeLast() }
     }
     /// Opdracht voor DIT apparaat (bijv. "speel deze video af" vanaf de Watch).
     var onCommand: ((SyncCommand) -> Void)?
+    /// V22.2: alleen de afspeelstand van een snapshot die de tab-vergelijking verloor.
+    var onPlaybackState: ((SyncSnapshot) -> Void)?
 
     private var isTesting: Bool { ProcessInfo.processInfo.arguments.contains("--uitesting") || NSClassFromString("XCTestCase") != nil }
 
@@ -222,7 +224,11 @@ final class TabSyncService: NSObject, ObservableObject {
             let accepted = ledger.receive(snapshot)
             // Altijd bevestigen (ook als hij niet won): zo ziet de afzender dat we bij zijn.
             sendAck(to: peer)
-            guard let accepted else { note("ignored older v\(snapshot.version % 100000) from \(snapshot.originName)"); return }
+            guard let accepted else {
+                note("ignored older v\(snapshot.version % 100000) from \(snapshot.originName)")
+                onPlaybackState?(snapshot)        // V22.2: speel-/pauzestand toch bijwerken
+                return
+            }
             lastSync = Date()
             note("applied \(accepted.tabs.count) tabs from \(accepted.originName)")
             let merge = mergedOrigins.insert(accepted.origin).inserted

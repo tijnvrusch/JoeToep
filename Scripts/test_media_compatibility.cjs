@@ -553,6 +553,8 @@ test('V19.1 exact playback speed via setRate (0.01 precision, clamped)', () => {
 test('V19.2 pause leaves fullscreen after 350 ms; a quick pause/play does not', async () => {
   const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
   h.w.eval(fs.readFileSync(path.join(__dirname,'../JoeToep/Resources/playbackControls.js'),'utf8'));
+  // V22.2: standaard uit (zoals in Swift); hier expliciet aangezet.
+  h.w.JoeToepControls.configure({exitFullscreenOnPause:true});
   let exits=0;const fsEl=h.d.body;
   Object.defineProperty(h.d,'fullscreenElement',{configurable:true,get:()=>exits?null:fsEl});
   h.d.exitFullscreen=()=>{exits++;return Promise.resolve();};

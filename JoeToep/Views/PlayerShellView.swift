@@ -146,6 +146,9 @@ struct TabPlayerView: View {
         .task {
             // Alleen het geselecteerde (actieve) tabblad laden we meteen de webpagina.
             if selected { session.start(with: settings.snapshot) }
+            session.isVisibleTab = selected
+            if selected { session.becameVisible() }   // V22.2: app-status gelijkzetten
+            if selected { session.recoverWebProcessIfNeeded() }
             #if os(iOS)
             session.webView.accessibilityElementsHidden = !selected
             #endif
@@ -154,6 +157,9 @@ struct TabPlayerView: View {
         // (dus als je van tabblad wisselt).
         .onChange(of: selected) { _, visible in
             if visible { session.start(with: settings.snapshot) }
+            session.isVisibleTab = visible
+            if visible { session.becameVisible() }   // V22.2: app-status gelijkzetten
+            if visible { session.recoverWebProcessIfNeeded() }
             #if os(iOS)
             // Background tabs keep their page but are not exposed to VoiceOver.
             session.webView.accessibilityElementsHidden = !visible

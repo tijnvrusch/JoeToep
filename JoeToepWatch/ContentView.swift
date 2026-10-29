@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var path: [Route] = []
     @Environment(\.scenePhase) private var phase
 
-    enum Route: Hashable { case nowPlaying, results, downloads, local, devices, spotify, settings, player(LocalDownload) }
+    enum Route: Hashable { case nowPlaying, results, downloads, local, devices, spotify, settings, search, player(LocalDownload) }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -79,6 +79,7 @@ struct ContentView: View {
                 case .devices: DevicesView()
                 case .spotify: SpotifyView()
                 case .settings: WatchSettingsView()
+                case .search: WatchSearchView { q in path.append(.results); Task { await store.search(q) } }     // V22.2
                 case .player(let item): LocalPlayerView(item: item)
                 }
             }
@@ -90,7 +91,7 @@ struct ContentView: View {
             case "nowplaying": path = [.nowPlaying]
             case "devices": path = [.devices]
             case "spotify": path = [.spotify]
-            case "search": path = []
+            case "search": path = [.search]     // V22.2: echt het zoekscherm openen
             case "local": path = [.local]
             default: break
             }
@@ -183,6 +184,26 @@ struct ResultsView: View {
     }
 }
 
+/// V22.2: zoekscherm voor de complicatie/deeplink `joetoepwatch://search` (een TextFieldLink kan
+/// niet vanuit code geopend worden): zoekveld + recente zoekopdrachten.
+struct WatchSearchView: View {
+    @EnvironmentObject private var store: WatchStore
+    let submit: (String) -> Void
+    @State private var text = ""
+    var body: some View {
+        List {
+            TextField("Search YouTube", text: $text)
+                .onSubmit { if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { submit(text) } }
+            ForEach(store.recentSearches, id: \.self) { q in
+                Button { submit(q) } label: {
+                    Label(q, systemImage: "clock.arrow.circlepath").font(.footnote).lineLimit(1)
+                }
+            }
+        }
+        .navigationTitle("Search")
+    }
+}
+
 // MARK: - Apparaten
 
 struct DevicesView: View {
@@ -202,7 +223,11 @@ struct DevicesView: View {
                         Circle().fill(d.connected ? Color.green : Color.gray).frame(width: 6, height: 6)
                     }
                     if let title = d.title { Text(title).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }
-                    if d.title != nil {
+                    if d.title != nil && !d.connected {
+                        // V22.2: offline → geen bediening (de iPhone zou anders niets/het verkeerde doen).
+                        Text("Offline").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if d.title != nil && d.connected {
                         HStack(spacing: 6) {
                             small("gobackward.\(Int(store.skipSeconds))") { await store.seek(-store.skipSeconds, device: d.id) }
                             small(d.playing ? "pause.fill" : "play.fill", filled: true) { await store.toggle(d.id) }
@@ -218,7 +243,7 @@ struct DevicesView: View {
                     }
                 }
                 .padding(.vertical, 4)
-                .onTapGesture { store.target = d.id }
+                .onTapGesture { if d.connected { store.target = d.id } }     // V22.2: offline niet als doel
                 .listRowBackground(RoundedRectangle(cornerRadius: 12).fill(store.target == d.id ? Color.red.opacity(0.18) : Color.white.opacity(0.06)))
             }
         }
@@ -238,6 +263,7 @@ struct DevicesView: View {
 struct SpotifyView: View {
     @EnvironmentObject private var store: WatchStore
     @State private var volume: Double = 50
+    @State private var appliedVolume: Double?     // V22.2
     var body: some View {
         ScrollView {
             if let sp = store.state.spotify {
@@ -266,10 +292,15 @@ struct SpotifyView: View {
                     HStack {
                         Image(systemName: "speaker.fill").font(.caption2)
                         Slider(value: $volume, in: 0...100, step: 10) { Text("Volume") }
-                            .onChange(of: volume) { _, v in Task { await store.spotify("setVolume", value: v) } }
+                            .onChange(of: volume) { _, v in
+                                // V22.2: de waarde die onAppear zelf zette niet terugsturen.
+                                let programmatic = v == appliedVolume
+                                appliedVolume = nil
+                                if !programmatic { Task { await store.spotify("setVolume", value: v) } }
+                            }
                         Image(systemName: "speaker.wave.3.fill").font(.caption2)
                     }
-                    .onAppear { volume = sp.volume }
+                    .onAppear { appliedVolume = sp.volume; volume = sp.volume }
                     Text("on \(sp.device)").font(.caption2).foregroundStyle(.secondary)
                 }
             } else {
@@ -364,6 +395,7 @@ struct LocalPlayerView: View {
     @EnvironmentObject private var store: WatchStore
     let item: LocalDownload
     @State private var player: AVPlayer?
+    @State private var audioError: String?     // V22.2
     var body: some View {
         Group {
             if let player {
@@ -371,6 +403,7 @@ struct LocalPlayerView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "music.note").font(.largeTitle).foregroundStyle(.red)
                         Text(item.title).font(.footnote).lineLimit(2).multilineTextAlignment(.center)
+                        if let audioError { Text(audioError).font(.caption2).foregroundStyle(.orange).multilineTextAlignment(.center) }     // V22.2
                         HStack {
                             Button { player.seek(to: CMTime(seconds: max(0, player.currentTime().seconds - 15), preferredTimescale: 600)) } label: { Image(systemName: "gobackward.15") }
                             Button { player.timeControlStatus == .playing ? player.pause() : player.play() } label: { Image(systemName: "playpause.fill") }
@@ -389,7 +422,13 @@ struct LocalPlayerView: View {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: item.audio ? .default : .moviePlayback, policy: item.audio ? .longFormAudio : .default)
             player = p
             if item.audio {
-                AVAudioSession.sharedInstance().activate(options: []) { ok, _ in if ok { DispatchQueue.main.async { p.play() } } }
+                AVAudioSession.sharedInstance().activate(options: []) { ok, _ in
+                    DispatchQueue.main.async {
+                        if ok { p.play() }
+                        // V22.2: zonder audio-uitvoer (bijv. geen Bluetooth-koptelefoon gekozen) niet stil blijven hangen.
+                        else { audioError = "Couldn't start audio. Connect Bluetooth headphones and try again." }
+                    }
+                }
             } else { p.play() }
         }
         .onDisappear {

@@ -35,6 +35,8 @@ struct SidebarView: View {
     @State private var renaming: UUID?
     @State private var renameText = ""
     @State private var dropTarget: String?
+    /// V22.2: breedte bij het begin van het verslepen van de rand.
+    @State private var dragStartWidth: Double?
     @Environment(\.joeToepTheme) private var theme
     @Environment(\.openWindow) private var openWindow
 
@@ -111,7 +113,8 @@ struct SidebarView: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(dropTarget == "pinned" ? theme.accent.opacity(0.15) : .clear))
         .dropDestination(for: String.self) { items, _ in
             guard let tab = tab(from: items) else { return false }
-            tab.pinned = true; tab.groupID = nil; workspace.publishSync(); return true
+            // V22.2: via setPinned → herordenen + opslaan (niet alleen de vlag omzetten).
+            workspace.setPinned(tab, true); return true
         } isTargeted: { dropTarget = $0 ? "pinned" : (dropTarget == "pinned" ? nil : dropTarget) }
     }
 
@@ -135,7 +138,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 6).padding(.vertical, 5)
             .contentShape(Rectangle())
-            .onTapGesture { withAnimation(.snappy) { workspace.toggleGroupCollapsed(group.id) } }
+            .onTapGesture { withAnimation(Motion.quick()) { workspace.toggleGroupCollapsed(group.id) } }
             .contextMenu {
                 Button("Rename") { renameText = group.name; renaming = group.id }
                 Menu("Colour") {
@@ -162,14 +165,15 @@ struct SidebarView: View {
             HStack {
                 Text("Tabs").font(.caption.weight(.semibold)).foregroundStyle(theme.secondary)
                 Spacer()
-                Button("Clear") { withAnimation(.snappy) { workspace.clearLooseTabs() } }
+                Button("Clear") { withAnimation(Motion.quick()) { workspace.clearLooseTabs() } }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(theme.secondary)
                     .help("Close all loose tabs (pinned tabs and groups stay)")
             }
             .padding(.horizontal, 6).padding(.top, 4)
             .dropDestination(for: String.self) { items, _ in
                 guard let tab = tab(from: items) else { return false }
-                tab.pinned = false; workspace.setGroup(tab, to: nil); return true
+                // V22.2: via setPinned → herordenen + opslaan.
+                workspace.setGroup(tab, to: nil); workspace.setPinned(tab, false); return true
             }
             Button { workspace.requestNewTab() } label: {
                 Label("New Tab", systemImage: "plus").font(.callout)
@@ -187,7 +191,11 @@ struct SidebarView: View {
     private func row(_ tab: BrowserTab, accent: Color?) -> some View {
         SidebarTabRow(tab: tab, session: tab.session, selected: tab.id == workspace.selectedID, compact: compactRows,
                       accent: accent, close: { workspace.close(tab) }, select: { workspace.select(tab) })
-            .onTapGesture { workspace.select(tab) }
+            .onTapGesture {
+                // V22.2: zelfde bewaking als TabBarView.tapped(): een klik op het geluid-icoontje is geen tab-klik.
+                if TabAudioIcon.selecting { workspace.select(tab); return }
+                DispatchQueue.main.async { if Date().timeIntervalSince(TabAudioIcon.lastAction) >= 0.4 { workspace.select(tab) } }
+            }
             .contextMenu { tabMenu(tab) }
             .draggable(tab.id.uuidString) { Text(tab.title).padding(6) }
             .dropDestination(for: String.self) { items, _ in
@@ -242,8 +250,11 @@ struct SidebarView: View {
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             #endif
             .gesture(DragGesture(minimumDistance: 1).onChanged { value in
-                width = min(420, max(190, width + value.translation.width))
-            })
+                // V22.2: vanaf de breedte bij het begin van het slepen rekenen (translation is cumulatief).
+                let start = dragStartWidth ?? width
+                if dragStartWidth == nil { dragStartWidth = width }
+                width = min(420, max(190, start + value.translation.width))
+            }.onEnded { _ in dragStartWidth = nil })
     }
 
     private func tab(from items: [String]) -> BrowserTab? {

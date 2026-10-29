@@ -9,7 +9,7 @@
   // Zoekt het video-element van de pagina op (YouTube's hoofdvideo, of anders de eerste
   // <video> die er is).
   // V19: instelbaar vanuit de app (Instellingen › Playback › Gestures).
-  const cfg = {swipeSeek: 5, keySeek: 5, volumeStep: 0.01, swipeThreshold: 28, showControlsOnSwipe: true, scrubThumbnail: true, showControlsOnKeys: false, nativeWheel: false, exitFullscreenOnPause: true, touchScrub: true, touchSeekPerPx: 0.25, invertTouch: false, seekThrottleMs: 60};
+  const cfg = {swipeSeek: 5, keySeek: 5, volumeStep: 0.01, swipeThreshold: 28, showControlsOnSwipe: true, scrubThumbnail: true, showControlsOnKeys: false, nativeWheel: false, exitFullscreenOnPause: false, touchScrub: true, touchSeekPerPx: 0.25, invertTouch: false, seekThrottleMs: 60};
   const pick = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
   // V21: de pagina mag nooit horizontaal "meeveren" (elastische overscroll) tijdens scrubben
   // met trackpad, muis of vinger. Verticaal scrollen blijft gewoon werken.

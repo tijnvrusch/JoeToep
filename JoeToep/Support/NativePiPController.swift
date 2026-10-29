@@ -37,6 +37,8 @@ final class NativePiPController: NSObject {
     private var possibleObservation: NSKeyValueObservation?
     private var statusObservation: NSKeyValueObservation?
     private var restoreRequested = false
+    /// V22.2: close() loopt; restore-delegate en onStop mogen dan niet "terugkeren" melden.
+    private var closing = false
     /// V22: vlak vóór de terugkeer uit PiP; geeft terug hoelang de animatie nog moet wachten.
     var onRestoreRequested: ((Double, Bool) -> TimeInterval)?
     private var automaticAllowed = true
@@ -149,6 +151,18 @@ final class NativePiPController: NSObject {
         controller?.stopPictureInPicture()
     }
 
+    /// V22.2: PiP sluiten en pauzeren (hand-over, pauzeer alles, tab-icoon): geen terugkeer naar
+    /// de app of fullscreen; onStop meldt `.closed` zodat de webvideo gepauzeerd blijft.
+    func close() {
+        pendingManualStart = false
+        guard isActive || isStarting else { return }
+        closing = true
+        restoreRequested = false
+        player.pause()
+        lastEvent = "closing"
+        controller?.stopPictureInPicture()
+    }
+
     /// Background without PiP (lock screen, audio only): stop decoding the silent shadow.
     func suspendShadow() {
         guard isArmed, !isActive, !isStarting else { return }
@@ -190,7 +204,7 @@ extension NativePiPController: AVPictureInPictureControllerDelegate {
     }
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         MainActor.assumeIsolated {
-            isStarting = false; isActive = false
+            isStarting = false; isActive = false; closing = false
             player.isMuted = true
             player.currentItem?.preferredPeakBitRate = Self.shadowBitRate
             lastEvent = "failed: " + error.localizedDescription
@@ -202,6 +216,8 @@ extension NativePiPController: AVPictureInPictureControllerDelegate {
         // V22: eerst de webvideo al fullscreen zetten (op het juiste tijdstip), pas daarna de
         // PiP-animatie laten eindigen → geen flits van de inline YouTube-speler ertussen.
         MainActor.assumeIsolated {
+            // V22.2: sluiten via close() → geen restore/fullscreen.
+            if closing { restoreRequested = false; completionHandler(true); return }
             restoreRequested = true
             guard let prepare = onRestoreRequested else { completionHandler(true); return }
             let delay = prepare(player.currentTime().seconds, player.rate != 0)
@@ -214,8 +230,9 @@ extension NativePiPController: AVPictureInPictureControllerDelegate {
         MainActor.assumeIsolated {
             let playing = player.rate != 0
             let time = player.currentTime().seconds
-            let reason: StopReason = restoreRequested ? .restore : .closed
-            isActive = false; isStarting = false; restoreRequested = false
+            let reason: StopReason = (restoreRequested && !closing) ? .restore : .closed
+            if closing { player.pause() }   // V22.2: gesloten = gepauzeerd
+            isActive = false; isStarting = false; restoreRequested = false; closing = false
             // Back to a silent, low-cost shadow. The web video becomes audible again.
             player.isMuted = true
             player.currentItem?.preferredPeakBitRate = Self.shadowBitRate

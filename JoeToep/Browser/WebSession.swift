@@ -155,6 +155,14 @@ final class WebSession: NSObject, ObservableObject {
     var isInPictureInPicture: Bool { pip.isActive || nativePiPActive }
     var isFloating: Bool { pip.state == .floating }
     var isPiPRequesting: Bool { pip.isRequesting }
+    /// V22.2: native PiP is aan het starten (nog niet actief) — telt mee als PiP bij pauzeren/overdracht.
+    var isNativePiPStarting: Bool {
+        #if os(iOS)
+        nativePiP.isStarting
+        #else
+        false
+        #endif
+    }
     var isTestMode: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--uitesting")
@@ -584,7 +592,7 @@ final class WebSession: NSObject, ObservableObject {
                 if !jsPiP {
                     if self.pip.state == .native { self.pip.exitNative(); self.recordLifecycle("reconcile: stale PiP button cleared") }
                     // V16.2: a repaired stale PiP lands inline; the user asked to come back fullscreen.
-                    if attempt > 0 && self.applicationActive && self.isPlaying && !self.isFullscreen &&
+                    if attempt > 0 && self.applicationActive && self.isVisibleTab && self.isPlaying && !self.isFullscreen &&   // V22.2: alleen zichtbare tab
                         self.settings.pipReturnTarget != .inline {
                         self.recordLifecycle("reconcile: repaired, continue fullscreen")
                         _ = try? await self.webView.evaluateJavaScript("window.JoeToepMedia?.restoreFullscreen(true)")
@@ -814,6 +822,7 @@ final class WebSession: NSObject, ObservableObject {
         screenFocus.stop()
         #endif
         applicationActive = true; leavingEpisode = false
+        if isVisibleTab { recoverWebProcessIfNeeded() }
         if settings.automaticFullscreen && !pip.isActive && !pip.isRequesting {
             fulfillAutomaticFullscreen()
         }
@@ -852,7 +861,9 @@ final class WebSession: NSObject, ObservableObject {
         if !settings.keepPiPOnReturn {
             #if os(macOS)
             if isFloating { floating.restore() }
-            webView.evaluateJavaScript("window.JoeToepMedia?.returnToApp('origin')", completionHandler: nil)
+            // V22.2: verborgen tab → inline terug, nooit fullscreen.
+            if isVisibleTab { webView.evaluateJavaScript("window.JoeToepMedia?.returnToApp('origin')", completionHandler: nil) }
+            else { webView.evaluateJavaScript("window.JoeToepMedia?.returnToApp(false)", completionHandler: nil) }
             #else
             // V12: when the PiP window's own return button was used, AVKit is already animating
             // back into fullscreen; a second request made the video jump. Only if PiP is still
@@ -873,7 +884,9 @@ final class WebSession: NSObject, ObservableObject {
                 }
                 guard !Task.isCancelled, let self, self.applicationActive else { return }
                 self.recordLifecycle("return via app icon: bring video back from PiP")
-                _ = try? await self.webView.evaluateJavaScript("window.JoeToepMedia?.returnToApp('origin')")
+                // V22.2: verborgen tab → inline terug, nooit fullscreen.
+                let script = self.isVisibleTab ? "window.JoeToepMedia?.returnToApp('origin')" : "window.JoeToepMedia?.returnToApp(false)"
+                _ = try? await self.webView.evaluateJavaScript(script)
             }
             #endif
         }
@@ -922,7 +935,8 @@ final class WebSession: NSObject, ObservableObject {
             self.refreshNativeShadow()
         }
         nativePiP.onRestoreRequested = { [weak self] time, playing in
-            guard let self, self.nativePiPWasFullscreen || self.settings.automaticFullscreen else { return 0 }
+            // V22.2: verborgen tab → geen fullscreen bij terugkeer uit PiP.
+            guard let self, self.isVisibleTab, self.nativePiPWasFullscreen || self.settings.automaticFullscreen else { return 0 }
             let t = time.isFinite ? time : -1
             self.recordLifecycle("native PiP restore → straight to fullscreen")
             self.webView.evaluateJavaScript("(()=>{const v=document.querySelector('video.html5-main-video')||document.querySelector('video');if(!v)return 0;try{if(\(t)>=0&&Math.abs(v.currentTime-\(t))>0.3)v.currentTime=\(t)}catch(_){}\(playing ? "v.play()?.catch(()=>{});" : "")try{if(v.webkitSetPresentationMode)v.webkitSetPresentationMode('fullscreen');else v.webkitEnterFullscreen()}catch(_){}return 1})()", completionHandler: nil)
@@ -1238,6 +1252,7 @@ final class WebSession: NSObject, ObservableObject {
             for delay in [700, 1500] {
                 try? await Task.sleep(for: .milliseconds(delay))
                 guard !Task.isCancelled, let self else { return }
+                guard self.isVisibleTab else { return }   // V22.2: verborgen tab → geen fullscreen
                 guard UIApplication.shared.applicationState == .active, !self.navigatingAway,
                       self.videoID == expectedVideo, expectedVideo != 0, self.isPlaying,
                       !self.isFullscreen, !self.pip.isActive, !self.pip.isRequesting,
@@ -1252,17 +1267,18 @@ final class WebSession: NSObject, ObservableObject {
 
     private func restoreFullscreenAfterPiPIfNeeded() {
         guard !isHandingOver else { return }  // V16.2.1: never for a tab that is handing over
-        guard applicationActive, let deadline = fullscreenReturnDeadline,
+        // V22.2: een verborgen tab gaat na PiP nooit fullscreen.
+        guard applicationActive, isVisibleTab, let deadline = fullscreenReturnDeadline,
               deadline > Date(), !pip.isActive, !pip.isRequesting else { return }
         fullscreenReturnDeadline = nil
         fullscreenReturnTask?.cancel()
         let expectedDocument = documentID
         let expectedVideo = videoID
         // V17: animaties uit → meteen (0 ms); snelle overgangen → 120 ms; anders 650 ms.
-        let delay = settings.animationsOff ? 0 : (settings.instantTransitions ? 120 : 650)
+        let delay = settings.animationsOff ? 0 : (settings.instantTransitions ? 60 : 320)
         fullscreenReturnTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(delay))
-            guard !Task.isCancelled, let self, self.applicationActive,
+            guard !Task.isCancelled, let self, self.applicationActive, self.isVisibleTab,
                   !self.navigatingAway, self.documentID == expectedDocument,
                   self.videoID == expectedVideo, expectedVideo != 0,
                   !self.pip.isActive, !self.pip.isRequesting, !self.isFullscreen else { return }
@@ -1275,7 +1291,7 @@ final class WebSession: NSObject, ObservableObject {
     private func scheduleFullscreenExit() {
         guard !systemFullscreenHandoff && applicationActive else { return }
         exitTask?.cancel()
-        let delay = settings.animationsOff ? 120 : (settings.instantTransitions ? 250 : 400)
+        let delay = settings.animationsOff ? 60 : (settings.instantTransitions ? 140 : 260)
         exitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(delay))
             guard !Task.isCancelled, let self, !self.isFullscreen,
@@ -1353,8 +1369,16 @@ final class WebSession: NSObject, ObservableObject {
     }
 
     /// Een ander apparaat begon af te spelen: hier stoppen (PiP sluiten als die open is).
+    /// V22.2: een overname die net werd ingezet weer intrekken — ook als de pagina nog laadt.
+    func cancelPendingAutoplay() {
+        forcePlayOnStart = false; restoredPlaying = false
+        if let p = pendingResume { pendingResume = (p.time, false) }
+        holdQuiet(3)   // V22.2: via holdQuiet, zodat het stil-houden een paginalaad overleeft
+        pauseForRemotePlayback()
+    }
     func pauseForRemotePlayback() {
-        if isInPictureInPicture { stopPiPAndPause(); return }
+        // V22.2: ook een lopend PiP-verzoek of startende native PiP telt als PiP.
+        if isInPictureInPicture || isPiPRequesting || isNativePiPStarting { stopPiPAndPause(); return }
         if isPlaying { recordLifecycle("sync: paused for other device"); pauseForTabSwitch() }
     }
 
@@ -1421,6 +1445,35 @@ final class WebSession: NSObject, ObservableObject {
     }
     /// V21: deze tab moet bij het (eerste) laden meteen spelen (overname van een ander apparaat).
     var forcePlayOnStart = false
+    /// V22.2: het webproces van deze tab is (op de achtergrond) afgesloten; herstellen zodra hij zichtbaar is.
+    private(set) var needsProcessRecovery = false
+    /// V22.2: deze tab is de zichtbare tab (gezet door de tabweergave).
+    var isVisibleTab = false
+    /// V22.2: tab wordt zichtbaar → applicationActive/leavingEpisode gelijkzetten met de echte
+    /// app-status (een verborgen tab kreeg de activeer-meldingen mogelijk niet).
+    func becameVisible() {
+        #if os(iOS)
+        applicationActive = UIApplication.shared.applicationState == .active
+        #else
+        applicationActive = NSApp.isActive
+        #endif
+        if applicationActive { leavingEpisode = false }
+    }
+    /// V22.2: lege tab na een afgesloten webproces → stil herladen, gepauzeerd en zonder fullscreen.
+    func recoverWebProcessIfNeeded() {
+        guard needsProcessRecovery, hasStarted else { return }
+        needsProcessRecovery = false
+        // Geen crashlus: hooguit 3 keer per 2 minuten automatisch herstellen.
+        let now = Date()
+        terminations = terminations.filter { now.timeIntervalSince($0) < 120 }
+        guard terminations.count <= 3 else {
+            showNotice(.error, "Player stopped", "WebKit keeps closing on this page. Tap Reload to try again.")
+            return
+        }
+        suppressAutoFullscreenOnce = true
+        recordLifecycle("recovering web process")
+        reload()
+    }
     /// V22.1: gestart via het tab-icoon → deze keer niet automatisch fullscreen.
     var suppressAutoFullscreenOnce = false
     /// V21: kleine correctie na de overdracht — alleen spoelen als het echt verschilt (geen hapering).
@@ -1523,11 +1576,13 @@ final class WebSession: NSObject, ObservableObject {
     func resetVideoZoom() { bridge("window.JoeToepBridge?.resetZoom()") }
 
     private func fulfillAutomaticFullscreen(extraChecks: Int = 0) {
+        // V22.2: een achtergrondtab (bijv. bijgewerkt door sync) gaat NOOIT vanzelf fullscreen.
+        guard isVisibleTab else { recordLifecycle("auto-fullscreen skipped: background tab"); return }
         #if os(macOS)
         let keyboard = settings.macFullscreenMode == .youtube
         let serial = navigationSerial
         // V17: met animaties uit wacht automatisch-fullscreen 0.2 s in plaats van 0.5 s.
-        let firstWait = settings.animationsOff ? 0.2 : 0.5
+        let firstWait = settings.animationsOff ? 0.08 : (settings.instantTransitions ? 0.2 : 0.35)
         DispatchQueue.main.asyncAfter(deadline: .now() + (extraChecks == 0 ? firstWait : 0.15)) { [weak self] in
             guard let self, self.navigationSerial == serial, self.applicationActive,
                   self.settings.automaticFullscreen || self.settings.fullscreenOnPlay, !self.pip.isActive, !self.pip.isRequesting else { return }
@@ -2041,7 +2096,15 @@ final class WebSession: NSObject, ObservableObject {
         #endif
         #if os(iOS)
         pipReturnSafetyTask?.cancel()
+        // V22.2: native PiP (eigen AVPlayer) echt sluiten en pauzeren; pauzeren van de webvideo
+        // alleen liet het PiP-venster doorspelen.
+        if nativePiPActive || nativePiP.isStarting { nativePiP.close() }
         #endif
+        // V22.2: een lopend PiP-verzoek intrekken, anders opent PiP alsnog na de overdracht.
+        if pip.isRequesting {
+            bridge("window.JoeToepBridge?.cancelRequest(\(pip.serial))")
+            pipWatchdog?.cancel(); pip.reset()
+        }
         webView.evaluateJavaScript("window.JoeToepMedia?.remoteAction('pause'); window.JoeToepMedia?.closePiPInline()", completionHandler: nil)
         #if os(macOS)
         floating.restore()
@@ -2076,7 +2139,7 @@ final class WebSession: NSObject, ObservableObject {
         fullscreenVerifyTask?.cancel()
         fullscreenVerifyTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
-            guard !Task.isCancelled, let self, self.applicationActive, !self.navigatingAway, !self.isHandingOver,
+            guard !Task.isCancelled, let self, self.applicationActive, self.isVisibleTab, !self.navigatingAway, !self.isHandingOver,
                   self.documentID == document, self.videoID == video, !self.pip.isActive, !self.pip.isRequesting else { return }
             let fullscreen = (try? await self.webView.evaluateJavaScript("Boolean(document.fullscreenElement || document.webkitFullscreenElement || document.documentElement.hasAttribute('data-joetoep-stage'))")) as? Bool
             guard fullscreen != true, attempt < 3 else { return }
@@ -2244,7 +2307,7 @@ final class WebSession: NSObject, ObservableObject {
             #if os(iOS)
             if settings.rotateOnFullscreen && !pip.isActive && !pip.isRequesting {
                 orientationTask?.cancel()
-                let rotateDelay = settings.animationsOff ? 40 : (settings.instantTransitions ? 120 : 350)
+                let rotateDelay = settings.animationsOff ? 0 : (settings.instantTransitions ? 60 : 200)
                 orientationTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(rotateDelay))
                     guard !Task.isCancelled, let self, self.isFullscreen, self.applicationActive,
@@ -2504,11 +2567,19 @@ extension WebSession: WKNavigationDelegate {
         let now = Date()
         terminations = terminations.filter { now.timeIntervalSince($0) < 120 }
         terminations.append(now)
-        guard settings.recoverWebProcess && terminations.count <= 2 && applicationActive else {
-            showNotice(.error, "Player stopped", "WebKit was closed by the system. Return to JoeToep and tap Reload.")
+        // V22.2: een verborgen tab herlaadt pas als hij zichtbaar wordt (recoverWebProcessIfNeeded).
+        guard settings.recoverWebProcess && terminations.count <= 2 && applicationActive && isVisibleTab else {
+            // V22.2: niet leeg laten staan — zodra je deze tab weer ziet (of de app terugkomt)
+            // herstellen we hem vanzelf, gepauzeerd op dezelfde plek.
+            needsProcessRecovery = settings.recoverWebProcess
+            recordLifecycle("web process ended; recovery pending")
+            if !needsProcessRecovery {
+                showNotice(.error, "Player stopped", "WebKit was closed by the system. Return to JoeToep and tap Reload.")
+            }
             return
         }
         showNotice(.warning, "Player recovered", "The web process restarted. Press Play to continue.")
+        suppressAutoFullscreenOnce = true
         reload()
     }
 }

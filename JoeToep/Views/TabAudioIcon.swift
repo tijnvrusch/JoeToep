@@ -28,6 +28,12 @@ enum TabAudioIcon {
     static func perform(_ tab: BrowserTab, _ session: WebSession, select: () -> Void) {
         lastAction = Date()
         if TabAudioIconPrefs.action == "switch" { choose(select); return }
+        // V22.2: native PiP speelt in een eigen AVPlayer terwijl de webvideo gepauzeerd is;
+        // remoteToggle() zou die webvideo juist starten → PiP sluiten en pauzeren.
+        if session.nativePiPActive || session.isNativePiPStarting {
+            session.stopPiPAndPause()
+            return
+        }
         if session.isPlaying || session.isInPictureInPicture {
             session.remoteToggle()                       // pauzeren
             return

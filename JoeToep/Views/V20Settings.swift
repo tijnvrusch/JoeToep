@@ -292,6 +292,8 @@ struct SidebarAndCommandBarSettings: View {
     @AppStorage("commandBarTabToSearchV21") private var tabToSearch = true
     @AppStorage("newTabPlatformV192") private var defaultPlatform = MediaPlatform.youtube.rawValue
     @AppStorage("liquidGlassV21") private var glass = true
+    /// V22.2: waarneembaar, zodat "Dashboard in the new tab overlay" niet blijft hangen.
+    @ObservedObject private var overlayStore = OverlayLayoutStore.shared
 
     private var sidebarAvailable: Bool {
         #if os(macOS)
@@ -335,9 +337,9 @@ struct SidebarAndCommandBarSettings: View {
                     ForEach(MediaPlatform.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Toggle("Platform name + Tab searches there", isOn: $tabToSearch)
-                Toggle("Dashboard in the new tab overlay", isOn: Binding(get: { OverlayLayoutStore.shared.dashboardEnabled },
-                                                                          set: { OverlayLayoutStore.shared.dashboardEnabled = $0 }))
-                Button("Reset overlay layout") { OverlayLayoutStore.shared.reset() }
+                // V22.2: via @ObservedObject → de schakelaar ververst meteen.
+                Toggle("Dashboard in the new tab overlay", isOn: $overlayStore.dashboardEnabled)
+                Button("Reset overlay layout") { overlayStore.reset() }
                 Toggle("Suggest open tabs", isOn: $showTabs)
                 Toggle("Suggest favourites & history", isOn: $showHistory)
                 Stepper("Suggestions: \(suggestions)", value: $suggestions, in: 3...15)

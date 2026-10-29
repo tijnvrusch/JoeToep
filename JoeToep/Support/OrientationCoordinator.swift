@@ -46,6 +46,8 @@ final class JoeToepAppDelegate: NSObject, UIApplicationDelegate {
         MainActor.assumeIsolated {
             WatchBridge.shared.activateSession()
             if UserDefaults.standard.object(forKey: "tabSyncV18") as? Bool ?? true { TabSyncService.shared.start() }
+            // V22.2: ook bij een achtergrondstart widgets/Live Activity/Watch-toestand bijhouden (idempotent).
+            WidgetBridge.shared.startOnce()
         }
         return true
     }

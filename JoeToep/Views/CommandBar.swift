@@ -3,6 +3,9 @@
 // om daar te zoeken. Standaard zoekt hij op YouTube. Ook: naar open tabs springen, favorieten
 // en geschiedenis. ⌘T = nieuwe tab, ⌘L / klik op de actieve tab = adres van deze tab wijzigen.
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 #if os(iOS)
 import UIKit
 #endif
@@ -87,13 +90,20 @@ struct CommandBarOverlay: View {
                 .padding(.horizontal, 12)
             // V22: Escape sluit altijd eerst de zoekbalk (ook als het tekstveld geen focus heeft) —
             // anders verliet het venster fullscreen.
-            Button("") { if customizing { withAnimation(.snappy) { customizing = false } } else { close() } }
+            Button("") { if customizing { withAnimation(Motion.quick()) { customizing = false } } else { close() } }
                 .keyboardShortcut(.cancelAction)
                 .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
         }
+        .closesOnEscape { if customizing { withAnimation(Motion.quick()) { customizing = false } } else { close() } }
         .onAppear {
             token = workspace.commandBarToken; workspace.commandBarToken = nil; selection = 0
             text = editsCurrent ? (workspace.selected.currentURL?.absoluteString ?? "") : ""
+            DispatchQueue.main.async { focused = true }
+        }
+        // V22.2: ⌘L terwijl de ⌘T-overlay al open is (of andersom) → veld opnieuw vullen zoals bij onAppear.
+        .onChange(of: workspace.commandBarEditsCurrent) { _, now in
+            token = workspace.commandBarToken; workspace.commandBarToken = nil; selection = 0; customizing = false
+            text = now ? (workspace.selected.currentURL?.absoluteString ?? "") : ""
             DispatchQueue.main.async { focused = true }
         }
         #if os(macOS)
@@ -121,7 +131,7 @@ struct CommandBarOverlay: View {
                         .background(Capsule().fill(theme.accent.opacity(0.9)))
                         .foregroundStyle(.white)
                         .transition(.scale.combined(with: .opacity))
-                        .onTapGesture { withAnimation(.snappy) { self.token = nil } }
+                        .onTapGesture { withAnimation(Motion.quick()) { self.token = nil } }
                 } else {
                     Image(systemName: editsCurrent ? "link" : "magnifyingglass").foregroundStyle(theme.secondary)
                 }
@@ -135,16 +145,27 @@ struct CommandBarOverlay: View {
                     .keyboardType(.webSearch)
                     .submitLabel(.go)
                     #endif
-                    .onSubmit { commit(selection) }
+                    // V22.2: leeg veld met dashboard → er is geen zichtbare suggestie, dus Return/pijlen doen niets.
+                    .onSubmit { if !dashboardBlocksSuggestions { commit(selection) } }
                     .onKeyPress(.tab) { tabToSearch() ? .handled : .ignored }
-                    .onKeyPress(.downArrow) { selection = min(selection + 1, max(0, suggestions.count - 1)); return .handled }
-                    .onKeyPress(.upArrow) { selection = max(selection - 1, 0); return .handled }
+                    .onKeyPress(.downArrow) {
+                        if dashboardBlocksSuggestions { return .ignored }
+                        selection = min(selection + 1, max(0, suggestions.count - 1)); return .handled
+                    }
+                    .onKeyPress(.upArrow) {
+                        if dashboardBlocksSuggestions { return .ignored }
+                        selection = max(selection - 1, 0); return .handled
+                    }
                     .onKeyPress(.delete) {
                         // Backspace op een leeg veld haalt het platform-label weg.
-                        if text.isEmpty, token != nil { withAnimation(.snappy) { token = nil }; return .handled }
+                        if text.isEmpty, token != nil { withAnimation(Motion.quick()) { token = nil }; return .handled }
                         return .ignored
                     }
-                    .onKeyPress(.escape) { close(); return .handled }
+                    // V22.2: tijdens aanpassen sluit Esc eerst de aanpasmodus (zoals de andere Esc-paden).
+                    .onKeyPress(.escape) {
+                        if customizing { withAnimation(Motion.quick()) { customizing = false } } else { close() }
+                        return .handled
+                    }
                     .onChange(of: text) { _, _ in selection = 0 }
                     .accessibilityIdentifier("commandBar.field")
                 if !text.isEmpty {
@@ -153,7 +174,7 @@ struct CommandBarOverlay: View {
                 }
                 if showsDashboard {
                     // V22: dashboard aanpassen (slepen, aan/uit).
-                    Button { withAnimation(.snappy) { customizing.toggle() } } label: {
+                    Button { withAnimation(Motion.quick()) { customizing.toggle() } } label: {
                         Image(systemName: customizing ? "checkmark.circle.fill" : "slider.horizontal.3")
                             .foregroundStyle(customizing ? theme.accent : theme.secondary)
                     }
@@ -193,12 +214,16 @@ struct CommandBarOverlay: View {
         .frame(maxWidth: 680)
         .joeToepGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.25), radius: 30, y: 12)
-        .animation(.snappy(duration: 0.2), value: token)
+        .animation(Motion.quick(0.2), value: token)
     }
 
     /// V22: leeg zoekveld bij een nieuwe tab → het aanpasbare dashboard.
     private var showsDashboard: Bool {
         overlayStore.dashboardEnabled && !editsCurrent && text.isEmpty && token == nil || customizing
+    }
+    /// V22.2: dashboard zichtbaar en niets getypt → suggesties zijn verborgen en mogen niet uitgevoerd worden.
+    private var dashboardBlocksSuggestions: Bool {
+        showsDashboard && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     private var dashboardMaxHeight: CGFloat {
         #if os(macOS)
@@ -218,7 +243,7 @@ struct CommandBarOverlay: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(MediaPlatform.allCases) { p in
-                    Button { withAnimation(.snappy) { token = (token == p ? nil : p) }; focused = true } label: {
+                    Button { withAnimation(Motion.quick()) { token = (token == p ? nil : p) }; focused = true } label: {
                         Label(p.title, systemImage: p.symbol).font(.caption.weight(.medium))
                             .padding(.horizontal, 9).padding(.vertical, 4)
                             .background(Capsule().fill(p == platform && token != nil ? theme.accent.opacity(0.85) : theme.foreground.opacity(0.07)))
@@ -280,7 +305,7 @@ struct CommandBarOverlay: View {
     /// "youtube" + Tab → YouTube-label; wat je daarna typt is de zoekterm.
     private func tabToSearch() -> Bool {
         guard CommandBarPrefs.tabToSearch, token == nil, let p = SearchToken.platform(for: text) else { return false }
-        withAnimation(.snappy) { token = p }
+        withAnimation(Motion.quick()) { token = p }
         text = ""
         return true
     }
@@ -310,7 +335,7 @@ struct CommandBarOverlay: View {
         close()
     }
     private func close() {
-        withAnimation(.easeOut(duration: 0.15)) { workspace.showCommandBar = false }
+        withAnimation(Motion.fade(0.15)) { workspace.showCommandBar = false }
     }
 }
 
@@ -366,4 +391,65 @@ struct PaletteCommand {
         PaletteCommand(title: "Settings", symbol: "gearshape", keywords: ["settings", "preferences", "options"]) { ws in
             NotificationCenter.default.post(name: .joeToepOpenSettings, object: ws.selected.session) },
     ]
+}
+
+
+/// V22.2: open panelen (zoekbalk, instellingen, …) melden zich hier aan. Op de Mac sluit Esc
+/// via een app-brede monitor altijd het bovenste paneel — ook als de webview de focus heeft.
+@MainActor
+enum EscapeStack {
+    struct Entry { let id: UUID; let action: () -> Void; let windowNumber: Int? }
+    static var handlers: [Entry] = []
+    static func push(_ id: UUID, windowNumber: Int? = nil, _ action: @escaping () -> Void) {
+        pop(id); handlers.append(Entry(id: id, action: action, windowNumber: windowNumber))
+    }
+    static func pop(_ id: UUID) { handlers.removeAll { $0.id == id } }
+    /// Heeft dit venster (nil = onbekend) een open paneel?
+    static func hasPanel(in windowNumber: Int?) -> Bool { top(in: windowNumber) != nil }
+    private static func top(in windowNumber: Int?) -> Entry? {
+        handlers.last { $0.windowNumber == nil || windowNumber == nil || $0.windowNumber == windowNumber }
+    }
+    /// true als er iets gesloten werd.
+    @discardableResult
+    static func handle(in windowNumber: Int? = nil) -> Bool {
+        guard let entry = top(in: windowNumber) else { return false }
+        entry.action(); return true
+    }
+}
+
+private struct ClosesOnEscape: ViewModifier {
+    let action: () -> Void
+    @State private var id = UUID()
+    func body(content: Content) -> some View {
+        content
+            #if os(macOS)
+            // V22.2: het venster waarin dit paneel ÉCHT staat (niet het venster dat toevallig key was).
+            .background(WindowNumberReader { number in EscapeStack.push(id, windowNumber: number, action) })
+            #endif
+            .onAppear { EscapeStack.push(id, action) }
+            .onDisappear { EscapeStack.pop(id) }
+    }
+}
+
+#if os(macOS)
+/// Meldt het windowNumber van het venster waarin deze (onzichtbare) view staat, ook bij verhuizen.
+private struct WindowNumberReader: NSViewRepresentable {
+    let onChange: (Int?) -> Void
+    func makeNSView(context: Context) -> NSView { Probe(onChange) }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+    final class Probe: NSView {
+        let onChange: (Int?) -> Void
+        init(_ onChange: @escaping (Int?) -> Void) { self.onChange = onChange; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { self.onChange = { _ in }; super.init(coder: coder) }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let number = window?.windowNumber else { return }
+            DispatchQueue.main.async { [onChange] in onChange(number) }
+        }
+    }
+}
+#endif
+
+extension View {
+    func closesOnEscape(_ action: @escaping () -> Void) -> some View { modifier(ClosesOnEscape(action: action)) }
 }

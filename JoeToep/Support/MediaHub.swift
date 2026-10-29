@@ -134,7 +134,18 @@ final class MediaHub: ObservableObject {
         for other in sources where other.id != source.id && other.playing { pauseSource(other) }
         if !source.playing { toggle(source) }
     }
-    func pauseAll() { sources.filter(\.playing).forEach(pauseSource) }
+    /// V22.2: pauzeert ÉCHT alles — ook een video die net begon en nog niet in de (asynchrone) scan zit.
+    func pauseAll() {
+        sources.filter(\.playing).forEach(pauseSource)
+        for (tab, _) in allTabs where tab.session.currentURL != nil {
+            // V22.2: ook een lopend PiP-verzoek / startende native PiP telt als PiP.
+            if tab.session.isPlaying || tab.session.isInPictureInPicture || tab.session.isPiPRequesting ||
+                tab.session.isNativePiPStarting { tab.session.pauseForRemotePlayback() }
+            run(tab, "pause")          // ook niet-YouTube-media (audio-elementen e.d.)
+            update(tab.id) { $0.playing = false }
+        }
+        if SpotifyController.shared.current?.playing == true { SpotifyController.shared.perform(.pause) }
+    }
     private func pauseSource(_ source: MediaSourceState) {
         switch source.kind {
         case .spotify: SpotifyController.shared.perform(.pause)

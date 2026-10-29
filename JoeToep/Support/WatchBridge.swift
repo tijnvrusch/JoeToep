@@ -99,8 +99,14 @@ final class WatchBridge: NSObject {
     private static func equivalent(_ a: WatchState, _ b: WatchState) -> Bool {
         guard a.devices.count == b.devices.count, a.spotify?.track == b.spotify?.track, a.spotify?.playing == b.spotify?.playing,
               abs((a.spotify?.volume ?? 0) - (b.spotify?.volume ?? 0)) < 1 else { return false }
+        // V22.2: ook Spotify-positie (±2 s, gespoeld), -duur en shuffle/repeat meenemen.
+        if let x = a.spotify, let y = b.spotify {
+            guard abs(x.duration - y.duration) < 1, x.shuffling == y.shuffling, x.repeating == y.repeating,
+                  abs(x.livePosition(at: y.updated) - y.position) <= 2 else { return false }
+        }
         for (x, y) in zip(a.devices, b.devices) {
-            guard x.id == y.id, x.title == y.title, x.playing == y.playing, x.connected == y.connected, x.url == y.url else { return false }
+            guard x.id == y.id, x.title == y.title, x.playing == y.playing, x.connected == y.connected, x.url == y.url,
+                  x.rate == y.rate, abs((x.duration ?? 0) - (y.duration ?? 0)) < 1 else { return false }     // V22.2: snelheid/duur
             let ex = x.livePosition(at: y.updated) ?? 0, ey = y.time ?? 0
             if abs(ex - ey) > 1.5 { return false }
         }
@@ -138,13 +144,12 @@ final class WatchBridge: NSObject {
             return ["items": await YouTubeFeedService.search(message["q"] as? String ?? "").map(\.plist)]
         case "play":
             guard let id = message["id"] as? String else { return ["ok": false] }
-            if workspace == nil && target(message) == TabSyncService.shared.deviceID {
-                return status().merging(["error": "Open JoeToep on your iPhone once, then try again."]) { a, _ in a }
-            }
+            guard let dest = target(message) else { return offlineReply() }     // V22.2
+            if workspace == nil && dest == TabSyncService.shared.deviceID { return noWorkspaceReply() }
             let url = FeedVideo(id: id, title: "", channel: "").url
-            TabSyncService.shared.send(SyncCommand(kind: .play, target: target(message), url: url, value: nil))
+            TabSyncService.shared.send(SyncCommand(kind: .play, target: dest, url: url, value: nil))
             try? await Task.sleep(for: .milliseconds(400))
-            return status(for: target(message))
+            return status(for: dest)
         case "downloads":
             let items = DownloadManager.shared.items.filter { $0.state == .done }
             let sent = sentToWatch
@@ -154,13 +159,14 @@ final class WatchBridge: NSObject {
         case "playDownload":
             guard let raw = message["id"] as? String, let id = UUID(uuidString: raw),
                   let item = DownloadManager.shared.items.first(where: { $0.id == id }) else { return ["ok": false] }
+            if workspace == nil { return noWorkspaceReply() }     // V22.2: de offline-speler hoort bij het venster
             NotificationCenter.default.post(name: DownloadManager.playOffline, object: item.id)
             return status().merging(["title": item.title, "playing": true]) { _, new in new }
         case "sendToWatch":
             guard let raw = message["id"] as? String, let id = UUID(uuidString: raw) else { return ["ok": false] }
             if let q = message["quality"] as? String { watchQuality = q }
-            sendDownload(id)
-            return ["ok": true]
+            // V22.2: alleen "ok" als het overzetten echt kon starten.
+            return sendDownload(id) ? ["ok": true] : ["ok": false, "error": "Can't send this download to your Watch right now."]
         case "downloadCurrent":
             // Download de video op de huidige pagina (alleen openlijk aangeboden bestanden, geen YouTube)
             // en zet hem daarna meteen op de Watch.
@@ -171,17 +177,21 @@ final class WatchBridge: NSObject {
             return ["ok": true, "autoSync": autoSyncDownloads, "quality": watchQuality]
         case "toggle", "seek", "rate":
             let kind = SyncCommand.Kind(rawValue: op) ?? .toggle
-            TabSyncService.shared.send(SyncCommand(kind: kind, target: target(message), url: nil, value: message["v"] as? Double))
+            guard let dest = target(message) else { return offlineReply() }     // V22.2
+            if workspace == nil && dest == TabSyncService.shared.deviceID { return noWorkspaceReply() }
+            TabSyncService.shared.send(SyncCommand(kind: kind, target: dest, url: nil, value: message["v"] as? Double))
             try? await Task.sleep(for: .milliseconds(250))     // even laten verwerken → verse status
             push(force: true)
-            return status(for: target(message))
+            return status(for: dest)
         case "takeover":
             // "Hier verder" op de iPhone: neem de video van dat apparaat over.
+            if workspace == nil { return noWorkspaceReply() }     // V22.2
             if let device = message["device"] as? String { workspace?.takeOverFrom(device: device) }
             try? await Task.sleep(for: .milliseconds(400)); push(force: true)
             return status()
         case "continueOn":
             // De video van de iPhone naar een ander apparaat sturen.
+            if workspace == nil { return noWorkspaceReply() }     // V22.2
             if let device = message["device"] as? String { workspace?.continuePlayback(on: device) }
             try? await Task.sleep(for: .milliseconds(400)); push(force: true)
             return status()
@@ -189,6 +199,8 @@ final class WatchBridge: NSObject {
             // Van apparaat A naar B (bijv. Mac → iPad) — via "verder daar" op A.
             guard let from = message["from"] as? String, let to = message["to"] as? String else { return status() }
             let sync = TabSyncService.shared
+            // V22.2: van/naar de iPhone kan alleen met een venster.
+            if workspace == nil && (from == sync.deviceID || to == sync.deviceID) { return noWorkspaceReply() }
             if from == sync.deviceID { workspace?.continuePlayback(on: to) }
             else if to == sync.deviceID { workspace?.takeOverFrom(device: from) }
             else if let snap = sync.latestByDevice[from], let tab = snap.playingID.flatMap({ id in snap.tabs.first { $0.id == id } }), let url = tab.url {
@@ -210,10 +222,19 @@ final class WatchBridge: NSObject {
         }
     }
 
-    private func target(_ message: [String: Any]) -> String {
+    /// V22.2: nil = het gevraagde apparaat is niet (meer) verbonden — niet stilletjes de iPhone bedienen.
+    private func target(_ message: [String: Any]) -> String? {
         let requested = message["target"] as? String ?? ""
         let sync = TabSyncService.shared
-        return requested.isEmpty || (requested != sync.deviceID && sync.devices[requested] == nil) ? sync.deviceID : requested
+        if requested.isEmpty || requested == sync.deviceID { return sync.deviceID }
+        return sync.devices[requested] == nil ? nil : requested
+    }
+    /// V22.2: foutantwoorden (met verse status, zodat de Watch de apparatenlijst bijwerkt).
+    private func offlineReply() -> [String: Any] {
+        status().merging(["ok": false, "error": "That device is offline."]) { _, new in new }
+    }
+    private func noWorkspaceReply() -> [String: Any] {
+        status().merging(["ok": false, "error": "Open JoeToep on your iPhone once, then try again."]) { _, new in new }
     }
 
     /// Wat de Watch toont: welke video, speelt hij, snelheid, en op welke apparaten je kunt afspelen.
@@ -253,11 +274,13 @@ final class WatchBridge: NSObject {
         return ["ok": true, "title": item.title]
     }
 
-    func sendDownload(_ id: UUID) {
+    /// V22.2: geeft `false` als het overzetten niet kon starten (de Watch telt dan niet op).
+    @discardableResult
+    func sendDownload(_ id: UUID) -> Bool {
         let session = WCSession.default
         guard session.activationState == .activated, session.isWatchAppInstalled,
               let item = DownloadManager.shared.items.first(where: { $0.id == id }),
-              let file = DownloadManager.shared.fileURL(for: item) else { return }
+              let file = DownloadManager.shared.fileURL(for: item) else { return false }
         let quality = watchQuality
         Task.detached(priority: .utility) {
             let prepared = await Self.prepareForWatch(file, audioOnly: item.format.isAudio || quality == "audio", quality: quality) ?? file
@@ -268,6 +291,7 @@ final class WatchBridge: NSObject {
                 var sent = WatchBridge.shared.sentToWatch; sent.insert(item.id.uuidString); WatchBridge.shared.sentToWatch = sent
             }
         }
+        return true
     }
 
     /// Kleiner maken voor de Watch (scherm 200-ish px breed; scheelt opslag en overzettijd).
@@ -323,6 +347,19 @@ extension WatchBridge: WCSessionDelegate {
         // Tijdelijk (verkleind) bestand opruimen.
         let url = fileTransfer.file.fileURL
         if url.lastPathComponent.hasPrefix("watch-") { try? FileManager.default.removeItem(at: url) }
+        // V22.2: mislukte overdracht aan de Watch melden (anders blijft "Receiving…" staan).
+        let meta = UncheckedBox(value: fileTransfer.file.metadata ?? [:])
+        let failed = error != nil
+        Task { @MainActor in
+            let raw = meta.value["id"] as? String ?? ""
+            if let id = UUID(uuidString: raw) { WatchBridge.shared.transfers[id] = nil }
+            guard failed else { return }
+            var sent = WatchBridge.shared.sentToWatch; sent.remove(raw); WatchBridge.shared.sentToWatch = sent
+            let wc = WCSession.default
+            if wc.activationState == .activated, wc.isWatchAppInstalled {
+                wc.transferUserInfo(["transferFailed": meta.value["t"] as? String ?? ""])     // sleutel ook in WatchStore
+            }
+        }
     }
 }
 

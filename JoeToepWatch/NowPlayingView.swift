@@ -25,7 +25,7 @@ struct NowPlayingView: View {
                 }
                 if store.state.devices.count > 1 || store.devices.count > 1 {
                     Picker("Play on", selection: $store.target) {
-                        ForEach(store.state.devices.isEmpty ? store.devices.map { WatchDeviceState(id: $0.id, name: $0.name, kind: "iphone", isPhone: false, connected: true) } : store.state.devices) {
+                        ForEach(store.state.devices.isEmpty ? store.devices.map { WatchDeviceState(id: $0.id, name: $0.name, kind: "iphone", isPhone: false, connected: true) } : store.state.devices.filter(\.connected)) {     // V22.2: geen offline apparaten
                             Label($0.name, systemImage: $0.symbol).tag($0.id)
                         }
                     }
