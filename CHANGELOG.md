@@ -1,3 +1,13 @@
+# 19.0.0 (build 23) — 28-09-2026
+
+- **Ctrl+Tab / Ctrl+Shift+Tab**: door je recent gebruikte tabs (houd Ctrl vast, tik Tab), ook vanuit fullscreen — de nieuwe video gaat dan fullscreen verder.
+- **Automatisch fullscreen gerepareerd**: eerst theatermodus, pas daarna fullscreen (wacht op YouTube); de theaterknop wordt nooit meer tijdens fullscreen ingedrukt; controle + één nieuwe poging na 1,6 s op de Mac.
+- **Vegen/scrubben**: kleine stapjes (standaard 5 s en 1% volume per stapje), werkt ook met Mac Mouse Fix; tijdens vegen YouTube-bediening + voorbeeldplaatje van de positie. Alles instelbaar (Playback › Gestures & scrubbing).
+- **Redesign**: rustige "Minimal"-menubalk (één keer toegepast), lichtere iconen, meer ruimte; menubalk-indelingen Minimal/Standard/Everything, elke knop apart aan/uit.
+- **Sync**: bevestigingen (✓), activiteitenlog, zelf herstellende verbinding zonder doorlopende timer, samenvoegen bij eerste contact, wissel-vriendelijk (geen beelden op het apparaat dat je verliet).
+- **Standaardbrowser**: Mac-knop + uitleg; iPhone/iPad-omweg via `joetoep://` en een "Open in JoeToep"-opdracht in het deelmenu.
+- **Apple Watch**: eigen schema "JoeToepWatch" om direct op de Watch te installeren.
+
 # 18.0.0 (build 22) — 28-09-2026
 
 ## Nieuw

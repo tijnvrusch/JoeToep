@@ -63,7 +63,6 @@ final class TabSyncService: NSObject, ObservableObject {
     /// Laatste gebeurtenissen (nieuwste bovenaan), max. 30 — voor de diagnose in Instellingen.
     @Published private(set) var log: [String] = []
     var currentVersion: UInt64 { ledger.current?.version ?? 0 }
-    private var reconnectTimer: Timer?
     private func note(_ text: String) {
         let stamp = Date().formatted(date: .omitted, time: .standard)
         log.insert("\(stamp)  \(text)", at: 0)
@@ -114,10 +113,19 @@ final class TabSyncService: NSObject, ObservableObject {
         // Vangnet: elke 4 s, als er geen enkel apparaat verbonden is, opnieuw zoeken én adverteren.
         // (MultipeerConnectivity meldt een apparaat maar één keer; na een verbroken verbinding
         //  of een app die even op de achtergrond stond, moet je zelf opnieuw beginnen.)
-        reconnectTimer?.invalidate()
-        reconnectTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.running, (self.session?.connectedPeers.isEmpty ?? true) else { return }
+        scheduleReconnect()
+    }
+
+    /// Zoekt opnieuw zolang er géén apparaat verbonden is, en stopt vanzelf zodra er één is
+    /// (dus geen doorlopende timer als alles werkt).
+    private var reconnectTask: Task<Void, Never>?
+    private func scheduleReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { @MainActor [weak self] in
+            for _ in 0..<45 {                           // max. ±6 minuten, daarna bij volgende activatie weer
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled, let self, self.running else { return }
+                if !(self.session?.connectedPeers.isEmpty ?? true) { return }
                 self.restartDiscovery()
             }
         }
@@ -147,7 +155,7 @@ final class TabSyncService: NSObject, ObservableObject {
     func stop() {
         guard running else { return }
         running = false
-        reconnectTimer?.invalidate(); reconnectTimer = nil
+        reconnectTask?.cancel(); reconnectTask = nil
         advertiser?.stopAdvertisingPeer(); browser?.stopBrowsingForPeers()
         session?.disconnect()
         advertiser = nil; browser = nil; session = nil
@@ -159,7 +167,7 @@ final class TabSyncService: NSObject, ObservableObject {
     func resume() {
         guard UserDefaults.standard.object(forKey: "tabSyncV18") as? Bool ?? true else { return }
         if !running { start(); return }
-        restartDiscovery()
+        restartDiscovery(); scheduleReconnect()
         if let current = ledger.current { broadcast(.snapshot(current)) }
     }
 
@@ -245,6 +253,7 @@ final class TabSyncService: NSObject, ObservableObject {
         if let id = peerDevice.removeValue(forKey: peer) { devices[id] = nil; peerStates[id] = nil }
         refreshPeers()
         note("disconnected: \(peer.displayName) — searching again")
+        if running && (session?.connectedPeers.isEmpty ?? true) { scheduleReconnect() }
     }
 
     private func refreshPeers() {

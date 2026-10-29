@@ -120,7 +120,7 @@ final class DownloadManager: NSObject, ObservableObject {
     static func isDownloadable(_ url: URL) -> Bool {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }
         let host = url.host?.lowercased() ?? ""
-        let blocked = ["googlevideo.com", "youtube.com", "youtu.be", "ytimg.com"]
+        let blocked = ["youtube.com", "youtu.be", "ytimg.com"]
         if blocked.contains(where: { host == $0 || host.hasSuffix("." + $0) }) { return false }
         return url.pathExtension.lowercased() != "m3u8"      // HLS-streams: niet als los bestand
     }
@@ -128,6 +128,8 @@ final class DownloadManager: NSObject, ObservableObject {
     @discardableResult
     func start(source: URL, title: String, page: URL?, format: DownloadFormat, bitrate: AudioBitrate = .k256) -> DownloadItem? {
         guard Self.isDownloadable(source) else { return nil }
+        // Nooit vanaf een YouTube-pagina (die streams zijn beveiligd; zie YouTube's eigen Downloaden).
+        if let host = page?.host?.lowercased(), ["youtube.com", "youtu.be"].contains(where: { host == $0 || host.hasSuffix("." + $0) }) { return nil }
         var item = DownloadItem(title: title.isEmpty ? source.lastPathComponent : title, pageURL: page, sourceURL: source,
                                 format: format, bitrate: bitrate)
         item.state = .downloading

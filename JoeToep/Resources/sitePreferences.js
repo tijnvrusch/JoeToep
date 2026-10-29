@@ -12,6 +12,15 @@
   // Onthoudt voor welke video (key) we theatermodus al hebben aangezet, zodat we dat niet
   // telkens opnieuw proberen te doen (en de gebruiker de knop niet kan uitzetten).
   let theaterKey = '';
+  // V19: volgorde theater → fullscreen, en geen theater-klik vlak rond een fullscreen-verzoek.
+  let theaterRequestedAt = 0, waitingForTheater = false;
+  const observedWatch = new WeakSet();
+  // Luistert (zonder timers) naar YouTube's theater/fullscreen-attributen op de kijkpagina.
+  function watchAttributes(el) {
+    if (observedWatch.has(el)) return;
+    observedWatch.add(el);
+    new MutationObserver(() => schedule()).observe(el, {attributes: true, attributeFilter: ['theater', 'fullscreen']});
+  }
   // lastFullscreenKey: video waarvoor we al één keer automatische fullscreen probeerden.
   // pendingFullscreenKey: een fullscreen-verzoek dat wacht op bevestiging van de native app.
   // queued: voorkomt dat we apply() meerdere keren inplannen binnen dezelfde "tick".
@@ -60,13 +69,23 @@
       try { if (player?.getOption?.('captions', 'track')?.languageCode) player.setOption?.('captions', 'track', {}); } catch (_) {}
     }
     // V16: theater mode by default (YouTube's T) so the video uses the full width before fullscreen.
-    if (configured && config.theater && !document.fullscreenElement && watchPage() && theaterKey !== key()) {
-      const watch = document.querySelector('ytd-watch-flexy');
-      if (watch && !watch.hasAttribute('fullscreen')) {
+    // V19: NOOIT tijdens (of vlak na een verzoek om) fullscreen: de theaterknop indrukken terwijl
+    // fullscreen start, liet de video terugvallen naar theatermodus i.p.v. fullscreen te blijven.
+    const watch = document.querySelector('ytd-watch-flexy');
+    // (Apple's eigen speler ligt over de pagina heen; daar stoort de theaterknop niet.)
+    const anyFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement || watch?.hasAttribute('fullscreen'));
+    if (watch) watchAttributes(watch);
+    if (configured && config.theater && !anyFullscreen && !pendingFullscreenKey && watchPage() && theaterKey !== key()) {
+      if (watch) {
         theaterKey = key();
-        if (!watch.hasAttribute('theater')) document.querySelector('.ytp-size-button')?.click();
+        if (!watch.hasAttribute('theater')) { theaterRequestedAt = Date.now(); document.querySelector('.ytp-size-button')?.click(); }
       }
     }
+    // V19: eerst theatermodus (brede video → soepelere overgang, en na fullscreen blijf je in
+    // theater), pas daarna fullscreen. Wacht op YouTube's 'theater'-attribuut, hooguit 1,5 s.
+    if (configured && config.theater && watch && !watch.hasAttribute('theater') && !anyFullscreen &&
+        Date.now() - theaterRequestedAt < 1500) { waitingForTheater = true; return; }
+    waitingForTheater = false;
     // Een hele reeks voorwaarden die allemaal waar moeten zijn voordat we automatisch
     // fullscreen mogen gaan: de pagina moet zichtbaar zijn, de instelling moet aanstaan,
     // het moet een kijkpagina zijn met een video die al speelt en genoeg geladen is
@@ -113,6 +132,8 @@
   // Bij deze video-events, bij YouTube's eigen "pagina-navigatie klaar"-event, en bij de
   // browser-terugknop (popstate) plannen we een nieuwe toepassing van onze voorkeuren.
   for (const event of ['playing', 'loadedmetadata', 'canplay']) window.addEventListener(event, schedule, true);
+  // Vangnet als het theater-attribuut nooit komt: bij de eerstvolgende tijd-update opnieuw kijken.
+  window.addEventListener('timeupdate', () => { if (waitingForTheater) schedule(); }, true);
   document.addEventListener('yt-navigate-finish', schedule);
   window.addEventListener('popstate', schedule);
   // Een MutationObserver houdt veranderingen in de HTML-boom in de gaten (hier: de hele

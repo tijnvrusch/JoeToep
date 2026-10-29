@@ -411,6 +411,53 @@ final class BrowserWorkspace: ObservableObject {
         }
     }
     /// V16 Ctrl+Tab: back to the tab that was open before (again: forth), like app switching.
+    // MARK: V19 — Ctrl+Tab door recente tabs (zoals de app-wisselaar: houd Ctrl vast, tik Tab)
+    private var recentCycle: [UUID] = []
+    private var recentCycleIndex = 0
+    private var recentCycleFullscreen = false
+
+    /// Eén stap: eerste Tab = vorige tab, volgende Tab (Ctrl nog vast) = die daarvoor, enz.
+    /// Speelde de video fullscreen, dan gaat de nieuwe video ook fullscreen verder.
+    func cycleRecent(backwards: Bool = false) {
+        Self.active = self
+        if recentCycle.isEmpty {
+            // Volgorde: meest recent gebruikt eerst (huidige tab vooraan), daarna de rest.
+            var order = recent.reversed().filter { id in tabs.contains { $0.id == id } }
+            if let i = order.firstIndex(of: selectedID) { order.remove(at: i) }
+            order.insert(selectedID, at: 0)
+            for tab in tabs where !order.contains(tab.id) { order.append(tab.id) }
+            recentCycle = order; recentCycleIndex = 0
+            recentCycleFullscreen = selected.session.isFullscreen
+        }
+        guard recentCycle.count > 1 else { return }
+        recentCycleIndex = (recentCycleIndex + (backwards ? -1 : 1) + recentCycle.count) % recentCycle.count
+        guard let target = tabs.first(where: { $0.id == recentCycle[recentCycleIndex] }) else { return }
+        let current = selected
+        let wasPlaying = current.session.isPlaying
+        if recentCycleFullscreen {
+            // Fullscreen-wissel: huidige video pauzeren (geen PiP), fullscreen sluiten, doorschakelen.
+            current.session.pauseForTabSwitch()
+            current.session.leaveFullscreenForTabSwitch()
+            current.lastActive = Date()
+            selectedID = target.id; target.lastActive = Date()
+            if wasPlaying || NavigationPolicy.isPlaybackPage(target.currentURL) {
+                target.session.remoteToggleIfPaused()
+                Task { @MainActor [weak target] in
+                    try? await Task.sleep(for: .milliseconds(900))
+                    target?.session.enterFullscreenForHandOver()
+                }
+            }
+        } else {
+            select(target)
+        }
+    }
+    func endRecentCycle() {
+        guard !recentCycle.isEmpty else { return }
+        recentCycle = []
+        recent.removeAll { $0 == selectedID }; recent.append(selectedID)
+        persist()
+    }
+
     func selectRecent() {
         guard let previous = recent.last(where: { id in id != selectedID && tabs.contains { $0.id == id } }),
               let tab = tabs.first(where: { $0.id == previous }) else { selectPrevious(); return }
@@ -742,6 +789,7 @@ struct PlayerShellView: View {
                 Button("Library") { showingLibrary = true }.keyboardShortcut("y", modifiers: .command)
                 // V17: Option (⌥) + Tab wisselt naar de vorige (recentste) tab, zoals ⌘+Tab bij apps.
                 Button("Recent tab") { workspace.selectRecent() }.keyboardShortcut(.tab, modifiers: .option)
+                Button("Recent tab (Ctrl)") { workspace.cycleRecent(); workspace.endRecentCycle() }.keyboardShortcut(.tab, modifiers: .control)
                 Button("Force refresh") { workspace.selected.session.forceRefresh() }.keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Next tab") { workspace.selectNext() }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous tab") { workspace.selectPrevious() }.keyboardShortcut("[", modifiers: [.command, .shift])

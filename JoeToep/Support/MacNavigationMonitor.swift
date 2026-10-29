@@ -47,6 +47,20 @@ final class MacNavigationMonitor {
             MainActor.assumeIsolated { MacNavigationMonitor.navigateUnlessTyping(back: back) }
             return event   // doorlaten: in een webtekstveld werkt ⌘← dan nog gewoon
         }) { monitors.append(m) }
+        // V19: Ctrl+Tab / Ctrl+Shift+Tab — door je recente tabs, ook als de video fullscreen speelt
+        // (een local monitor ziet ook toetsen in WebKit's eigen fullscreen-venster).
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { event in
+            let flags = event.modifierFlags.intersection([.control, .shift, .command, .option])
+            guard event.keyCode == 48, flags == [.control] || flags == [.control, .shift] else { return event }
+            let backwards = flags.contains(.shift)
+            MainActor.assumeIsolated { BrowserWorkspace.active?.cycleRecent(backwards: backwards) }
+            return nil
+        }) { monitors.append(m) }
+        // Ctrl losgelaten → de keuze is definitief (volgende Ctrl+Tab begint weer bij de meest recente).
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in
+            if !event.modifierFlags.contains(.control) { MainActor.assumeIsolated { BrowserWorkspace.active?.endRecentCycle() } }
+            return event
+        }) { monitors.append(m) }
         // Trackpad: horizontaal vegen met twee vingers (alleen als WebKit zelf niet terug kan).
         if let m = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { event in
             MainActor.assumeIsolated { MacNavigationMonitor.shared.track(event) }

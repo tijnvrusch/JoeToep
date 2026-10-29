@@ -160,6 +160,17 @@ final class AppSettings: ObservableObject {
     @Published var tabSync: Bool { didSet { save(tabSync, "tabSyncV18") } }
     /// Knoppen "langzamer / sneller" (afspeelsnelheid) in de menubalk.
     @Published var showSpeedControl: Bool { didSet { save(showSpeedControl, "showSpeedControlV18") } }
+    // MARK: V19 gebaren (veeg/scroll in fullscreen, pijltjes)
+    /// Seconden per veeg-stapje (horizontaal vegen / Mac Mouse Fix).
+    @Published var swipeSeekSeconds: Double { didSet { save(swipeSeekSeconds, "swipeSeekSecondsV19") } }
+    /// Volume per stapje, in procenten.
+    @Published var volumeStepPercent: Double { didSet { save(volumeStepPercent, "volumeStepPercentV19") } }
+    /// YouTube-bediening tonen tijdens vegen.
+    @Published var showControlsWhileScrubbing: Bool { didSet { save(showControlsWhileScrubbing, "showControlsWhileScrubbingV19") } }
+    /// Voorbeeldplaatje van de positie tonen tijdens scrubben.
+    @Published var scrubThumbnail: Bool { didSet { save(scrubThumbnail, "scrubThumbnailV19") } }
+    /// YouTube-bediening ook tonen bij de pijltjestoetsen (standaard onzichtbaar).
+    @Published var arrowKeysShowControls: Bool { didSet { save(arrowKeysShowControls, "arrowKeysShowControlsV19") } }
     /// Downloadknop (offline opslaan) in de menubalk.
     @Published var showDownloadButton: Bool { didSet { save(showDownloadButton, "showDownloadButtonV18") } }
     @Published var showTabIcons: Bool { didSet { save(showTabIcons, "showTabIconsV15") } }
@@ -356,6 +367,11 @@ final class AppSettings: ObservableObject {
         tabSync = flag("tabSyncV18", true)
         showSpeedControl = flag("showSpeedControlV18", true)
         showDownloadButton = flag("showDownloadButtonV18", true)
+        swipeSeekSeconds = min(max((defaults.object(forKey: "swipeSeekSecondsV19") as? Double) ?? 5, 1), 30)
+        volumeStepPercent = min(max((defaults.object(forKey: "volumeStepPercentV19") as? Double) ?? 1, 1), 10)
+        showControlsWhileScrubbing = flag("showControlsWhileScrubbingV19", true)
+        scrubThumbnail = flag("scrubThumbnailV19", true)
+        arrowKeysShowControls = flag("arrowKeysShowControlsV19", false)
         showTabIcons = flag("showTabIconsV15", true)
         showMoreMenu = flag("showMoreMenuV15", true)
         showBookmarkButton = flag("showBookmarkButtonV15", false)
@@ -405,6 +421,13 @@ final class AppSettings: ObservableObject {
         // tabtitel-samenvatter configureren.
         Self.applyOrientationLock(self)
         TabTitleSummarizer.configure(from: self)
+        // V19 redesign: één keer de rustige "Minimal"-menubalk en lichtere iconen toepassen.
+        // Daarna blijft elke knop gewoon aan/uit te zetten (en de preset te wisselen).
+        if !defaults.bool(forKey: "redesignAppliedV19") {
+            defaults.set(true, forKey: "redesignAppliedV19")
+            ToolbarPreset.minimal.apply(to: self)
+            iconWeight = .light
+        }
     }
     // snapshot is een berekende property die alle instellingen samenvat in
     // één SettingsSnapshot-waarde (bijvoorbeeld om ze in één keer door te
@@ -432,7 +455,10 @@ final class AppSettings: ObservableObject {
             cookieBannerMode: cookieBannerMode, stripTrackingParameters: stripTrackingParameters,
             globalPrivacyControl: globalPrivacyControl, blockTrackers: blockTrackers, spatialAudio: spatialAudio,
             pipOnAllSites: pipOnAllSites, animationsOff: animationStyle == .off,
-            smartMultiMonitorPiP: smartMultiMonitorPiP)
+            smartMultiMonitorPiP: smartMultiMonitorPiP,
+            swipeSeekSeconds: swipeSeekSeconds, volumeStepPercent: volumeStepPercent,
+            showControlsWhileScrubbing: showControlsWhileScrubbing, scrubThumbnail: scrubThumbnail,
+            arrowKeysShowControls: arrowKeysShowControls)
     }
     // Een gewone functie (geen property): wordt aangeroepen als de
     // gebruiker de servicemelding accepteert, en zet de bijbehorende
@@ -470,6 +496,7 @@ final class AppSettings: ObservableObject {
         blockTrackers = true; clearDataOnQuit = false; spatialAudio = true; backClosesTab = true
         switchToNewTabs = true; pipOnAllSites = true; showCreatorTools = true
         smartMultiMonitorPiP = true; tabSync = true; showSpeedControl = true; showDownloadButton = true
+        swipeSeekSeconds = 5; volumeStepPercent = 1; showControlsWhileScrubbing = true; scrubThumbnail = true; arrowKeysShowControls = false
         showMoreMenu = true; showBookmarkButton = false
         aiTabSummary = true; tabSummaryLength = .short; useAppleIntelligence = true; openNewTabsNextToCurrent = true
         openWebLinksInApp = true; searchEngine = .youtube; recordHistory = true

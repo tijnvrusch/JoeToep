@@ -100,6 +100,9 @@ enum SettingHelp {
         "Spatial audio for AirPods (movie mode, multichannel)": "Surround and head tracking on AirPods Pro and Max.",
         "Show speed buttons (slower / faster)": "Two buttons in the menu bar: one click is one speed step (0.25× to 4×). Long-press resets to 1×.",
         "Show Download button": "Button to save the video or audio of this page for offline use. Works on sites that offer the file; YouTube uses its own Premium downloads.",
+        "Show YouTube controls while swiping": "While you scrub or change volume with a swipe, YouTube's time bar and volume stay visible.",
+        "Preview thumbnail while scrubbing": "Shows the small picture of where you are in the video above the time bar.",
+        "Show YouTube controls for arrow keys": "Off: arrow keys work invisibly so nothing covers the video.",
         // Privacy
         "Cookie banners": "Reject all automatically, only hide the banner, or leave it alone.",
         "Remove tracking parameters from links (utm_, fbclid, si …)": "Cleans tracking codes from links before you open or share them.",

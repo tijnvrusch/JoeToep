@@ -70,5 +70,11 @@ struct SettingsSnapshot: Equatable, Sendable {
     var animationsOff = false
     /// V18: slimme PiP bij meerdere schermen (zie MultiMonitorPiPPolicy).
     var smartMultiMonitorPiP = true
+    // V19 gebaren
+    var swipeSeekSeconds = 5.0
+    var volumeStepPercent = 1.0
+    var showControlsWhileScrubbing = true
+    var scrubThumbnail = true
+    var arrowKeysShowControls = false
     static let standard = SettingsSnapshot()
 }

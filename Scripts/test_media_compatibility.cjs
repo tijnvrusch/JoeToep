@@ -536,10 +536,26 @@ test('V10 desktop theater does not race automatic fullscreen or unconfigured nat
   const button=h.d.createElement('button');button.className='ytp-size-button';watch.append(button);
   let clicks=0;button.addEventListener('click',()=>{clicks++;watch.setAttribute('theater','');});
   h.w.eval(preferencesSource);await Promise.resolve();assert.equal(clicks,0,'not before native configuration');
-  h.w.JoeToepPreferences.configure({automaticFullscreen:true,theater:false});await Promise.resolve();assert.equal(clicks,0);
-  h.w.JoeToepPreferences.configure({automaticFullscreen:true,theater:true});await Promise.resolve();assert.equal(clicks,1,'V16 theater by default');
+  h.w.JoeToepPreferences.configure({automaticFullscreen:false,theater:false});await Promise.resolve();assert.equal(clicks,0);
+  h.w.JoeToepPreferences.configure({automaticFullscreen:false,theater:true});await Promise.resolve();assert.equal(clicks,1,'V16 theater by default');
   watch.removeAttribute('theater');h.w.JoeToepPreferences.configure({theater:true});await Promise.resolve();
   assert.equal(clicks,1,'once per video: a user leaving theater mode is respected');
+  h.close();
+});
+test('V19 theater mode comes first, automatic fullscreen only after YouTube applied it', async () => {
+  const h=harness({mobile:false});h.w.JOETOEP_NATIVE_HOST=true;
+  const watch=h.d.createElement('ytd-watch-flexy');h.d.body.append(watch);
+  const button=h.d.createElement('button');button.className='ytp-size-button';watch.append(button);
+  const order=[];let applyTheater=false;
+  button.addEventListener('click',()=>{order.push('theater');if(applyTheater)watch.setAttribute('theater','');});
+  h.d.addEventListener('joetoep-automatic-fullscreen',()=>order.push('fullscreen'));
+  h.w.eval(preferencesSource);
+  h.w.JoeToepPreferences.configure({automaticFullscreen:true,theater:true});await Promise.resolve();
+  assert.deepEqual(order,['theater'],'fullscreen waits while theater is being applied');
+  watch.setAttribute('theater','');await new Promise(r=>setTimeout(r,0));await Promise.resolve();
+  assert.deepEqual(order,['theater','fullscreen'],'then fullscreen follows exactly once');
+  watch.setAttribute('fullscreen','');watch.removeAttribute('theater');await new Promise(r=>setTimeout(r,0));
+  assert.equal(order.filter(x=>x==='theater').length,1,'never toggles theater while fullscreen');
   h.close();
 });
 test('V10 native automatic fullscreen waits for preferences and consumes exactly one request', async () => {
@@ -697,9 +713,12 @@ test('V10 trackpad changes only the fullscreen video and preserves page scrollin
   Object.defineProperty(h.v,'duration',{value:600});h.v.currentTime=100;h.v.volume=.7;
   let prevented=0;const wheel=(x,y,extra={})=>listeners.wheel({isTrusted:true,target:h.v,deltaMode:0,deltaX:x,deltaY:y,preventDefault(){prevented++;},stopImmediatePropagation(){},...extra});
   wheel(60,0);assert.equal(h.v.currentTime,100);assert.equal(prevented,0);
-  h.d.documentElement.setAttribute('data-joetoep-stage','');wheel(60,0);assert.equal(h.v.currentTime,105);
-  wheel(0,-60);assert.equal(h.v.volume,.75);wheel(0,60);assert.equal(h.v.volume,.7);
-  wheel(60,0,{ctrlKey:true});assert.equal(h.v.currentTime,105);h.close();
+  // V19: every 28 px = one small step (5 s / 1 %), so a 60 px swipe = 2 steps.
+  h.d.documentElement.setAttribute('data-joetoep-stage','');wheel(60,0);assert.equal(h.v.currentTime,110);
+  wheel(0,-60);assert.equal(h.v.volume,.72);wheel(0,60);assert.equal(h.v.volume,.7);
+  wheel(60,0,{ctrlKey:true});assert.equal(h.v.currentTime,110);
+  h.w.JoeToepControls.configure({swipeSeek:1,volumeStep:.05});wheel(30,0);assert.equal(h.v.currentTime,111,'step size is configurable');
+  h.close();
 });
 
 test('V11 slash focuses the YouTube search field and typing in fields is untouched', async () => {

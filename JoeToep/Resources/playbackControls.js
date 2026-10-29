@@ -8,6 +8,8 @@
   if (!window.JoeToepMedia || window.JoeToepControls) return;
   // Zoekt het video-element van de pagina op (YouTube's hoofdvideo, of anders de eerste
   // <video> die er is).
+  // V19: instelbaar vanuit de app (Instellingen › Playback › Gestures).
+  const cfg = {swipeSeek: 5, keySeek: 5, volumeStep: 0.01, swipeThreshold: 28, showControlsOnSwipe: true, scrubThumbnail: true, showControlsOnKeys: false};
   const pick = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
   // Checkt of het element waarop getypt wordt een tekstveld is (input, textarea, etc.),
   // zodat onze sneltoetsen daar niet per ongeluk ingrijpen terwijl iemand aan het typen is.
@@ -37,23 +39,45 @@
     clearTimeout(hideOverlay.t);
     hideOverlay.t=setTimeout(()=>p.classList.remove('joetoep-quiet'),1200);
   }
-  function seek(delta) {
+  // V19: YouTube's bediening tonen (en optioneel het voorbeeldplaatje op de tijdbalk) tijdens
+  // het scrubben met een veeg: we "bewegen" de muis over de tijdbalk op de nieuwe positie, dan
+  // tekent YouTube zelf zijn balk + storyboard-thumbnail.
+  function revealAt(p, time, duration) {
+    try {
+      p.classList.remove('joetoep-quiet','ytp-autohide');
+      p.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:10,clientY:10}));
+      if (!cfg.scrubThumbnail || !Number.isFinite(duration) || duration <= 0) return;
+      const bar=p.querySelector('.ytp-progress-bar'); if(!bar) return;
+      const r=bar.getBoundingClientRect(); if(!r.width) return;
+      const x=r.left+r.width*Math.max(0,Math.min(1,time/duration)), y=r.top+r.height/2;
+      for (const type of ['mouseover','mousemove']) bar.dispatchEvent(new MouseEvent(type,{bubbles:true,clientX:x,clientY:y}));
+      clearTimeout(revealAt.t);
+      revealAt.t=setTimeout(()=>{ try{ bar.dispatchEvent(new MouseEvent('mouseout',{bubbles:true,clientX:x,clientY:y})); }catch(_){} },900);
+    } catch (_) {}
+  }
+  function seek(delta, reveal=false) {
     const p=ytPlayer();
     if(p){ try {
       const now=Number(p.getCurrentTime()), dur=Number(p.getDuration?.())||Infinity;
-      if(Number.isFinite(now)){ p.seekTo(Math.max(0,Math.min(dur,now+delta)),true); hideOverlay(); return true; }
+      if(Number.isFinite(now)){
+        const target=Math.max(0,Math.min(dur,now+delta));
+        p.seekTo(target,true);
+        if (reveal) revealAt(p,target,dur); else hideOverlay();
+        return true;
+      }
     } catch(_){} }
     const v=pick(), range=v && bounds(v);if (!range) return false;
     v.currentTime=Math.max(range[0],Math.min(range[1],v.currentTime+delta));return true;
   }
   // Verandert het volume met "delta" (bijvoorbeeld 0.05 = 5%), afgerond op hele procenten
   // en geknepen tussen 0 en 1. Als het volume boven 0 komt, zetten we mute automatisch uit.
-  function volume(delta) {
+  function volume(delta, reveal=false) {
     const p=ytPlayer();
     if(p && typeof p.setVolume==='function' && typeof p.getVolume==='function'){ try {
       const next=Math.round(Math.max(0,Math.min(100,Number(p.getVolume())+delta*100)));
       p.setVolume(next); if(next>0) p.unMute?.(); else p.mute?.();
-      hideOverlay(); return true;
+      if (reveal) revealAt(p, Number(p.getCurrentTime?.())||0, NaN); else hideOverlay();
+      return true;
     } catch(_){} }
     const v=pick();if(!v)return false;
     v.volume=Math.round(Math.max(0,Math.min(1,v.volume+delta))*100)/100;
@@ -98,12 +122,12 @@
     if(e.key===' ' && !e.metaKey && !e.altKey && !youtubeOwnsSpace)handled=toggle();
     // Pijl-links/rechts spoelt: normaal 5 seconden, met Alt 30, met Alt+Cmd 60.
     if(['ArrowLeft','ArrowRight'].includes(e.key)) {
-      const step=e.altKey?(e.metaKey?60:30):5;
-      if(!e.metaKey||e.altKey)handled=seek(e.key==='ArrowRight'?step:-step);
+      const step=e.altKey?(e.metaKey?60:30):cfg.keySeek;
+      if(!e.metaKey||e.altKey)handled=seek(e.key==='ArrowRight'?step:-step,cfg.showControlsOnKeys);
     }
     // Pijl-omhoog/omlaag verandert het volume met 5%, tenzij Cmd of Alt ingedrukt is
     // (die combinaties zijn dan voor iets anders, zoals browser-sneltoetsen).
-    if(!e.metaKey && !e.altKey && ['ArrowUp','ArrowDown'].includes(e.key))handled=volume(e.key==='ArrowUp'?.05:-.05);
+    if(!e.metaKey && !e.altKey && ['ArrowUp','ArrowDown'].includes(e.key))handled=volume(e.key==='ArrowUp'?cfg.volumeStep*5:-cfg.volumeStep*5,cfg.showControlsOnKeys);
     // preventDefault stopt het standaardgedrag van de browser voor deze toets;
     // stopImmediatePropagation zorgt dat geen andere listener de toets ook nog verwerkt.
     // We sturen ook een eigen event ('joetoep-controls-used') zodat andere delen van de
@@ -129,11 +153,16 @@
     dx+=e.deltaX*scale;dy+=e.deltaY*scale;
     // Horizontale swipe (groter dan verticale, en groot genoeg): spoelen. Verticale swipe:
     // volume aanpassen. Na een actie beginnen we de teller weer op 0.
-    if(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>=45){seek(dx>0?5:-5);dx=dy=0;}
-    else if(Math.abs(dy)>=45){volume(dy<0?.05:-.05);dx=dy=0;}
+    // V19: kleine, gelijkmatige stapjes: elke `swipeThreshold` px = één stap van `swipeSeek` s
+    // (standaard 5 s) of `volumeStep` (standaard 1%). Werkt ook met Mac Mouse Fix (die stuurt
+    // gewone scroll-events, soms in regels i.p.v. pixels — daarom de schaal hierboven).
+    const t=cfg.swipeThreshold;
+    while(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>=t){seek(dx>0?cfg.swipeSeek:-cfg.swipeSeek,cfg.showControlsOnSwipe);dx-=Math.sign(dx)*t;dy=0;}
+    while(Math.abs(dy)>=t && Math.abs(dy)>=Math.abs(dx)){volume(dy<0?cfg.volumeStep:-cfg.volumeStep,cfg.showControlsOnSwipe);dy-=Math.sign(dy)*t;dx=0;}
     e.preventDefault();e.stopImmediatePropagation();document.dispatchEvent(new Event('joetoep-controls-used'));
   },{capture:true,passive:false});
   // Deze functies ook buiten dit bestand beschikbaar maken, maar wel bevroren (Object.freeze)
   // zodat niemand ze per ongeluk kan overschrijven.
-  window.JoeToepControls=Object.freeze({seek,volume,toggle,bounds,rate,rateNow:()=>Number(ytPlayer()?.getPlaybackRate?.() ?? pick()?.playbackRate ?? 1)});
+  window.JoeToepControls=Object.freeze({seek,volume,toggle,bounds,rate,
+    configure(next){ Object.assign(cfg, next||{}); return {...cfg}; },rateNow:()=>Number(ytPlayer()?.getPlaybackRate?.() ?? pick()?.playbackRate ?? 1)});
 })();

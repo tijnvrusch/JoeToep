@@ -326,7 +326,10 @@ final class WebSession: NSObject, ObservableObject {
                 sponsorVideoID = nil; updateSponsorBlock()
             } else { pushSponsorBlock() }
         }
-        if old.pipReturnTarget != updated.pipReturnTarget || old.pipReturnKeepsPlaying != updated.pipReturnKeepsPlaying {
+        if old.pipReturnTarget != updated.pipReturnTarget || old.pipReturnKeepsPlaying != updated.pipReturnKeepsPlaying ||
+            old.swipeSeekSeconds != updated.swipeSeekSeconds || old.volumeStepPercent != updated.volumeStepPercent ||
+            old.showControlsWhileScrubbing != updated.showControlsWhileScrubbing || old.scrubThumbnail != updated.scrubThumbnail ||
+            old.arrowKeysShowControls != updated.arrowKeysShowControls {
             configureCompatibility()
         }
         if old.videoFit != updated.videoFit || old.pinchMode != updated.pinchMode { configureBridge() }
@@ -1395,6 +1398,21 @@ final class WebSession: NSObject, ObservableObject {
                     context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
                     self.webView.keyDown(with: event)
                 }
+                // V19: controle na 1,6 s — kwam fullscreen er niet (YouTube was nog bezig met
+                // theatermodus of de focus sprong weg), dan één keer opnieuw. Nooit als het al
+                // fullscreen is (F is een aan/uit-knop).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+                    guard let self, extraChecks < 20, self.navigationSerial == serial, self.applicationActive,
+                          !self.isFullscreen, self.isPlaying, !self.pip.isActive, !self.pip.isRequesting,
+                          let window = self.webView.window else { return }
+                    self.recordLifecycle("auto-fullscreen: retry")
+                    window.makeFirstResponder(self.webView)
+                    if let retry = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
+                        self.webView.keyDown(with: retry)
+                    }
+                }
             }
         }
         #else
@@ -1552,6 +1570,8 @@ final class WebSession: NSObject, ObservableObject {
 
     private func configureCompatibility() {
         webView.evaluateJavaScript("window.JoeToepMedia?.configure({protect:\(settings.backgroundProtection),automatic:\(settings.automaticPiP),nativeFullscreen:\(settings.nativeFullscreen),macFullscreen:'\(settings.macFullscreenMode.rawValue)',fallback:\(settings.pipFallbackEnabled),elementFullscreen:\(usesElementFullscreen),returnTarget:'\(settings.pipReturnTarget.rawValue)',keepPlaying:\(settings.pipReturnKeepsPlaying)})", completionHandler: nil)
+        // V19: gebaren-instellingen naar de toets/veeg-bediening.
+        webView.evaluateJavaScript("window.JoeToepControls?.configure({swipeSeek:\(settings.swipeSeekSeconds),keySeek:5,volumeStep:\(settings.volumeStepPercent / 100),showControlsOnSwipe:\(settings.showControlsWhileScrubbing),scrubThumbnail:\(settings.scrubThumbnail),showControlsOnKeys:\(settings.arrowKeysShowControls)}); 0", completionHandler: nil)
         webView.evaluateJavaScript("window.JoeToepPreferences?.configure({automaticFullscreen:\(settings.automaticFullscreen),disableCaptions:\(settings.disableCaptions),disablePreviewCaptions:\(settings.disablePreviewCaptions),theater:\(settings.theaterMode)})", completionHandler: nil)
     }
 

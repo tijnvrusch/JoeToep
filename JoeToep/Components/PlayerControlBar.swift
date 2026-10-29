@@ -50,7 +50,7 @@ struct PlayerControlBar: View {
         #else
         let preferred: CGFloat = density.isEnlarged ? density.height - 6 : 40
         #endif
-        let fits = (availableWidth - 12) / CGFloat(visibleButtonCount)
+        let fits = (availableWidth - 24) / CGFloat(visibleButtonCount)
         return max(24, min(preferred, fits))
     }
     var body: some View {
@@ -86,7 +86,8 @@ struct PlayerControlBar: View {
                     .accessibilityIdentifier("toolbar.settings")
             }
         }
-        .padding(.horizontal, 4)
+        // V19 redesign: meer lucht aan de zijkanten, geen harde lijn bovenaan.
+        .padding(.horizontal, 10)
         .frame(height: settings.toolbarDensity.height)
         .background { ZStack { theme.background; AudioVisualizer(playing: session.isPlaying && !session.isFullscreen && !session.isInPictureInPicture) } }
         .animation(theme.anim(.toolbar), value: settings.toolbarDensity)
@@ -94,8 +95,7 @@ struct PlayerControlBar: View {
         .sheet(isPresented: $showingCreatorTools) { CreatorToolsView(session: session) }
         .sheet(isPresented: $showingDownload) { DownloadSheet(session: session) }
         #if os(macOS)
-        .overlay(alignment: .top) { theme.style.separator.frame(height: 1).allowsHitTesting(false) }
-        .overlay(alignment: .bottom) { theme.style.separator.frame(height: 1).allowsHitTesting(false) }
+        .overlay(alignment: .bottom) { theme.style.separator.opacity(0.5).frame(height: 0.5).allowsHitTesting(false) }
         #endif
     }
 

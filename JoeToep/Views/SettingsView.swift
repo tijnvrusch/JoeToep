@@ -427,6 +427,19 @@ private struct PlaybackSettings: View {
                 }
             }
             #endif
+            Section("Gestures & scrubbing") {
+                Stepper(value: $settings.swipeSeekSeconds, in: 1...30, step: 1) {
+                    SettingLabel(title: "Swipe step: \(Int(settings.swipeSeekSeconds)) s")
+                }
+                Stepper(value: $settings.volumeStepPercent, in: 1...10, step: 1) {
+                    SettingLabel(title: "Volume step: \(Int(settings.volumeStepPercent))%")
+                }
+                SettingToggle("Show YouTube controls while swiping", isOn: $settings.showControlsWhileScrubbing)
+                SettingToggle("Preview thumbnail while scrubbing", isOn: $settings.scrubThumbnail)
+                    .disabled(!settings.showControlsWhileScrubbing)
+                SettingToggle("Show YouTube controls for arrow keys", isOn: $settings.arrowKeysShowControls)
+                detail("Fullscreen: swipe sideways with two fingers (or Mac Mouse Fix) to scrub, up/down for volume. Arrow keys: ←/→ 5 s, ⌥ 30 s, ⌥⌘ 60 s; ↑/↓ five volume steps.")
+            }
             Section("Watching") {
                 SettingToggle("Theater mode (full width)", isOn: $settings.theaterMode)
                 SettingToggle("Open videos in fullscreen automatically", isOn: $settings.automaticFullscreen)
@@ -718,6 +731,17 @@ private struct LayoutSettings: View {
                     ForEach(ToolbarDensity.allCases) { Text($0.title).tag($0) }
                 }
                 detail("Eight sizes. Cozy, Medium and Roomy sit just below Large. Hold or middle-click Home, Subscriptions or Library to open them in a new tab; hold Refresh to force-refresh the player. Settings stays reachable with ⌘, and the ⋯ menu when its button is hidden.")
+            }
+            Section("Layout") {
+                Menu {
+                    ForEach(ToolbarPreset.allCases) { preset in
+                        Button(preset.title) { preset.apply(to: settings) }
+                    }
+                } label: {
+                    Label("Apply a menu bar layout…", systemImage: "rectangle.3.group")
+                }
+                .accessibilityIdentifier("settings.toolbarPreset")
+                detail("Minimal keeps only Back/Forward, Home, speed, PiP, ⋯ and Settings in view — everything else stays one tap away in ⋯. Fine-tune each button below.")
             }
             Section("Buttons") {
                 #if os(iOS)
