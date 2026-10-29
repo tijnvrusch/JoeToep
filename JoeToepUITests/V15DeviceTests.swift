@@ -258,4 +258,60 @@ final class V15DeviceTests: XCTestCase {
         throw XCTSkip("Mobile PiP")
         #endif
     }
+
+    /// V17.1: the "…" panel shows every option at once — the first and last buttons are both
+    /// visible and tappable without scrolling.
+    @MainActor func testMorePanelShowsAllOptionsWithoutScrolling() throws {
+        #if os(iOS)
+        app.launch()
+        let more = app.buttons["toolbar.more"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+        let first = app.buttons["more.New Tab"], last = app.buttons["more.Settings"]
+        XCTAssertTrue(first.waitForExistence(timeout: 3))
+        XCTAssertTrue(first.isHittable, "first option visible"); XCTAssertTrue(last.isHittable, "last option visible without scrolling")
+        attach("More panel")
+        first.tap()
+        XCTAssertFalse(last.waitForExistence(timeout: 1.5) && last.isHittable, "panel closes after choosing")
+        #else
+        throw XCTSkip("iOS panel")
+        #endif
+    }
+
+    /// V17.1 stress: PiP while the app is under load — 6 extra tabs loading, rapid tab switches
+    /// and 8 PiP → return cycles. Every cycle must end fullscreen and keep playing.
+    @MainActor func testPiPUnderHeavyLoad() throws {
+        #if os(iOS)
+        // Real load: the app keeps 3 CPU threads busy the whole test ("--cpu-load"), on top of
+        // the web process decoding video.
+        app.launchArguments = ["--uitesting", "--skip-onboarding", "--cpu-load"]
+        app.launch()
+        let play = app.webViews.buttons["Play test video"]
+        XCTAssertTrue(play.waitForExistence(timeout: 25)); play.tap()
+        XCTAssertTrue(waitFor("play=1", timeout: 10), "plays under load: \(probe)")
+        app.webViews.buttons["Fullscreen test video"].tap()
+        XCTAssertTrue(waitFor("fs=1", timeout: 6), "fullscreen under load: \(probe)")
+        var results: [String] = []
+        for cycle in 1...8 {
+            sleep(1)
+            XCUIDevice.shared.press(.home)
+            guard pipWindow.waitForExistence(timeout: 8) else { results.append("\(cycle): no PiP"); app.activate(); continue }
+            sleep(2)
+            var restored = false
+            for _ in 0..<4 where !restored {
+                pipWindow.tap()
+                let restore = springboard.buttons["Restore fullscreen"]
+                if restore.waitForExistence(timeout: 1.5) && restore.isHittable { restore.tap(); restored = true }
+            }
+            guard restored else { results.append("\(cycle): restore unreachable"); app.activate(); continue }
+            let ok = waitFor("fs=1", timeout: 4); usleep(500_000)
+            results.append("\(cycle): \(ok ? "ok" : "FAIL") \(probe) :: \(app.staticTexts["debug.lifecycle"].firstMatch.label)")
+        }
+        let log = XCTAttachment(string: results.joined(separator: "\n")); log.name = "PiP under load"; log.lifetime = .keepAlways; add(log)
+        let failures = results.filter { !$0.contains(": ok") || !$0.contains("play=1") }
+        XCTAssertTrue(failures.isEmpty, "PiP under load: \(failures)")
+        app.terminate()                                        // leave a clean state for the next test
+        #else
+        throw XCTSkip("Mobile PiP")
+        #endif
+    }
 }

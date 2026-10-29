@@ -40,5 +40,14 @@ final class JoeToepAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         MainActor.assumeIsolated { OrientationCoordinator.supportedOrientations(for: window) }
     }
+    /// V18: de Watch kan de iPhone-app op de achtergrond wekken; dan moet de verbinding er al
+    /// zijn vóórdat er een venster bestaat.
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        MainActor.assumeIsolated {
+            WatchBridge.shared.activateSession()
+            if UserDefaults.standard.object(forKey: "tabSyncV18") as? Bool ?? true { TabSyncService.shared.start() }
+        }
+        return true
+    }
 }
 #endif

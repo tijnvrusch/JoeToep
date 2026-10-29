@@ -154,8 +154,10 @@ enum AnimationStyle: String, CaseIterable, Identifiable, Codable, Sendable {
     }
     var animation: Animation? { animation(speed: 1) }
     /// `speed` > 1 is faster (shorter), < 1 slower.
+    /// V16.2.1: the allowed range is now 0.0025…400 (global 0.05–20 × per-animation 0.05–20),
+    /// so a 20× faster global speed can still be combined with a 20× faster single animation.
     func animation(speed: Double) -> Animation? {
-        let s = max(0.2, min(speed, 5))
+        let s = max(0.0025, min(speed, 400))
         switch self {
         case .off: return nil
         case .snappy: return .snappy(duration: 0.2 / s)
@@ -190,18 +192,62 @@ struct AnimationProfile: Codable, Equatable, Sendable {
     var speed: Double = 1
 }
 
-/// V16: menu-bar audio visualizer.
+/// V16/V17.1: de audiovisualizer in de tab- en menubalk (Instellingen › Weergave › Visualizer).
 enum VisualizerStyle: String, CaseIterable, Identifiable, Sendable {
-    case bars, wave, glow, off
+    case off, bars, mirror, wave, line, dots, blocks, glow, pulse
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .bars: "Bars"
-        case .wave: "Wave"
-        case .glow: "Glow"
         case .off: "Off"
+        case .bars: "Bars"
+        case .mirror: "Mirrored bars"
+        case .wave: "Wave"
+        case .line: "Spectrum line"
+        case .dots: "Dots"
+        case .blocks: "LED blocks (retro)"
+        case .glow: "Glow"
+        case .pulse: "Pulse"
         }
     }
+}
+
+/// V17.1: hoe de visualizer gekleurd wordt.
+enum VisualizerColorMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case accent, gradient, rainbow, white, custom
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .accent: "Accent colour"
+        case .gradient: "Accent → second colour"
+        case .rainbow: "Rainbow"
+        case .white: "White"
+        case .custom: "Custom colour"
+        }
+    }
+}
+
+/// V17.1: waar de visualizer in de balk staat.
+enum VisualizerPlacement: String, CaseIterable, Identifiable, Codable, Sendable {
+    case bottom, center, top
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+/// V17.1: alle fijne instellingen van de visualizer in één pakketje. `Codable` = kan als tekst
+/// (JSON) worden opgeslagen, zodat we niet voor elke schuifregelaar een aparte sleutel nodig hebben.
+struct VisualizerConfig: Codable, Equatable, Sendable {
+    var colorMode: VisualizerColorMode = .accent
+    var colorA = "#FF0033"          // tweede/eigen kleur (hex)
+    var bars = 48                   // aantal staven/punten (8…160)
+    var speed = 1.0                 // animatiesnelheid (0.25…3)
+    var bpm = 0.0                   // 0 = vrij bewegen; anders pulseert het op dit tempo
+    var height = 1.0                // hoogte t.o.v. de balk (0.2…1)
+    var opacity = 0.55              // doorzichtigheid (0.1…1)
+    var glow = false                // zachte gloed eromheen
+    var mirror = false              // spiegel links ↔ rechts
+    var placement: VisualizerPlacement = .bottom
+    var smoothing = 0.5             // 0 = springerig, 1 = heel vloeiend
+    var roundedCaps = true          // afgeronde staafuiteinden
 }
 
 enum TabShape: String, CaseIterable, Identifiable, Sendable {
@@ -232,6 +278,14 @@ enum TabTextSize: String, CaseIterable, Identifiable, Sendable {
         case .small: .caption
         case .regular: .footnote
         case .large: .subheadline
+        }
+    }
+    /// V16.2.1: the same sizes in points, so they can be multiplied by the text-size factor.
+    var pointSize: Double {
+        switch self {
+        case .small: 11
+        case .regular: 12.5
+        case .large: 14.5
         }
     }
 }

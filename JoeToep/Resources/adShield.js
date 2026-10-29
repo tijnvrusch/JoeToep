@@ -6,38 +6,60 @@
  * Installed at document start in the page world; configuration arrives in JOETOEP_ADSHIELD. */
 (() => {
   'use strict';
+  // Alleen op YouTube (of, voor onze eigen tests, een lokaal bestand met JOETOEP_TEST aan).
   const host = location.hostname.toLowerCase();
   if (!(host === 'youtube.com' || host.endsWith('.youtube.com') || (location.protocol === 'file:' && window.JOETOEP_TEST))) return;
+  // Niet dubbel opzetten.
   if (window.JoeToepAdShield) return;
+  // Object.assign kopieert eigenschappen van het tweede object over het eerste: zo krijgen
+  // we standaardwaarden (allemaal uit) die overschreven worden door wat de native app al
+  // vóór het laden van dit script in window.JOETOEP_ADSHIELD heeft klaargezet.
   const config = Object.assign({ enabled: false, skip: false, fastForward: false, prune: false, pruneFeed: false, dismissWarnings: false, cosmetic: false },
     window.JOETOEP_ADSHIELD || {});
+  // Telt hoe vaak we elke actie hebben uitgevoerd, zodat de app dit kan tonen aan de gebruiker.
   const stats = { skipped: 0, fastForwarded: 0, pruned: 0, feedPruned: 0, warnings: 0 };
+  // Als adblokkeren helemaal uitstaat, zetten we alleen de (lege) publieke API klaar en stoppen we.
   if (!config.enabled) {
     window.JoeToepAdShield = Object.freeze({ config: () => ({ ...config }), stats: () => ({ ...stats }) });
     return;
   }
+  // Dit zijn de sleutels in YouTube's eigen data-objecten die advertentie-plaatsen beschrijven.
   const PLAYER_KEYS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
+  // Snelle check (op de rauwe tekst, vóór het JSON.parse'en) of een stuk data überhaupt
+  // iets met advertenties te maken zou kunnen hebben — zo hoeven we niet elk stuk JSON op
+  // de pagina te doorzoeken.
   const hasAdKeys = text => typeof text === 'string' && text.length > 60 &&
     (text.includes('"adPlacements"') || text.includes('"playerAds"') || text.includes('"adSlots"') ||
      (config.pruneFeed && text.includes('adSlotRenderer')));
+  // Verwijdert de advertentie-sleutels (PLAYER_KEYS) uit het speler-object van YouTube,
+  // zodat de speler zelf geen advertenties meer kan plannen. We checken drie mogelijke
+  // plekken waar dat object zich kan bevinden, afhankelijk van hoe de data is opgebouwd.
   function prunePlayer(obj) {
     if (!obj || typeof obj !== 'object') return obj;
     let removed = 0;
     for (const target of [obj, obj.playerResponse, obj.response?.playerResponse]) {
       if (!target || typeof target !== 'object') continue;
+      // hasOwnProperty checkt of de sleutel er echt op dit object staat (niet via prototype).
       for (const key of PLAYER_KEYS) if (Object.prototype.hasOwnProperty.call(target, key)) { delete target[key]; removed++; }
     }
     if (removed) stats.pruned += removed;
     return obj;
   }
+  // Herkent of een "item" uit de feed (startpagina/zoekresultaten) een advertentie is,
+  // door te kijken of het één van de bekende advertentie-renderer-sleutels bevat.
   const isAdItem = item => item && typeof item === 'object' && (
     'adSlotRenderer' in item || 'promotedSparklesWebRenderer' in item || 'searchPyvRenderer' in item ||
     'promotedVideoRenderer' in item || 'compactPromotedVideoRenderer' in item || 'inFeedAdLayoutRenderer' in item ||
     (item.richItemRenderer && item.richItemRenderer.content && 'adSlotRenderer' in item.richItemRenderer.content) ||
     (item.richSectionRenderer && JSON.stringify(item.richSectionRenderer).includes('"adSlotRenderer"')));
+  // Loopt recursief (roept zichzelf steeds opnieuw aan, dieper de boom in) door het hele
+  // data-object en verwijdert advertentie-items uit arrays. "depth" voorkomt dat we bij een
+  // heel diep genest object voor altijd doorgaan (veiligheidslimiet).
   function pruneFeed(node, depth = 0) {
     if (!node || typeof node !== 'object' || depth > 40) return;
     if (Array.isArray(node)) {
+      // Van achteren naar voren doorlopen, want splice() verandert de lengte van de array
+      // — van voren naar achteren zou items overslaan.
       for (let i = node.length - 1; i >= 0; i--) {
         if (isAdItem(node[i])) { node.splice(i, 1); stats.feedPruned++; }
         else pruneFeed(node[i], depth + 1);
@@ -49,21 +71,35 @@
       if (value && typeof value === 'object') pruneFeed(value, depth + 1);
     }
   }
+  // Combineert beide opschoon-stappen: altijd de speler-advertenties weg, en als
+  // pruneFeed aanstaat ook de feed-advertenties.
   function clean(obj) {
     prunePlayer(obj);
     if (config.pruneFeed) pruneFeed(obj);
     return obj;
   }
   if (config.prune) {
+    // We "hooken" (vervangen) de ingebouwde JSON.parse-functie door onze eigen versie die
+    // eerst normaal parset en daarna, als het om speler-data lijkt te gaan, de advertenties
+    // eruit haalt. YouTube gebruikt zelf JSON.parse om zijn data te lezen, dus zo grijpen
+    // we in vóórdat YouTube de advertentie-info ooit ziet.
     const nativeParse = JSON.parse;
     const parse = function(text, reviver) {
       const result = nativeParse.call(this, text, reviver);
       try { if (hasAdKeys(text)) clean(result); } catch (_) {}
       return result;
     };
+    // We doen ons best om onze vervangfunctie te vermommen als de originele (naam en
+    // toString), zodat scripts die controleren "is dit nog de native functie?" niet raar
+    // gaan doen. Dit is puur cosmetisch/compatibiliteit, geen beveiliging.
     try { Object.defineProperty(parse, 'name', { value: 'parse' }); } catch (_) {}
     parse.toString = () => 'function parse() { [native code] }';
     JSON.parse = parse;
+    // YouTube zet zijn beginwaarden vaak direct in window.ytInitialPlayerResponse /
+    // ytInitialData (los van JSON.parse, als een <script>-tag met een toewijzing).
+    // Object.defineProperty met een eigen get/set laat ons "meeluisteren" zodra YouTube
+    // zo'n waarde toekent: de set-functie hieronder schoont de data op vóórdat hij echt
+    // wordt opgeslagen, en de get-functie geeft gewoon de (opgeschoonde) waarde terug.
     for (const name of ['ytInitialPlayerResponse', 'ytInitialData']) {
       let stored;
       try {
@@ -72,15 +108,26 @@
           set(value) { try { stored = name === 'ytInitialData' ? (config.pruneFeed ? (pruneFeed(value), value) : value) : clean(value); } catch (_) { stored = value; } } });
       } catch (_) {}
     }
+    // Ook de ingebouwde fetch-functie (waarmee de pagina later, zonder herladen, nieuwe
+    // data ophaalt) vervangen we door een versie die de respons naleest en, als het om een
+    // relevante YouTube-API-aanroep gaat, de advertentiedata eruit filtert vóór YouTube
+    // het antwoord te zien krijgt.
     const nativeFetch = window.fetch;
     if (typeof nativeFetch === 'function') {
       const wrapped = async function(input, init) {
+        // Eerst gewoon het echte netwerkverzoek laten gebeuren.
         const response = await nativeFetch.apply(this, arguments);
         try {
           const url = typeof input === 'string' ? input : (input && input.url) || '';
+          // Alleen ingrijpen bij YouTube's eigen interne API-endpoints, en alleen bij een
+          // geslaagd antwoord.
           if (!/\/youtubei\/v1\/(player|next|browse|search|reel)/.test(url) || !response.ok) return response;
+          // response.clone() maakt een kopie van de respons, zodat we de tekst kunnen lezen
+          // zonder de originele respons "op te maken" (een Response kan maar één keer gelezen worden).
           const text = await response.clone().text();
           if (!hasAdKeys(text)) return response;
+          // De opgeschoonde data weer terug in een nieuwe Response stoppen, met dezelfde
+          // status en headers, zodat YouTube niets merkt behalve dat de advertenties weg zijn.
           const body = JSON.stringify(clean(nativeParse(text)));
           return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
         } catch (_) { return response; }

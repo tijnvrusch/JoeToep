@@ -1,22 +1,37 @@
+// Dit bestand tekent één enkel tabblad met daarin de video-player (webpagina)
+// en de bedieningsbalk eromheen, en luistert naar allerlei systeemgebeurtenissen
+// (app naar achtergrond, scherm vergrendeld, enz.) om de speler correct te laten reageren.
 import SwiftUI
+// Op iPhone/iPad gebruiken we UIKit-notificaties (bijv. voor scènes/schermrotatie);
+// op de Mac gebruiken we in plaats daarvan AppKit-notificaties.
 #if os(iOS)
 import UIKit
 #else
 import AppKit
 #endif
 
+// Eén "kaart" in de tab-workspace: de webweergave plus bedieningsbalk voor één tabblad.
 struct TabPlayerView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var session: WebSession
+    // "let" (in plaats van "var") betekent dat deze waarde niet meer verandert
+    // nadat de view is aangemaakt: geeft aan of dít tabblad het actieve is.
     let selected: Bool
+    // Een optionele waarde (kan nil zijn) met standaardwaarde nil: extra acties
+    // die alleen op macOS vanuit het menu worden doorgegeven.
     var actions: WorkspaceActions? = nil
     @State private var showingSettings = false
     @Environment(\.joeToepTheme) private var theme
+    // Leest de systeeminstelling "Beweging verminderen" (toegankelijkheid).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // GeometryReader geeft je de beschikbare breedte/hoogte van de ruimte
+        // waarin deze view getekend wordt, zodat je daarop kan inspelen.
         GeometryReader { geometry in
             VStack(spacing: 0) {
+                // Op de Mac staat de bedieningsbalk bovenaan (behalve tijdens
+                // een echte video-fullscreen/"video stage").
                 #if os(macOS)
                 if !session.isVideoStage {
                 PlayerControlBar(session: session, settings: settings, availableWidth: geometry.size.width, actions: actions) {
@@ -24,11 +39,16 @@ struct TabPlayerView: View {
                 }
                 }
                 #endif
+                // ZStack stapelt views bovenop elkaar (in plaats van naast of
+                // onder elkaar); de laatst genoemde ligt bovenop.
                 ZStack {
+                    // De eigenlijke webpagina/video, getoond via een systeem-webview.
                     WebContentView(webView: session.webView)
                         .accessibilityIdentifier("player.webView")
                     if session.isTestMode {
                         // UI-test probe: real presentation state (fullscreen / PiP / playing).
+                        // Bijna onzichtbare tekst (opacity 0.02) die alleen door
+                        // geautomatiseerde tests wordt uitgelezen, niet door mensen.
                         Text("fs=\(session.isFullscreen ? 1 : 0) pip=\(session.isInPictureInPicture ? 1 : 0) play=\(session.isPlaying ? 1 : 0)")
                             .font(.system(size: 8)).opacity(0.02).allowsHitTesting(false)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -39,6 +59,9 @@ struct TabPlayerView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("debug.lifecycle")
                     }
+                    // Als de video losgekoppeld in een zwevend mini-venster
+                    // (Picture-in-Picture) afspeelt, tonen we hier een melding
+                    // in plaats van de gewone webpagina.
                     if session.isFloating {
                         VStack(spacing: 12) {
                             Image(systemName: "pip.fill").font(.largeTitle)
@@ -52,7 +75,10 @@ struct TabPlayerView: View {
                 }
                 .padding(settings.edgeToEdge ? 0 : 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // .clipped() knipt alles wat buiten deze view valt weg, zodat
+                // er niks buiten de grenzen zichtbaar blijft.
                 .clipped()
+                // Op iPhone/iPad staat de bedieningsbalk juist ONDERaan.
                 #if os(iOS)
                 if !session.isVideoStage {
                 PlayerControlBar(session: session, settings: settings, availableWidth: geometry.size.width, actions: actions) {
@@ -63,7 +89,11 @@ struct TabPlayerView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
+            // .overlay(alignment: .top) legt extra inhoud bovenop, hier
+            // uitgelijnd aan de bovenkant: een tijdelijke meldingsbanner.
             .overlay(alignment: .top) {
+                // "if let" pakt de waarde uit een optional (session.notice)
+                // en gaat alleen het blok in als die niet nil is.
                 if let notice = session.notice {
                     NoticeBanner(notice: notice, dismiss: session.dismissNotice)
                         .padding(.horizontal, 10)
@@ -74,6 +104,9 @@ struct TabPlayerView: View {
                         #endif
                         .frame(maxWidth: min(520, geometry.size.width))
                         .accessibilityIdentifier("notice.banner")
+                        // .task(id:) start een achtergrondtaak die opnieuw
+                        // begint zodra de meegegeven id (notice.id) verandert;
+                        // hier: verberg de banner automatisch na 5 seconden.
                         .task(id: notice.id) {
                             try? await Task.sleep(for: .seconds(5))
                             guard !Task.isCancelled, session.notice?.id == notice.id else { return }
@@ -83,12 +116,16 @@ struct TabPlayerView: View {
             }
         }
         .background(theme.background.ignoresSafeArea())
+        // .task draait automatisch zodra deze view voor het eerst verschijnt.
         .task {
+            // Alleen het geselecteerde (actieve) tabblad laden we meteen de webpagina.
             if selected { session.start(with: settings.snapshot) }
             #if os(iOS)
             session.webView.accessibilityElementsHidden = !selected
             #endif
         }
+        // .onChange(of:) draait telkens als de waarde van "selected" wijzigt
+        // (dus als je van tabblad wisselt).
         .onChange(of: selected) { _, visible in
             if visible { session.start(with: settings.snapshot) }
             #if os(iOS)
@@ -96,7 +133,11 @@ struct TabPlayerView: View {
             session.webView.accessibilityElementsHidden = !visible
             #endif
         }
+        // Als de gebruiker instellingen wijzigt, passen we die direct toe op de sessie.
         .onChange(of: settings.snapshot) { _, updated in session.apply(updated) }
+        // .sheet toont een apart schermpje (modaal) bovenop dit scherm. Hier
+        // combineren we twee mogelijke redenen (instellingen of inlogscherm)
+        // in één handgemaakte Binding met eigen get/set-logica.
         .sheet(isPresented: Binding(
             get: { showingSettings || session.authenticationWebView != nil },
             set: { if !$0 { showingSettings = false; session.authenticationWebView = nil } }
@@ -114,6 +155,7 @@ struct TabPlayerView: View {
             } else {
                 SettingsView(settings: settings, session: session)
                     .environment(\.joeToepTheme, theme)
+                    .joeToepTextScale(theme.textScale)   // V16.2.1: settings follow the text size
                     .preferredColorScheme(theme.style.colorScheme)
                     .tint(theme.accent)
                     #if os(macOS)
@@ -121,9 +163,16 @@ struct TabPlayerView: View {
                     #endif
             }
         }
+        // .onReceive luistert naar berichten via NotificationCenter (Apple's
+        // systeem om gebeurtenissen door de hele app te versturen). Hier:
+        // reageer op het bericht "open instellingen" als dit tabblad actief is.
         .onReceive(NotificationCenter.default.publisher(for: .joeToepOpenSettings)) { note in
             if selected, (note.object as AnyObject?) === session { showingSettings = true }
         }
+        // De volgende blokken luisteren naar systeemgebeurtenissen: app naar
+        // de achtergrond/voorgrond, scherm vergrendeld/ontgrendeld, gedraaid,
+        // enzovoort, en geven dat door aan de sessie zodat de video netjes
+        // pauzeert/hervat.
         #if os(iOS)
         .onReceive(NotificationCenter.default.publisher(for: UIScene.willDeactivateNotification)) { note in
             if let scene = note.object as? UIScene, scene === session.webView.window?.windowScene,
@@ -147,6 +196,7 @@ struct TabPlayerView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             if selected { session.deviceOrientationChanged() }
         }
+        // Zet het ontvangen van schermrotatie-gebeurtenissen aan zodra deze view verschijnt.
         .onAppear { UIDevice.current.beginGeneratingDeviceOrientationNotifications() }
         #else
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in

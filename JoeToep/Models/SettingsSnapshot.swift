@@ -59,5 +59,16 @@ struct SettingsSnapshot: Equatable, Sendable {
     var theaterMode = true
     var dataSaverOnCellular = false
     var cellularQuality: PlaybackQualityPreference = .p720
+    // V17 — dezelfde betekenis als in AppSettings; hier als "momentopname" die de web-sessie leest.
+    var cookieBannerMode: CookieBannerMode = .rejectAll
+    var stripTrackingParameters = true
+    var globalPrivacyControl = true
+    var blockTrackers = true
+    var spatialAudio = true
+    var pipOnAllSites = true
+    /// Alle animaties uit → JoeToep gebruikt ook zijn kortst mogelijke wachttijden (snelste modus).
+    var animationsOff = false
+    /// V18: slimme PiP bij meerdere schermen (zie MultiMonitorPiPPolicy).
+    var smartMultiMonitorPiP = true
     static let standard = SettingsSnapshot()
 }

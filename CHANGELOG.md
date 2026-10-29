@@ -1,3 +1,135 @@
+# 18.0.0 (build 22) — 28-09-2026
+
+## Nieuw
+- **Live tab-sync** tussen Mac, iPad en iPhone (MultipeerConnectivity, geen iCloud nodig): tabs openen/sluiten/wisselen, video en afspeelpositie synchroniseren direct; nieuwste wijziging wint (hybride klok); één apparaat speelt tegelijk.
+- **Apple Watch-app**: home-feed, zoeken, downloads en afstandsbediening (play/pauze, ±10 s, snelheid, kies apparaat). Afspelen gebeurt op iPhone/Mac/iPad.
+- **Slimme PiP bij meerdere schermen (Mac)**: alleen PiP als de nieuwe app op hetzelfde scherm als JoeToep komt; met alleen de MacBook ongewijzigd.
+- **Pijltjestoetsen via YouTube's eigen speler**, met onzichtbare YouTube-bediening.
+- **Snelheidsknoppen** − 1× + (0,25–4×).
+- **Downloads** van openlijk aangeboden mediabestanden (MP4 of AAC-audio 64–320 kbit/s), Downloads-scherm, offline speler, lijst synchroniseert tussen apparaten. YouTube → YouTube's eigen Premium-downloads.
+- **Uitleg onder elke instelling**; nieuwe pagina's "Sync & devices" en "Downloads".
+
+## Sync-verbeteringen (na eerste test)
+- Crash op de Mac opgelost (Bonjour-browser werd gestopt en direct herstart).
+- Eerste contact voegt tabs samen i.p.v. te vervangen; snapshots die binnenkomen vóór het venster er is worden bewaard.
+- Automatisch opnieuw verbinden (elke 8 s zoeken als er niemand verbonden is; beide kanten mogen uitnodigen).
+- Bevestiging (✓ "In sync · N tabs") en activiteitenlog in Instellingen › Sync & devices.
+- Wisselen van apparaat: nieuwe en gesloten tabs verschijnen direct, maar een andere video/selectie wordt pas geladen zodra je dat apparaat weer gebruikt (klik, toets, aanraking of app openen) — gepauzeerd, op de juiste positie.
+- Standaardbrowser: `joetoep://`-links + stappenplan voor "Open in JoeToep" in het deelmenu (iPhone/iPad); Mac: extra uitleg en knop naar Bureaublad en Dock.
+
+## Tests
+- V18FeatureTests (15 tests): multi-monitor-regel, sync-klok/conflicten/diff, 500-stappen simulatie met 3 apparaten, feedparser, instellingen.
+- JS: pijltjes/volume/snelheid via YouTube-API (123 scenario's groen).
+
+# V17.1 — 17.1.0 (21)
+
+**Instellingen: eenvoudiger ingedeeld**
+- De hoofdlijst is nu:
+  - Algemeen
+  - Weergave
+  - Afspelen & PiP
+  - Privacy & cookies
+  - Advertenties & SponsorBlock
+  - Geavanceerd
+- Onder Weergave staan nu Tabs, Menubalk & knoppen, Audiovisualizer en App-icoon.
+- Focusfilters staan nu onder Geavanceerd.
+
+**Standaardbrowser**
+- Mac: JoeToep kan http/https-links en HTML-bestanden openen. De knop "Maak JoeToep de standaardbrowser" staat bij Instellingen › Algemeen. Links van buitenaf openen in een nieuwe tab van het bestaande venster.
+- iPhone/iPad: iOS staat dit alleen toe voor browsers met Apple's speciale browserrecht, en dat krijgt een gratis ontwikkelaarsaccount niet. De instellingen leggen dit uit.
+
+**Tabs en menu's**
+- Mac en iPad: met 1 tot 3 tabs is een tab maximaal 220 pt breed. Pas vanaf 4 tabs delen ze de hele breedte.
+- De menubalk scrolt nooit meer. De knoppen staan vast en worden zo nodig gelijkmatig iets kleiner.
+- iPhone/iPad: het "…"-menu toont alle opties meteen, in een raster in een uitklapvenster zonder scrollen.
+- Ingedrukt houden of rechtsklikken op een link geeft "Open in nieuwe tab" en, op Mac en iPad, ook "Open in nieuw venster".
+
+**Audiovisualizer**
+- Staat standaard uit.
+- 8 stijlen: staven, gespiegelde staven, golf, spectrumlijn, stippen, retro-ledblokken, gloed en puls.
+- Instelbaar:
+  - kleurmodus: accent, verloop, regenboog, wit of eigen kleur;
+  - dekking, gloed;
+  - aantal staven (8–160), hoogte, intensiteit, positie, spiegelen, afgeronde staven;
+  - snelheid en vloeiendheid;
+  - pulseren op een BPM (bijvoorbeeld uit Tap tempo).
+- Hij beweegt met het afspelen mee, niet met het echte geluid. WebKit geeft dat geluid niet vrij zonder risico op stilte in PiP.
+
+**110 nieuwe app-iconen** (153 in totaal), op iPhone, iPad en Mac, per serie in de kiezer:
+- 20 Unique
+- 20 Creative
+- 20 Eccentric
+- 20 Bold
+- 30 YouTube Red, met verschillende strakke achtergronden
+
+**Bugfixes tijdens het testen**
+- ⌘← op een net geopende tab sloot soms ook de tab eronder. Nu sluit één gebaar altijd precies één tab. Toetsherhaling wordt genegeerd en er zit 0,7 s rem op.
+- Mac: "Tekstgrootte" en "Snelheid" stonden dubbel in de instellingen (label van de schuifregelaar).
+
+**Testen**
+- Mac: 62/62 unittests. De UI-tests slagen op vier na; die vier worden verstoord door een venster van de app Vowen dat bovenaan het scherm de klikken opvangt (geen JoeToep-fout).
+- iPhone: alle UI-suites groen:
+  - 13 algemene UI-tests;
+  - 6 PiP-apparaattests;
+  - 9 V15/V17.1-apparaattests, waaronder 8 PiP-cycli onder zware processorbelasting, het "…"-paneel zonder scrollen, pauze in PiP, de PiP-overdracht bij een nieuwe tab en de stresstest met tabs en de Camera-app.
+- Handmatig op de Mac:
+  - compacte tabs;
+  - nieuwe indeling van de instellingen;
+  - rechtsklik › Open in nieuwe tab / nieuw venster;
+  - terug sluit tab en keert terug naar de bron-tab;
+  - meldingen.
+- JS: 122 + 12 + 13 scenario's.
+
+# V17 — 17.0.0 (20)
+
+Van YouTube-wrapper naar een complete browser voor media en multitasking, op Mac, iPad en iPhone.
+
+**Bediening en tabs**
+- Terug op de eerste pagina van een tab sluit die tab en toont de tab waar je vandaan kwam. Dat werkt met:
+  - de terugknop;
+  - de muisknop "terug" (Mac);
+  - ⌘← (Mac, niet tijdens typen);
+  - vegen met twee vingers (Mac);
+  - vegen vanaf de linkerrand (iPhone/iPad).
+  Een gesloten tab haal je terug met ⌘⇧T. Dit gedrag is uit te zetten.
+- Een link openen in een nieuwe tab (middelklik, rechtsklik) toont die tab meteen. Ook dit is uit te zetten.
+- ⌥ Option + Tab wisselt naar de vorige (recentste) tab op Mac en iPad. Dit was Ctrl+Tab.
+- De muisknop "vooruit" en ⌘→ gaan vooruit.
+
+**Picture in Picture op elke website**
+- De PiP-knop werkt nu ook op andere sites (Vimeo, Twitch, nieuwssites, video's in iframes van dezelfde site). JoeToep kiest de spelende of de grootste video en haalt PiP-blokkades weg.
+- Een video op een andere site gaat bij een tab-wissel ook naar PiP en pauzeert bij een overdracht.
+
+**Privacy**
+- Cookiebanners worden automatisch geweigerd (standaard aan). Andere keuzes: alleen verbergen, of uit. Dit herkent:
+  - OneTrust, Cookiebot, Didomi, Quantcast, Usercentrics, TrustArc, Google Funding Choices, Sourcepoint en meer;
+  - algemene knoppen als "Alles weigeren", "Reject all" of "Alleen noodzakelijk" (in het Nederlands, Engels, Duits, Frans en Spaans), maar alleen binnen een cookie- of privacyblok.
+- Bekende trackers en advertentiepixels worden geblokkeerd, zoals Google Analytics, Facebook-pixel, Hotjar en TikTok-pixel.
+- Volg-parameters (utm_, fbclid, gclid, YouTube-si …) worden uit links en adressen gehaald.
+- JoeToep stuurt Global Privacy Control mee (niet verkopen of delen).
+- Websitegegevens zijn nu meteen te wissen, of automatisch bij het afsluiten.
+
+**Audio: AirPods Pro 3**
+- Ruimtelijke audio op iPhone en iPad: filmmodus (ruimtelijk stereo met head tracking) en meerkanaals doorvoer voor Dolby Atmos en 5.1. Dit is uit te zetten. Op de Mac regelt macOS dit zelf.
+
+**Snelheid**
+- Met animaties uit gebruikt JoeToep ook zijn kortste wachttijden. Terug naar schermvullend na PiP gaat dan meteen (0 ms in plaats van 120 ms). Draaien naar schermvullend duurt 40 ms, sluiten 120 ms, automatisch schermvullend 0,2 s.
+- Door het blokkeren van trackers laden pagina's minder scripts.
+
+**Creator tools: muziek, DJ en design**
+- Snelheid van 0,25× tot 4×, met of zonder behoud van toonhoogte (tijdrek, of als een draaitafel).
+- A-B-loop, en loops van precies 1, 4, 8 of 16 maten op basis van het getikte tempo.
+- Tap tempo (BPM, ook met de T-toets).
+- Frame-stap (1/30 s) terug en vooruit.
+- Tab dempen, en een link naar het huidige tijdstip kopiëren (cue-punten).
+
+**Leren van de code**
+- Ongeveer 1.750 regels Nederlandse uitleg toegevoegd in 60 bestanden. Een script controleert dat daarbij geen code is veranderd.
+
+**Testen**
+- 58 unittests op de Mac (waaronder de nieuwe V17-tests).
+- 122 + 12 + 13 JS-scenario's.
+
 # V16.2 — 16.2.0 (18)
 
 Bevat alle features van V15 en V16. Deze versie draait om PiP-stabiliteit en performance.

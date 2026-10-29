@@ -1,4 +1,4 @@
-# JoeToep V16.2 — 16.2.0 (18)
+# JoeToep V17.1 — 17.1.0 (21)
 
 Persoonlijke YouTube-browser voor Mac (macOS 27), iPhone 13 Pro (iOS 27) en iPad Pro 12,9" 2e generatie (iPadOS 17). Open `JoeToep.xcodeproj`, kies scheme **JoeToep**, je apparaat en je Signing Team (app-ID `nl.tijn.JoeToep`). Zie `CHANGELOG.md` voor alles wat nieuw is en `Docs/BUILD_REPORT.md` voor de testresultaten.
 

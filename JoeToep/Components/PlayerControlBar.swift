@@ -14,34 +14,50 @@ struct PlayerControlBar: View {
     var actions: WorkspaceActions? = nil
     let showSettings: () -> Void
     @Environment(\.joeToepTheme) private var theme
+    /// V17: is het Creator-tools-paneel open?
+    @State private var showingCreatorTools = false
+    /// V18: is het downloadpaneel open?
+    @State private var showingDownload = false
 
-    private var iconSize: CGFloat { 17 * settings.toolbarDensity.scale }
+    private var iconSize: CGFloat { min(17 * settings.toolbarDensity.scale, buttonSize * 0.55) }   // V17.1: krimpt mee
+    /// V17.1: hoeveel knoppen staan er in de balk? Nodig om ze passend te maken zonder scrollen.
+    private var visibleButtonCount: Int {
+        var n = 0
+        #if os(iOS)
+        if settings.showBrand { n += 1 }
+        if settings.showAirPlayButton { n += 1 }
+        #endif
+        if settings.showNavigationControls { n += 2 }
+        if settings.showRefreshButton { n += 1 }
+        n += StartPage.allCases.filter(isVisible).count        // Home, Abonnementen, Bibliotheek …
+        if settings.showBookmarkButton { n += 1 }
+        if settings.showConnectionStatus { n += 2 }            // de status-"pil" is ±2 knoppen breed
+        if settings.showQualityButton { n += 1 }
+        if settings.showPiPButton { n += 1 }
+        if settings.showCreatorTools { n += 1 }
+        if settings.showSpeedControl { n += 2 }
+        if settings.showDownloadButton { n += 1 }
+        if settings.showMoreMenu { n += 1 }
+        if settings.showSettingsButton { n += 1 }
+        return max(n, 1)
+    }
+    /// V17.1: knopgrootte. De balk scrolt nooit meer: passen niet alle knoppen op de normale maat,
+    /// dan worden ze gelijkmatig iets kleiner (minimaal 24 pt), zodat ze altijd vast staan.
     private var buttonSize: CGFloat {
         let density = settings.toolbarDensity
         #if os(macOS)
-        return 32 * density.scale
+        let preferred = 32 * density.scale
         #else
-        // Larger sizes keep their size; the scrolling section absorbs the extra width.
-        if density.isEnlarged { return density.height - 6 }
-        let extras = (settings.showNavigationControls ? 2 : 0) + (settings.showPiPButton ? 1 : 0) +
-            (settings.showMoreMenu ? 1 : 0) + (settings.showBookmarkButton ? 1 : 0)
-        return min(40, max(30, (availableWidth - 8) / CGFloat(8 + extras)))
+        let preferred: CGFloat = density.isEnlarged ? density.height - 6 : 40
         #endif
+        let fits = (availableWidth - 12) / CGFloat(visibleButtonCount)
+        return max(24, min(preferred, fits))
     }
     var body: some View {
         HStack(spacing: 0) {
-            #if os(iOS)
-            // V16: scroll only when the buttons would not fit otherwise.
-            ViewThatFits(in: .horizontal) {
-                leadingButtons.frame(maxWidth: .infinity, alignment: .leading)
-                ScrollView(.horizontal) { leadingButtons }.scrollIndicators(.hidden)
-            }
-            .frame(maxWidth: .infinity, minHeight: buttonSize)
-            #else
-            ScrollView(.horizontal) { leadingButtons }
-                .scrollIndicators(.hidden)
-                .frame(maxWidth: .infinity, minHeight: buttonSize)
-            #endif
+            // V17.1: vaste knoppen, geen horizontaal scrollen meer (alle platforms).
+            leadingButtons
+                .frame(maxWidth: .infinity, minHeight: buttonSize, alignment: .leading)
             #if os(iOS)
             if settings.showAirPlayButton {
                 control("airplay.video", "AirPlay video", action: session.showVideoAirPlay)
@@ -49,8 +65,20 @@ struct PlayerControlBar: View {
             }
             #endif
             if settings.showQualityButton { qualityMenu }
+            // V18: afspeelsnelheid met één klik: − langzamer, + sneller; vasthouden = terug naar 1×.
+            if settings.showSpeedControl { speedControl }
+            // V18: offline opslaan.
+            if settings.showDownloadButton {
+                control("arrow.down.circle", "Download for offline", action: { showingDownload = true })
+                    .accessibilityIdentifier("toolbar.download")
+            }
             if settings.showPiPButton {
                 PiPButton(session: session, size: buttonSize, iconSize: iconSize)
+            }
+            // V17: knop voor Creator tools (snelheid, A-B-loop, tap tempo, frame-stap).
+            if settings.showCreatorTools {
+                control("slider.horizontal.3", "Creator tools", action: { showingCreatorTools = true })
+                    .accessibilityIdentifier("toolbar.creator")
             }
             if settings.showMoreMenu { moreMenu }
             if settings.showSettingsButton {
@@ -62,10 +90,40 @@ struct PlayerControlBar: View {
         .frame(height: settings.toolbarDensity.height)
         .background { ZStack { theme.background; AudioVisualizer(playing: session.isPlaying && !session.isFullscreen && !session.isInPictureInPicture) } }
         .animation(theme.anim(.toolbar), value: settings.toolbarDensity)
+        // V17: het Creator-tools-paneel als "sheet" (schuift over het scherm).
+        .sheet(isPresented: $showingCreatorTools) { CreatorToolsView(session: session) }
+        .sheet(isPresented: $showingDownload) { DownloadSheet(session: session) }
         #if os(macOS)
         .overlay(alignment: .top) { theme.style.separator.frame(height: 1).allowsHitTesting(false) }
         .overlay(alignment: .bottom) { theme.style.separator.frame(height: 1).allowsHitTesting(false) }
         #endif
+    }
+
+    /// V18: − [1×] + — de middelste tekst toont de huidige snelheid (tik = terug naar 1×).
+    private var speedControl: some View {
+        HStack(spacing: 0) {
+            control("minus", "Slower · hold for 1×", action: { session.stepPlaybackRate(-1) },
+                    secondary: { session.stepPlaybackRate(0) })
+                .accessibilityIdentifier("toolbar.slower")
+            Button { session.stepPlaybackRate(0) } label: {
+                Text(Self.rateLabel(session.playbackRate))
+                    .font(.system(size: max(10, iconSize * 0.72), weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(session.playbackRate == 1 ? theme.secondary : theme.accent)
+                    .frame(minWidth: buttonSize * 0.9, minHeight: buttonSize)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Playback speed · click for 1×")
+            .accessibilityLabel("Playback speed \(Self.rateLabel(session.playbackRate))")
+            .accessibilityIdentifier("toolbar.rate")
+            control("plus", "Faster · hold for 1×", action: { session.stepPlaybackRate(1) },
+                    secondary: { session.stepPlaybackRate(0) })
+                .accessibilityIdentifier("toolbar.faster")
+        }
+    }
+    static func rateLabel(_ rate: Double) -> String {
+        rate == rate.rounded() ? String(format: "%.0f×", rate) : String(format: "%g×", rate)
     }
 
     @ViewBuilder
@@ -78,7 +136,7 @@ struct PlayerControlBar: View {
             }
             #endif
             if settings.showNavigationControls {
-                control("chevron.backward", "Back", enabled: session.canGoBack, action: session.goBack).accessibilityIdentifier("toolbar.back")
+                control("chevron.backward", "Back", enabled: session.canGoBack || settings.backClosesTab, action: session.goBack).accessibilityIdentifier("toolbar.back")
                 control("chevron.forward", "Forward", enabled: session.canGoForward, action: session.goForward).accessibilityIdentifier("toolbar.forward")
             }
             if settings.showRefreshButton {
@@ -114,6 +172,59 @@ struct PlayerControlBar: View {
     }
 
     /// V15: browser menu (tabs, library, page tools).
+    /// V17.1: één lijst met alle acties van het "…"-menu. Het Mac-menu en het iPhone/iPad-paneel
+    /// gebruiken dezelfde lijst, zodat ze nooit uit elkaar lopen.
+    private var moreActions: [MoreAction] {
+        var list: [MoreAction] = [
+            MoreAction("New Tab", "plus.square") { actions?.newTab() },
+            MoreAction("Private Tab", "eyeglasses") { actions?.newPrivateTab() },
+            MoreAction("Reopen Closed", "arrow.uturn.backward") { actions?.reopenClosedTab() },
+            MoreAction("Pin Tab", "pin") { actions?.togglePin() },
+            MoreAction("Duplicate", "plus.square.on.square") { actions?.duplicateTab() },
+            MoreAction(library.isBookmarked(session.currentURL) ? "Unbookmark" : "Bookmark",
+                       library.isBookmarked(session.currentURL) ? "bookmark.slash" : "bookmark") { actions?.toggleBookmark() },
+            MoreAction("Library", "books.vertical") { actions?.showLibrary() },
+            MoreAction("Address…", "character.cursor.ibeam") { actions?.editAddress() },
+            MoreAction("Find", "text.magnifyingglass") { actions?.find() },
+        ]
+        if let url = session.currentURL {
+            list.append(MoreAction("Copy Link", "link") { Clipboard.copy(url) })
+            list.append(MoreAction("Safari", "safari") { openInBrowser(url) })
+        }
+        let desktop = session.effectivePresentation == .desktop
+        list += [
+            MoreAction(desktop ? "Mobile Site" : "Desktop Site", desktop ? "iphone" : "desktopcomputer") {
+                session.requestSite(desktop ? .mobile : .desktop) },
+            MoreAction("Zoom In", "plus.magnifyingglass") { session.zoom(by: 0.1) },
+            MoreAction("Zoom Out", "minus.magnifyingglass") { session.zoom(by: -0.1) },
+            MoreAction("\(Int((session.effectiveZoom * 100).rounded()))%", "1.magnifyingglass") { session.resetZoom() },
+            MoreAction("Reload", "arrow.clockwise") { session.reload() },
+            MoreAction("Force Refresh", "arrow.triangle.2.circlepath") { session.forceRefresh() },
+            MoreAction("Creator Tools", "slider.horizontal.3") { showingCreatorTools = true },
+            MoreAction("Download", "arrow.down.circle") { showingDownload = true },
+            MoreAction("Settings", "gearshape") { showSettings() },
+        ]
+        return list
+    }
+
+    #if os(iOS)
+    /// V17.1 (iPhone/iPad): het "…"-paneel toont ALLE opties meteen, zonder scrollen: een raster
+    /// van 4 kolommen in een popover die als uitklapmenu onder de knop verschijnt.
+    @State private var showingMore = false
+    private var moreMenu: some View {
+        Button { showingMore = true } label: {
+            Image(systemName: "ellipsis.circle").themedIcon(theme, size: iconSize)
+                .frame(width: buttonSize, height: buttonSize).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More")
+        .accessibilityIdentifier("toolbar.more")
+        .popover(isPresented: $showingMore, arrowEdge: .bottom) {
+            MoreActionsPanel(actions: moreActions, share: session.currentURL) { showingMore = false }
+                .presentationCompactAdaptation(.popover)      // ook op iPhone een uitklapmenu, geen sheet
+        }
+    }
+    #else
     private var moreMenu: some View {
         Menu {
             Section {
@@ -169,6 +280,7 @@ struct PlayerControlBar: View {
         .accessibilityLabel("More")
         .accessibilityIdentifier("toolbar.more")
     }
+    #endif
 
     private func openInBrowser(_ url: URL) {
         #if os(iOS)
@@ -234,5 +346,54 @@ struct PlayerControlBar: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(title)
             .accessibilityAction { action() }
+    }
+}
+
+
+// MARK: - V17.1 "…"-acties
+
+/// Eén actie in het "…"-menu: titel, SF-Symbol-icoon en wat er gebeurt bij een tik.
+struct MoreAction: Identifiable {
+    let id = UUID()
+    let title: String
+    let symbol: String
+    let run: () -> Void
+    init(_ title: String, _ symbol: String, run: @escaping () -> Void) { self.title = title; self.symbol = symbol; self.run = run }
+}
+
+/// Het iPhone/iPad-paneel: alle acties in een raster, in één keer zichtbaar.
+struct MoreActionsPanel: View {
+    let actions: [MoreAction]
+    let share: URL?
+    let close: () -> Void
+    @Environment(\.joeToepTheme) private var theme
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 4)
+    var body: some View {
+        VStack(spacing: 8) {
+            LazyVGrid(columns: columns, spacing: 6) {
+                ForEach(actions) { action in
+                    Button {
+                        close()                                   // eerst het paneel sluiten …
+                        DispatchQueue.main.async { action.run() } // … dan de actie (sheets openen dan netjes)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: action.symbol).font(.system(size: 18)).frame(height: 22)
+                            Text(action.title).font(.caption2).lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(theme.style.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("more." + action.title)
+                }
+            }
+            if let share {
+                ShareLink(item: share) { Label("Share…", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity) }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .frame(width: 330)
+        .tint(theme.accent)
     }
 }

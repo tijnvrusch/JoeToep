@@ -1,4 +1,7 @@
 import XCTest
+#if os(iOS)
+import UIKit
+#endif
 
 final class JoeToepUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -14,6 +17,10 @@ final class JoeToepUITests: XCTestCase {
         launch(["--skip-onboarding"])
         let add = app.buttons["tabs.new"]
         XCTAssertTrue(add.waitForExistence(timeout: 10));add.activateControl();add.activateControl()
+        if tabs.count != 3 {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "Tabs after +"; shot.lifetime = .keepAlways; self.add(shot)
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "Tree after +"; tree.lifetime = .keepAlways; self.add(tree)
+        }
         XCTAssertEqual(tabs.count, 3)
         app.terminate();launch(["--skip-onboarding", "--restore-tabs"])
         XCTAssertTrue(app.buttons["tabs.new"].waitForExistence(timeout: 10))
@@ -33,10 +40,22 @@ final class JoeToepUITests: XCTestCase {
         XCTAssertTrue(add.waitForExistence(timeout: 10))
         let window = app.windows.firstMatch.frame
         let single = tabs.firstMatch.frame.width
-        XCTAssertGreaterThan(single, window.width * 0.5, "one tab uses most of the width")
-        add.activateControl()
-        let two = tabs.firstMatch.frame.width
-        XCTAssertLessThan(two, single); XCTAssertGreaterThan(two, window.width * 0.3)
+        #if os(iOS)
+        let phone = UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        let phone = false
+        #endif
+        if phone {
+            XCTAssertGreaterThan(single, window.width * 0.5, "iPhone: one tab uses most of the width")
+            add.activateControl()
+            let two = tabs.firstMatch.frame.width
+            XCTAssertLessThan(two, single); XCTAssertGreaterThan(two, window.width * 0.3)
+        } else {
+            // V17.1 (Mac/iPad): with 1–3 tabs a tab is at most 220 pt wide, not the full width.
+            XCTAssertLessThanOrEqual(single, 221, "Mac/iPad: a single tab is compact")
+            add.activateControl()
+            XCTAssertLessThanOrEqual(tabs.firstMatch.frame.width, 221)
+        }
         for _ in 0..<10 { add.activateControl() }
         XCTAssertEqual(tabs.count, 12)
         XCTAssertGreaterThanOrEqual(tabs.element(boundBy: 11).frame.width, 80, "minimum readable width")
@@ -161,12 +180,18 @@ final class JoeToepUITests: XCTestCase {
         XCTAssertTrue(app.buttons["toolbar.settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(play.exists)
     }
+    /// A notice appears and closes itself after about five seconds. (On iPhone XCTest cannot
+    /// see the banner in the accessibility tree, so we read the app's lifecycle probe.)
     func testNoticeDisappearsAfterFiveSeconds() {
         launch(["--skip-onboarding", "--show-test-notice"])
-        let banner = app.descendants(matching: .any)["notice.banner"].firstMatch
-        XCTAssertTrue(banner.waitForExistence(timeout: 5))
-        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: banner)
-        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 7), .completed)
+        let trail = app.staticTexts["debug.lifecycle"].firstMatch
+        XCTAssertTrue(trail.waitForExistence(timeout: 15))
+        let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'notice shown: Test notice'"), object: trail)
+        XCTAssertEqual(XCTWaiter.wait(for: [shown], timeout: 10), .completed, "notice appears")
+        let start = Date()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'notice dismissed'"), object: trail)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 9), .completed, "notice closes itself")
+        XCTAssertGreaterThan(Date().timeIntervalSince(start), 1, "not closed immediately")
     }
     func testVideoDoesNotImmediatelyPauseAfterPlay() {
         launch(["--skip-onboarding"])

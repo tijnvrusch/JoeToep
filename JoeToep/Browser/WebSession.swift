@@ -54,6 +54,10 @@ final class WebSession: NSObject, ObservableObject {
         settings.dataSaverOnCellular && onExpensiveNetwork ? settings.cellularQuality : settings.quality
     }
     let webView: WKWebView
+    #if os(macOS)
+    /// V18: volgt app-wissels op andere schermen (alleen actief terwijl JoeToep op de achtergrond speelt).
+    private let screenFocus = ScreenFocusMonitor()
+    #endif
     let networkMonitor = NetworkMonitor()
     private let playbackSession: PlaybackSessionController
     private let contentController: WKUserContentController
@@ -109,6 +113,19 @@ final class WebSession: NSObject, ObservableObject {
     private var fullscreenReturnDeadline: Date?
     private var fullscreenReturnTask: Task<Void, Never>?
     private var pipReturnSafetyTask: Task<Void, Never>?
+    /// V16.2.1 hand-over flag. While this date lies in the future, this tab's PiP window is
+    /// being closed ON PURPOSE because another tab started a video. During that time the tab
+    /// must stay quietly in the background: no fullscreen restore and (Mac) no bringing its
+    /// window forward, which used to switch macOS to another Space ("the video disappears").
+    private var pipHandoverUntil: Date?
+    /// Writes a line to this tab's lifecycle log (Diagnostics, and the UI-test probe).
+    func noteHandOver(_ text: String) { recordLifecycle(text) }
+    /// Shared by ALL tabs (`static`): until this moment some tab is still closing its PiP window
+    /// for a hand-over. The new tab's automatic fullscreen waits for it, so fullscreen always
+    /// starts after the PiP window is gone (otherwise macOS could show the wrong Space).
+    static var handOverClosingUntil = Date.distantPast
+    /// True while a hand-over is running (see `pipHandoverUntil`).
+    var isHandingOver: Bool { (pipHandoverUntil ?? .distantPast) > Date() }
     #if os(iOS)
     private var handoffTaskID: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -186,6 +203,14 @@ final class WebSession: NSObject, ObservableObject {
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         #if os(iOS)
+        // V17: vegen vanaf de linkerrand terwijl de tab GEEN vorige pagina heeft. WebKit doet dan
+        // zelf niets; met deze extra "rand-veeg-herkenner" sluiten we dan de tab (instelling).
+        let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwipe(_:)))
+        edge.edges = .left
+        edge.delegate = self              // zie extensie onderaan: werkt samen met WebKit's gebaren
+        webView.addGestureRecognizer(edge)
+        #endif
+        #if os(iOS)
         webView.scrollView.keyboardDismissMode = .interactive
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.alwaysBounceHorizontal = false
@@ -208,6 +233,7 @@ final class WebSession: NSObject, ObservableObject {
                 return link.url
             }
             custom.openInNewTab = { [weak self] url, activate in self?.onOpenInNewTab?(url, activate) }
+            custom.openInNewWindow = { url in WindowOpener.open(url) }      // V17.1
         }
         #endif
         titleObservation = webView.observe(\.title, options: [.new]) { [weak self] _, _ in
@@ -254,7 +280,14 @@ final class WebSession: NSObject, ObservableObject {
                 self.showNotice(.warning, "Some filters are unavailable", "Playback remains available. See Diagnostics for filter status.")
             }
             if self.isTestMode { self.loadTestFixture() } else if let url = self.restoredURL {
-                if let time = self.restoredTime, time >= 3, NavigationPolicy.isPlaybackPage(url) {
+                if self.syncedStartPaused, NavigationPolicy.isPlaybackPage(url) {
+                    // V18: tab van een ander apparaat → op de juiste plek klaarzetten, NIET afspelen
+                    // (het andere apparaat speelt; één apparaat tegelijk).
+                    self.syncedStartPaused = false
+                    let time = max(self.restoredTime ?? 1, 1)
+                    self.pendingResume = (time, false)
+                    self.load(time >= 3 ? Self.url(url, at: time) : url)
+                } else if let time = self.restoredTime, time >= 3, NavigationPolicy.isPlaybackPage(url) {
                     self.pendingResume = (time, true)
                     self.load(Self.url(url, at: time))
                 } else { self.load(url) }
@@ -262,7 +295,11 @@ final class WebSession: NSObject, ObservableObject {
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--show-test-notice") {
-            showNotice(.information, "Test notice", "This banner expires after five seconds.")
+            // V17.1: 1.5 s na het starten tonen, zodat de UI-test de melding zeker ziet verschijnen
+            // (bij een tragere eerste start was hij al weg voordat de test keek).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.showNotice(.information, "Test notice", "This banner expires after five seconds.")
+            }
         }
         #endif
     }
@@ -298,6 +335,10 @@ final class WebSession: NSObject, ObservableObject {
             configureCompatibility()
             updateBackgroundProtection()
         }
+        // V17: ruimtelijke audio aan/uit → de audiosessie van iOS meteen opnieuw instellen.
+        #if os(iOS)
+        if old.spatialAudio != updated.spatialAudio { playbackSession.refreshSpatialAudio() }
+        #endif
         if old.quality != updated.quality || old.dataSaverOnCellular != updated.dataSaverOnCellular || old.cellularQuality != updated.cellularQuality {
             requestQuality(effectiveQuality, userInitiated: old.quality != updated.quality)
         }
@@ -327,13 +368,22 @@ final class WebSession: NSObject, ObservableObject {
            var parts = URLComponents(url: input, resolvingAgainstBaseURL: false) {
             parts.host = "www.youtube.com"; url = parts.url ?? input
         }
+        // V17: volg-parameters (utm_, fbclid, si …) uit het adres halen vóór het laden.
+        if settings.stripTrackingParameters { url = TrackingParameters.clean(url) }
         lastRequestedURL = url; failedNavigationURL = nil; networkRetryCount = 0
         networkRetryTask?.cancel()
         navigate { [weak self] in self?.webView.load(URLRequest(url: url, timeoutInterval: 30)) }
     }
     func goHome() { load(StartPage.home.url) }
+    /// V17: wordt door BrowserWorkspace ingevuld. Wordt aangeroepen als je "terug" doet terwijl er
+    /// geen vorige pagina is: dan sluit de werkruimte deze tab (en toont de tab waar je vandaan kwam).
+    var onCannotGoBack: (() -> Void)?
     func goBack() {
-        guard canGoBack else { showNotice(.information, "No previous page", "This is the first page in this window."); return }
+        guard canGoBack else {
+            // V17: geen vorige pagina → tab sluiten (instelling "Terug sluit de tab").
+            if let close = onCannotGoBack { close(); return }
+            showNotice(.information, "No previous page", "This is the first page in this window."); return
+        }
         navigate { [weak self] in self?.webView.goBack() }
     }
     func goForward() {
@@ -460,7 +510,9 @@ final class WebSession: NSObject, ObservableObject {
             guard positionTask == nil else { return }
             positionTask = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(5))
+                    // V18: met verbonden apparaten elke 2 s (live positie), anders elke 5 s (zuinig).
+                    let interval = TabSyncService.shared.peers.isEmpty ? 5.0 : 2.0
+                    try? await Task.sleep(for: .seconds(interval))
                     guard !Task.isCancelled, let self else { break }
                     self.capturePosition()
                 }
@@ -508,7 +560,16 @@ final class WebSession: NSObject, ObservableObject {
     }
 
 
+    /// Is de huidige pagina YouTube? (Dan regelt mediaCompatibility.js de PiP, anders webPiP.js.)
+    var isOnYouTube: Bool { NavigationPolicy.isYouTubeHost((currentURL?.host ?? "").lowercased()) }
     func togglePictureInPicture() {
+        // V17: andere websites → het algemene PiP-script kiest de beste video en start/stopt PiP.
+        // evaluateJavaScript telt in WebKit als gebruikersactie, dus de site mag PiP starten.
+        if !isOnYouTube && settings.pipOnAllSites && !isTestMode {
+            recordLifecycle("web PiP toggle (non-YouTube site)")
+            webView.evaluateJavaScript("window.JoeToepWebPiP && window.JoeToepWebPiP.toggle(); 0", completionHandler: nil)
+            return
+        }
         #if os(iOS)
         if nativePiPActive || nativePiP.isStarting { nativePiP.stop(); return }
         if nativePiP.isArmed && !isFullscreen && !pip.isActive && !pip.isRequesting {
@@ -637,9 +698,48 @@ final class WebSession: NSObject, ObservableObject {
         #endif
         guard settings.automaticPiP,
               isFullscreen || isTestMode || NavigationPolicy.isPlaybackPage(currentURL), !pip.isActive else { return }
+        #if os(macOS)
+        // V18: met meerdere schermen eerst kijken WAAR de nieuwe app staat. Een tel wachten zodat
+        // macOS de nieuwe app en haar venster al vooraan heeft gezet.
+        if settings.smartMultiMonitorPiP && NSScreen.screens.count > 1 && !isTestMode {
+            attemptedAutomaticInEpisode = true
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(60))
+                self?.decideMultiMonitorPiP(target: ScreenFocusMonitor.screenID(of: NSWorkspace.shared.frontmostApplication))
+            }
+            return
+        }
+        #endif
         attemptedAutomaticInEpisode = true
         requestPictureInPicture(reason: .appSwitch)
     }
+
+    #if os(macOS)
+    /// V18: het scherm van JoeToep's eigen venster (nil als het venster er (nog) niet is).
+    /// WebKit's element-fullscreen gebruikt een eigen venster; daarom het voorste zichtbare venster
+    /// van JoeToep (dat is het fullscreen-venster als de video fullscreen speelt).
+    private var ownScreenID: String? {
+        let front = NSApp.orderedWindows.first { $0.isVisible && $0.screen != nil && $0.frame.width > 200 }
+        return ScreenFocusMonitor.id(of: front?.screen ?? webView.window?.screen)
+    }
+
+    /// V18: start PiP alleen als de nieuwe app op JoeToep's scherm staat. Anders blijft de video
+    /// fullscreen doorspelen en letten we op: komt er LATER een app op ons scherm, dán PiP.
+    private func decideMultiMonitorPiP(target: String?) {
+        guard !applicationActive, !pip.isActive, !pip.isRequesting else { screenFocus.stop(); return }
+        let start = MultiMonitorPiPPolicy.shouldStartPiP(screenCount: NSScreen.screens.count,
+                                                         joeToepScreen: ownScreenID, targetScreen: target,
+                                                         enabled: settings.smartMultiMonitorPiP)
+        if start {
+            screenFocus.stop()
+            recordLifecycle("multi-monitor: same screen -> PiP")
+            requestPictureInPicture(reason: .appSwitch)
+        } else {
+            recordLifecycle("multi-monitor: other screen -> keep playing")
+            screenFocus.start { [weak self] screen in self?.decideMultiMonitorPiP(target: screen) }
+        }
+    }
+    #endif
 
     func applicationWillEnterForeground() {
         recordLifecycle("will-enter-foreground")
@@ -664,6 +764,9 @@ final class WebSession: NSObject, ObservableObject {
 
     func applicationDidActivate() {
         recordLifecycle("active")
+        #if os(macOS)
+        screenFocus.stop()
+        #endif
         applicationActive = true; leavingEpisode = false
         if settings.automaticFullscreen && !pip.isActive && !pip.isRequesting {
             fulfillAutomaticFullscreen()
@@ -1048,7 +1151,7 @@ final class WebSession: NSObject, ObservableObject {
 
     private func restoreMacAfterPiP() {
         #if os(macOS)
-        guard settings.activateMacOnPiPExit, !applicationActive, !navigatingAway else { return }
+        guard settings.activateMacOnPiPExit, !applicationActive, !navigatingAway, !isHandingOver else { return }
         macReturnTask?.cancel()
         let expectedDocument = documentID
         let expectedVideo = videoID
@@ -1095,13 +1198,15 @@ final class WebSession: NSObject, ObservableObject {
     #endif
 
     private func restoreFullscreenAfterPiPIfNeeded() {
+        guard !isHandingOver else { return }  // V16.2.1: never for a tab that is handing over
         guard applicationActive, let deadline = fullscreenReturnDeadline,
               deadline > Date(), !pip.isActive, !pip.isRequesting else { return }
         fullscreenReturnDeadline = nil
         fullscreenReturnTask?.cancel()
         let expectedDocument = documentID
         let expectedVideo = videoID
-        let delay = settings.instantTransitions ? 120 : 650
+        // V17: animaties uit → meteen (0 ms); snelle overgangen → 120 ms; anders 650 ms.
+        let delay = settings.animationsOff ? 0 : (settings.instantTransitions ? 120 : 650)
         fullscreenReturnTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(delay))
             guard !Task.isCancelled, let self, self.applicationActive,
@@ -1117,7 +1222,7 @@ final class WebSession: NSObject, ObservableObject {
     private func scheduleFullscreenExit() {
         guard !systemFullscreenHandoff && applicationActive else { return }
         exitTask?.cancel()
-        let delay = settings.instantTransitions ? 250 : 400
+        let delay = settings.animationsOff ? 120 : (settings.instantTransitions ? 250 : 400)
         exitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(delay))
             guard !Task.isCancelled, let self, !self.isFullscreen,
@@ -1140,7 +1245,106 @@ final class WebSession: NSObject, ObservableObject {
         bridge("window.JoeToepBridge?.exitFullscreen()")
         webView.evaluateJavaScript("window.JoeToepStage?.exit()", completionHandler: nil)
     }
+    // MARK: V18 — tab-sync
+    /// true = bij de eerste keer laden de video klaarzetten maar niet starten (tab van ander apparaat).
+    var syncedStartPaused = false
+    var hasLoadedContent: Bool { hasStarted }
+
+    /// Een ander apparaat opende hier een andere pagina: ga er ook heen, zonder af te spelen.
+    func syncNavigate(to url: URL, time: Double?) {
+        guard hasStarted else {
+            restoredURL = url; restoredTime = time; restoredPlaying = false; syncedStartPaused = true
+            return
+        }
+        guard !isPlaying else { return }   // wat hier speelt, blijft ongestoord
+        if NavigationPolicy.isPlaybackPage(url) {
+            let at = max(time ?? 1, 1)
+            pendingResume = (at, false)
+            load(at >= 3 ? Self.url(url, at: at) : url)
+        } else { load(url) }
+    }
+
+    /// Het andere apparaat speelt deze video op `time`: zet de (gepauzeerde) video hier op dezelfde plek.
+    func syncPosition(_ time: Double) {
+        guard time.isFinite, time >= 0 else { return }
+        guard hasStarted else { restoredTime = time; return }
+        guard !isPlaying else { return }
+        let t = String(format: "%.2f", time)
+        webView.evaluateJavaScript("""
+        (()=>{const v=document.querySelector('video.html5-main-video')||document.querySelector('video');
+        if(!v||!v.paused||Math.abs((v.currentTime||0)-\(t))<=3)return 0;
+        const p=document.getElementById('movie_player');
+        try{if(p&&p.seekTo){p.seekTo(\(t),true);if(!v.paused)p.pauseVideo&&p.pauseVideo();}else v.currentTime=\(t);}catch(_){}
+        return 1;})()
+        """, completionHandler: nil)
+    }
+
+    /// Een ander apparaat begon af te spelen: hier stoppen (PiP sluiten als die open is).
+    func pauseForRemotePlayback() {
+        if isInPictureInPicture { stopPiPAndPause(); return }
+        if isPlaying { recordLifecycle("sync: paused for other device"); pauseForTabSwitch() }
+    }
+
+    /// V18 — afspeelsnelheid met één klik (knoppen in de menubalk, en de Watch).
+    @Published private(set) var playbackRate: Double = 1
+    func stepPlaybackRate(_ direction: Int) {
+        webView.evaluateJavaScript("window.JoeToepControls ? window.JoeToepControls.rate(\(direction)) : 1") { [weak self] result, _ in
+            Task { @MainActor in
+                guard let self, let value = result as? Double else { return }
+                self.playbackRate = value
+                self.showRateToast(value)
+            }
+        }
+    }
+    private func showRateToast(_ value: Double) {
+        let text = value == floor(value) ? String(format: "%.0f×", value) : String(format: "%g×", value)
+        recordLifecycle("rate \(text)")
+    }
+    /// Voor de Watch-afstandsbediening: spoelen en afspelen/pauzeren via dezelfde weg als de toetsen.
+    func remoteSeek(by seconds: Double) {
+        webView.evaluateJavaScript("window.JoeToepControls && window.JoeToepControls.seek(\(seconds)); 0", completionHandler: nil)
+    }
+    func remoteToggleIfPaused() {
+        webView.evaluateJavaScript("(()=>{const v=document.querySelector('video');if(v&&v.paused&&window.JoeToepControls)window.JoeToepControls.toggle();return 0})()", completionHandler: nil)
+    }
+    func remoteToggle() {
+        webView.evaluateJavaScript("window.JoeToepControls && window.JoeToepControls.toggle(); 0", completionHandler: nil)
+    }
+
+    // MARK: V18 — downloads
+    /// Zoekt openlijk aangeboden media-bestanden op de pagina (video/audio met een http(s)-bron,
+    /// ook <source>-varianten en <a download>-links naar mediabestanden). Geen blob:/MSE-streams.
+    func findDownloadableMedia(_ completion: @escaping ([MediaSource]) -> Void) {
+        let script = #"""
+        (()=>{const out=[],seen=new Set();
+        const add=(u,k,l)=>{try{const a=new URL(u,location.href);if(!/^https?:$/.test(a.protocol)||seen.has(a.href))return;seen.add(a.href);out.push({u:a.href,k,l});}catch(_){}};
+        document.querySelectorAll('video,audio').forEach(m=>{const k=m.tagName==='AUDIO'?'audio':'video';
+          const h=m.videoHeight?m.videoHeight+'p · ':'';
+          if(m.currentSrc&&!m.currentSrc.startsWith('blob:'))add(m.currentSrc,k,h+(k==='audio'?'Audio':'Video'));
+          m.querySelectorAll('source[src]').forEach(s=>add(s.src,k,(s.getAttribute('size')||s.getAttribute('label')||s.getAttribute('res')||'')+' '+(s.type||'').replace(/^.*\//,'').toUpperCase()));});
+        document.querySelectorAll('a[href]').forEach(a=>{if(/\.(mp4|m4v|mov|webm|mp3|m4a|aac|wav|flac|ogg)(\?|$)/i.test(a.href))
+          add(a.href,/\.(mp3|m4a|aac|wav|flac|ogg)(\?|$)/i.test(a.href)?'audio':'video',(a.textContent||'').trim().slice(0,40)||'File');});
+        return JSON.stringify(out.slice(0,20));})()
+        """#
+        webView.evaluateJavaScript(script) { value, _ in
+            Task { @MainActor in
+                guard let text = value as? String, let data = text.data(using: .utf8),
+                      let list = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else { completion([]); return }
+                completion(list.compactMap { entry in
+                    guard let raw = entry["u"], let url = URL(string: raw), DownloadManager.isDownloadable(url) else { return nil }
+                    let label = (entry["l"] ?? "").trimmingCharacters(in: .whitespaces)
+                    return MediaSource(url: url, kind: entry["k"] == "audio" ? .audio : .video, label: label.isEmpty ? url.lastPathComponent : label)
+                })
+            }
+        }
+    }
+
     func pauseForTabSwitch() {
+        // V17: andere sites: alle video's op die pagina pauzeren en hun PiP sluiten.
+        if !isOnYouTube && settings.pipOnAllSites && !isTestMode {
+            webView.evaluateJavaScript("window.JoeToepWebPiP && window.JoeToepWebPiP.pauseAll(); 0", completionHandler: nil)
+            return
+        }
         guard isPlaying else { return }
         webView.evaluateJavaScript("window.JoeToepMedia?.remoteAction('pause')", completionHandler: nil)
     }
@@ -1166,13 +1370,20 @@ final class WebSession: NSObject, ObservableObject {
     }
     func resetVideoZoom() { bridge("window.JoeToepBridge?.resetZoom()") }
 
-    private func fulfillAutomaticFullscreen() {
+    private func fulfillAutomaticFullscreen(extraChecks: Int = 0) {
         #if os(macOS)
         let keyboard = settings.macFullscreenMode == .youtube
         let serial = navigationSerial
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        // V17: met animaties uit wacht automatisch-fullscreen 0.2 s in plaats van 0.5 s.
+        let firstWait = settings.animationsOff ? 0.2 : 0.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + (extraChecks == 0 ? firstWait : 0.15)) { [weak self] in
             guard let self, self.navigationSerial == serial, self.applicationActive,
                   self.settings.automaticFullscreen, !self.pip.isActive, !self.pip.isRequesting else { return }
+            // V16.2.1: another tab is still closing its PiP window for a hand-over → check again
+            // in 0.15 s (max. 12 times ≈ 1.8 s), so fullscreen only starts once PiP is gone.
+            if Self.handOverClosingUntil > Date() && extraChecks < 12 {
+                self.fulfillAutomaticFullscreen(extraChecks: extraChecks + 1); return
+            }
             self.webView.evaluateJavaScript("window.JoeToepPreferences?.fulfillFullscreenRequest(\(keyboard))") { [weak self] result, _ in
                 guard let self, result as? String == "keyboard", self.applicationActive,
                       self.navigationSerial == serial, !self.pip.isActive, !self.pip.isRequesting,
@@ -1188,6 +1399,34 @@ final class WebSession: NSObject, ObservableObject {
         }
         #else
         webView.evaluateJavaScript("window.JoeToepPreferences?.fulfillFullscreenRequest()", completionHandler: nil)
+        #endif
+    }
+
+    /// V16.2.1 — step 3 of a hand-over: put THIS tab's (new) video in fullscreen.
+    /// On the Mac a web page may only enter fullscreen right after a user action; a request
+    /// made by a script 1–2 s later can be refused. YouTube's own "F" key handler counts as
+    /// such an action, so we deliver a real key press to the web view (the same trick the
+    /// automatic-fullscreen feature uses). iPhone/iPad use the Apple player request.
+    func enterFullscreenForHandOver() {
+        guard !pip.isActive, !pip.isRequesting, !isFullscreen, isPlaying else { return }
+        #if os(macOS)
+        switch settings.macFullscreenMode {
+        case .youtube:
+            guard let window = webView.window else { return }       // tab must be on screen
+            window.makeFirstResponder(webView)                         // keyboard focus → player page
+            // Build a keyDown event for the letter F (keyCode 3 on every Mac keyboard layout).
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
+                webView.keyDown(with: event)                           // YouTube toggles fullscreen
+            }
+        case .enhanced:
+            openFullscreenFallback()                                   // JoeToep's own controls
+        case .safe:
+            openSafeFullscreen()                                       // compatibility stage
+        }
+        #else
+        openFullscreenFallback()
         #endif
     }
 
@@ -1334,7 +1573,9 @@ final class WebSession: NSObject, ObservableObject {
         #endif
         let level = settings.adBlockLevel
         let enabled = settings.blockAds
-        let key = "\(enabled)|\(level.rawValue)|\(settings.hideAdCards)"
+        // V17: de sleutel bevat nu ook de privacy-instellingen, zodat een wijziging daarvan de
+        // scripts opnieuw installeert (en anders niets onnodig herlaadt → sneller).
+        let key = "\(enabled)|\(level.rawValue)|\(settings.hideAdCards)|\(settings.cookieBannerMode.rawValue)|\(settings.stripTrackingParameters)|\(settings.globalPrivacyControl)|\(settings.blockTrackers)|\(settings.pipOnAllSites)"
         guard key != installedScriptKey else { return }
         installedScriptKey = key
         contentController.removeAllUserScripts()
@@ -1353,6 +1594,15 @@ final class WebSession: NSObject, ObservableObject {
         installScript("sitePreferences", world: .page, prefix: flags)
         installScript("sponsorBlock", world: .page)
         installScript("findInPage", world: Self.bridgeWorld)
+        // ── V17: scripts voor ALLE websites ──────────────────────────────────────────────
+        // Privacy eerst (atDocumentStart = vóór de scripts van de site zelf draaien).
+        let privacy = "window.JOETOEP_PRIVACY = {gpc:\(settings.globalPrivacyControl),strip:\(settings.stripTrackingParameters),trackers:\(settings.blockTrackers)};\n"
+        installScript("privacyShield", world: .page, time: .atDocumentStart, prefix: privacy)
+        // Cookiebanners: ook in iframes (sommige banners staan in een eigen frame) → allFrames.
+        let cookie = "window.JOETOEP_COOKIE_MODE = \"\(settings.cookieBannerMode.rawValue)\";\n"
+        installScript("cookieConsent", world: Self.bridgeWorld, prefix: cookie, allFrames: true)
+        if settings.pipOnAllSites { installScript("webPiP", world: .page) }   // PiP op elke site
+        installScript("creatorTools", world: .page)                          // snelheid, A-B-loop …
     }
 
     // MARK: - V15 titles, history
@@ -1491,14 +1741,30 @@ final class WebSession: NSObject, ObservableObject {
 
     /// Opening/switching tabs while this video plays: keep it playing in PiP.
     func enterPiPForTabSwitch() {
+        // V17: op andere sites weten we "speelt er iets" alleen in de pagina zelf → daar vragen.
+        if !isOnYouTube && settings.pipOnAllSites && !isTestMode {
+            webView.evaluateJavaScript("window.JoeToepWebPiP && window.JoeToepWebPiP.enterIfPlaying(); 0", completionHandler: nil)
+            return
+        }
         guard isPlaying, !pip.isActive, !pip.isRequesting, !isFloating else { return }
         recordLifecycle("tab switch: continue in PiP")
         requestPictureInPicture(reason: .manual)
     }
     /// Another tab started a video: pause this one and close its PiP window (inline, no fullscreen).
     func stopPiPAndPause() {
-        suppressExitPiP = true
-        fullscreenReturnDeadline = nil
+        // Step 1 of the hand-over (called by BrowserWorkspace when another tab starts playing):
+        // mark this tab as "handing over" for 3 seconds so every automatic "welcome back from
+        // PiP" behaviour below is skipped for it.
+        pipHandoverUntil = Date().addingTimeInterval(3)
+        Self.handOverClosingUntil = Date().addingTimeInterval(1.5)   // worst case: 1.5 s
+        recordLifecycle("hand-over: pause and close PiP (another tab plays)")
+        suppressExitPiP = true            // closing PiP must not start a new PiP
+        fullscreenReturnDeadline = nil    // no "return to fullscreen" window for this tab
+        fullscreenReturnTask?.cancel()    // cancel a fullscreen restore that was already planned
+        #if os(macOS)
+        macReturnTask?.cancel()           // cancel "bring the window forward" (the Space bug)
+        fullscreenVerifyTask?.cancel()    // cancel the fullscreen retry that also raised the window
+        #endif
         #if os(iOS)
         pipReturnSafetyTask?.cancel()
         #endif
@@ -1536,7 +1802,7 @@ final class WebSession: NSObject, ObservableObject {
         fullscreenVerifyTask?.cancel()
         fullscreenVerifyTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
-            guard !Task.isCancelled, let self, self.applicationActive, !self.navigatingAway,
+            guard !Task.isCancelled, let self, self.applicationActive, !self.navigatingAway, !self.isHandingOver,
                   self.documentID == document, self.videoID == video, !self.pip.isActive, !self.pip.isRequesting else { return }
             let fullscreen = (try? await self.webView.evaluateJavaScript("Boolean(document.fullscreenElement || document.webkitFullscreenElement || document.documentElement.hasAttribute('data-joetoep-stage'))")) as? Bool
             guard fullscreen != true, attempt < 3 else { return }
@@ -1551,7 +1817,12 @@ final class WebSession: NSObject, ObservableObject {
         #endif
     }
 
-    private func installScript(_ name: String, world: WKContentWorld, time: WKUserScriptInjectionTime = .atDocumentEnd, prefix: String = "") {
+    /// Laadt een .js-bestand uit de app en voegt het toe aan elke pagina die deze tab opent.
+    /// - `world`: `.page` = dezelfde wereld als de site (kan de site aanpassen); `bridgeWorld` =
+    ///   een afgeschermde wereld die de site niet kan zien of verstoren.
+    /// - `time`: vóór (`atDocumentStart`) of na (`atDocumentEnd`) het laden van de pagina.
+    /// - `allFrames` (V17): ook in iframes (ingesloten stukjes pagina) uitvoeren.
+    private func installScript(_ name: String, world: WKContentWorld, time: WKUserScriptInjectionTime = .atDocumentEnd, prefix: String = "", allFrames: Bool = false) {
         guard let url = Bundle.main.url(forResource: name, withExtension: "js", subdirectory: "Resources")
             ?? Bundle.main.url(forResource: name, withExtension: "js"),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
@@ -1559,7 +1830,7 @@ final class WebSession: NSObject, ObservableObject {
             return
         }
         contentController.addUserScript(WKUserScript(source: prefix + text, injectionTime: time,
-            forMainFrameOnly: true, in: world))
+            forMainFrameOnly: !allFrames, in: world))
     }
 
     private func handle(_ event: WebBridgeEvent) {
@@ -1628,16 +1899,24 @@ final class WebSession: NSObject, ObservableObject {
             pip.exitNative()
             suppressExitPiP = true // Closing PiP must not immediately reopen it.
             diagnostic = "PiP ended by player/system"
-            #if os(macOS)
-            restoreMacAfterPiP()
-            #endif
-            // A system return can precede didBecomeActive. Keep a short intent
-            // window, never turn a much later app launch into fullscreen.
-            fullscreenReturnDeadline = resettingPiP ? nil : Date().addingTimeInterval(2)
-            restoreFullscreenAfterPiPIfNeeded()
-            #if os(iOS)
-            if !resettingPiP { schedulePiPReturnSafetyNet() }
-            #endif
+            if isHandingOver {
+                // V16.2.1: PiP was closed because another tab took over. Stay in the
+                // background: the new tab's video is the one that goes fullscreen.
+                recordLifecycle("hand-over: PiP closed, stay in background")
+                // PiP is gone: the new tab may go fullscreen 0.25 s from now (close animation).
+                Self.handOverClosingUntil = min(Self.handOverClosingUntil, Date().addingTimeInterval(0.25))
+            } else {
+                #if os(macOS)
+                restoreMacAfterPiP()
+                #endif
+                // A system return can precede didBecomeActive. Keep a short intent
+                // window, never turn a much later app launch into fullscreen.
+                fullscreenReturnDeadline = resettingPiP ? nil : Date().addingTimeInterval(2)
+                restoreFullscreenAfterPiPIfNeeded()
+                #if os(iOS)
+                if !resettingPiP { schedulePiPReturnSafetyNet() }
+                #endif
+            }
         }
         if !wasFullscreen && event.fullscreen {
             suppressExitPiP = false
@@ -1648,7 +1927,7 @@ final class WebSession: NSObject, ObservableObject {
             #if os(iOS)
             if settings.rotateOnFullscreen && !pip.isActive && !pip.isRequesting {
                 orientationTask?.cancel()
-                let rotateDelay = settings.instantTransitions ? 120 : 350
+                let rotateDelay = settings.animationsOff ? 40 : (settings.instantTransitions ? 120 : 350)
                 orientationTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(rotateDelay))
                     guard !Task.isCancelled, let self, self.isFullscreen, self.applicationActive,
@@ -1710,8 +1989,12 @@ final class WebSession: NSObject, ObservableObject {
 
     func showNotice(_ kind: SessionNotice.Kind, _ title: String, _ message: String) {
         notice = SessionNotice(kind: kind, title: title, message: message)
+        if isTestMode { recordLifecycle("notice shown: " + title) }   // V17.1: zichtbaar in UI-tests
     }
-    func dismissNotice() { notice = nil }
+    func dismissNotice() {
+        if isTestMode && notice != nil { recordLifecycle("notice dismissed") }
+        notice = nil
+    }
 
     private func refreshNavigationState() {
         canGoBack = webView.canGoBack; canGoForward = webView.canGoForward
@@ -1978,11 +2261,17 @@ extension WebSession: WKUIDelegate {
                 self?.onOpenInNewTab?(url, false)
             }
             let copy = UIAction(title: "Copy Link", image: UIImage(systemName: "doc.on.doc")) { _ in UIPasteboard.general.url = url }
+            // V17.1: op iPad (meerdere vensters mogelijk) ook "Open in nieuw venster".
+            let window = UIAction(title: "Open in New Window", image: UIImage(systemName: "rectangle.badge.plus")) { _ in
+                WindowOpener.open(url)
+            }
+            let openers: [UIMenuElement] = UIApplication.shared.supportsMultipleScenes && UIDevice.current.userInterfaceIdiom == .pad
+                ? [open, background, window] : [open, background]
             let others = suggested.filter { element in
                 guard let action = element as? UIAction else { return true }
                 return !action.title.localizedCaseInsensitiveContains("reading list") && !action.title.localizedCaseInsensitiveContains("copy link")
             }
-            return UIMenu(children: [UIMenu(options: .displayInline, children: [open, background]),
+            return UIMenu(children: [UIMenu(options: .displayInline, children: openers),
                                      UIMenu(options: .displayInline, children: ([copy] as [UIMenuElement]) + others)])
         })
     }
@@ -1994,3 +2283,24 @@ extension WebSession: WKUIDelegate {
         completionHandler(nil)
     }
 }
+
+
+#if os(iOS)
+// ── V17: rand-veeg op iPhone/iPad ─────────────────────────────────────────────────────────
+extension WebSession: UIGestureRecognizerDelegate {
+    /// Wordt aangeroepen tijdens de veeg. Pas bij het loslaten (`.ended`) beslissen we: ver genoeg
+    /// (meer dan 90 punten) naar rechts geveegd en geen vorige pagina → "terug" = tab sluiten.
+    @objc func edgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        guard gesture.state == .ended, !canGoBack else { return }
+        let distance = gesture.translation(in: gesture.view).x
+        if distance > 90 { goBack() }     // goBack() roept onCannotGoBack aan → tab dicht
+    }
+    /// Laat onze veeg tegelijk met WebKit's eigen gebaren werken (anders blokkeren ze elkaar).
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    /// Alleen reageren als er echt geen vorige pagina is (anders doet WebKit het terug-vegen).
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer is UIScreenEdgePanGestureRecognizer ? !canGoBack : true
+    }
+}
+#endif

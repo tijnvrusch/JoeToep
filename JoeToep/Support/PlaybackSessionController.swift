@@ -27,12 +27,32 @@ final class PlaybackSessionController {
     func prepareForPictureInPicture() {
         // WebKit owns activation. Re-activating an already playing session causes a gap.
     }
+    /// Stelt de "audiosessie" van iOS/iPadOS in: hoe het systeem het geluid van JoeToep behandelt.
+    ///
+    /// V17 — Ruimtelijke audio (spatial audio) met AirPods Pro 3:
+    ///  • categorie `.playback` = geluid blijft spelen met het stilteknopje aan en op de achtergrond;
+    ///  • modus `.moviePlayback` = "dit is film/video". Precies deze modus zet iOS aan om stereo
+    ///    ruimtelijk te maken ("Spatialize Stereo") en hoofdbeweging te volgen (head tracking)
+    ///    met AirPods Pro / Max;
+    ///  • `setSupportsMultichannelContent(true)` = meerkanaals geluid (5.1 / Dolby Atmos) wordt
+    ///    niet naar stereo teruggemixt maar in zijn geheel naar de AirPods gestuurd;
+    ///  • `.longFormVideo` = AirPlay en "Doorgaan op ander apparaat" behandelen het als video.
+    /// Met de instelling uit gebruiken we modus `.default`: gewoon stereo, zonder ruimtelijk effect.
     private func configureCategory() {
         let session = AVAudioSession.sharedInstance()
-        guard session.category != .playback || session.mode != .moviePlayback || session.routeSharingPolicy != .longFormVideo || !session.categoryOptions.isEmpty else { return }
-        do { try session.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo, options: []) }
-        catch { /* WebKit owns activation; a future user gesture can activate it. */ }
+        // Leest de instelling direct uit UserDefaults (standaard aan).
+        let spatial = UserDefaults.standard.object(forKey: "spatialAudioV17") as? Bool ?? true
+        let mode: AVAudioSession.Mode = spatial ? .moviePlayback : .default
+        // Alleen iets veranderen als het nog niet goed staat (een wijziging kost een hapering).
+        if session.category != .playback || session.mode != mode || session.routeSharingPolicy != .longFormVideo || !session.categoryOptions.isEmpty {
+            do { try session.setCategory(.playback, mode: mode, policy: .longFormVideo, options: []) }
+            catch { /* WebKit owns activation; a future user gesture can activate it. */ }
+        }
+        // Meerkanaals doorgeven voor Dolby Atmos / 5.1 naar AirPods (bestaat sinds iOS 15).
+        try? session.setSupportsMultichannelContent(spatial)
     }
+    /// V17: opnieuw instellen nadat de gebruiker de instelling "Ruimtelijke audio" wijzigt.
+    func refreshSpatialAudio() { configureCategory() }
     private func interrupted(_ notification: Notification) {
         guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }

@@ -57,9 +57,15 @@ function harness({ mobile = true, url = 'https://m.youtube.com/watch?v=fixture',
   }
   Object.defineProperty(w.navigator, 'mediaSession', {value: new MockMediaSession()});
   w.JOETOEP_MOBILE = mobile;
+  // V16.2.1: remember the page script's window listeners so a test can deliver a TRUSTED
+  // (real user) click; jsdom itself can only create untrusted events.
+  const captured = {}; const originalAdd = w.addEventListener.bind(w);
+  w.addEventListener = (type, fn, options) => { (captured[type] ??= []).push(fn); return originalAdd(type, fn, options); };
   const install = () => w.eval(source);
   install();
-  return { w, d, state, v: d.querySelector('video'), api: w.JoeToepMedia, nativeCalls, rawPause, rawPlay, fire, setMode, install,
+  w.addEventListener = originalAdd;
+  const userClick = target => (captured.pointerdown || []).forEach(fn => fn({ isTrusted: true, target }));
+  return { w, d, state, v: d.querySelector('video'), api: w.JoeToepMedia, nativeCalls, rawPause, rawPlay, fire, setMode, install, userClick,
     hide() { visibility = 'hidden'; fire(d, 'visibilitychange'); },
     show() { visibility = 'visible'; fire(d, 'visibilitychange'); },
     advance(ms) { now += ms; },
@@ -615,6 +621,60 @@ test('V10 seeking clamps both edges and live DVR bounds; volume is bounded', () 
 });
 
 
+test('V18 arrow keys drive YouTube\'s own player API and keep its controls hidden', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  const p=h.w.document.getElementById('movie_player')||(()=>{const d=h.w.document.createElement('div');d.id='movie_player';h.w.document.body.appendChild(d);return d;})();
+  let t=50,vol=40,muted=false,rate=1;
+  Object.assign(p,{seekTo:(x)=>{t=x;},getCurrentTime:()=>t,getDuration:()=>100,setVolume:(v)=>{vol=v;},getVolume:()=>vol,
+    mute:()=>{muted=true;},unMute:()=>{muted=false;},getPlaybackRate:()=>rate,setPlaybackRate:(r)=>{rate=r;}});
+  h.w.eval(fs.readFileSync(path.join(__dirname,'../JoeToep/Resources/playbackControls.js'),'utf8'));
+  const c=h.w.JoeToepControls;
+  c.seek(5);assert.equal(t,55);c.seek(-100);assert.equal(t,0);c.seek(500);assert.equal(t,100);
+  c.volume(.05);assert.equal(vol,45);c.volume(-1);assert.equal(vol,0);assert.equal(muted,true);c.volume(.1);assert.equal(muted,false);
+  assert.ok(p.classList.contains('joetoep-quiet'),'YouTube controls stay invisible while we adjust');
+  assert.ok(h.w.document.getElementById('joetoep-quiet-controls'));
+  assert.equal(c.rate(1),1.25);assert.equal(rate,1.25);assert.equal(c.rate(1),1.5);assert.equal(c.rate(-1),1.25);
+  assert.equal(c.rate(0),1);assert.equal(c.rate(-1),0.75);
+  rate=2;assert.equal(c.rate(1),2.5);assert.equal(h.v.playbackRate,2.5,'above 2x the element is set directly');
+  h.close();
+});
+
+test('V16.2.1 clicking the video to pause right after a PiP return stays paused (Mac)', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  h.api.enterPiP(); h.api.returnToApp('origin'); h.advance(500);   // inside the 3 s return window
+  const plays=h.nativeCalls.play;
+  h.userClick(h.v); h.v.pause();                                    // real click → YouTube pauses
+  assert.equal(h.v.paused,true); h.advance(300); h.fire(h.v,'pause');
+  assert.equal(h.nativeCalls.play,plays,'no automatic resume after a user pause'); h.close();
+});
+test('V16.2.1 clicking the video (iPhone/iPad) during the return window stays paused too', () => {
+  const h=harness(); h.api.enterPiP(); h.hide(); h.show(); h.api.returnToApp('origin'); h.advance(400);
+  const plays=h.nativeCalls.play; h.userClick(h.v); h.rawPause(h.v);
+  assert.equal(h.v.paused,true); assert.equal(h.nativeCalls.play,plays); h.close();
+});
+test('V16.2.1 without a user click the return window still recovers a system pause', () => {
+  const h=harness(); h.api.enterPiP(); h.api.returnToApp('origin'); h.advance(400);
+  h.rawPause(h.v); assert.equal(h.v.paused,false,'system pause is undone once'); h.close();
+});
+test('V16.2.1 a click on a child of the player counts as user intent', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  const player=h.d.createElement('div'); player.className='html5-video-player';
+  const overlay=h.d.createElement('div'); player.appendChild(overlay); h.d.body.appendChild(player);
+  h.api.enterPiP(); h.api.returnToApp('origin'); h.advance(300);
+  h.userClick(overlay); h.rawPause(h.v); assert.equal(h.v.paused,true); h.close();
+});
+test('V16.2.1 hand-over: closing PiP for another tab never restores fullscreen and keeps it paused', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  h.api.configure({returnTarget:'fullscreen'}); h.api.enterPiP();
+  h.api.remoteAction('pause'); assert.equal(h.api.closePiPInline(),true);
+  assert.equal(h.api.restoreFullscreen(),false,'no fullscreen for the old tab');
+  assert.equal(h.v.paused,true); h.advance(1000); h.fire(h.v,'pause'); assert.equal(h.v.paused,true); h.close();
+});
+test('V16.2.1 500 rapid click-pause/play cycles never auto-resume and leave no timers', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  for(let i=0;i<500;i++){ h.userClick(h.v); h.v.pause(); assert.equal(h.v.paused,true); h.advance(50); h.userClick(h.v); h.v.play(); assert.equal(h.v.paused,false); h.advance(50); }
+  assert.equal(h.timerCalls,0); h.close();
+});
 test('V10 keyboard modifiers map to 5/30/60 seconds and ignore text entry', () => {
   const h=harness({mobile:false}), listeners={};
   h.w.addEventListener=(type,fn)=>{listeners[type]=fn;};

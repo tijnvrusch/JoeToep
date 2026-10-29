@@ -7,6 +7,8 @@ import AppKit
 final class JoeToepWebView: WKWebView {
     var contextLink: (() -> URL?)?
     var openInNewTab: ((URL, Bool) -> Void)?
+    /// V17.1: "Open in nieuw venster".
+    var openInNewWindow: ((URL) -> Void)?
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
@@ -19,12 +21,20 @@ final class JoeToepWebView: WKWebView {
         let backgroundItem = NSMenuItem(title: "Open in New Tab", action: #selector(openBackground(_:)), keyEquivalent: "")
         backgroundItem.representedObject = url; backgroundItem.target = self
         backgroundItem.image = NSImage(systemSymbolName: "plus.square", accessibilityDescription: nil)
+        // V17.1: ook "Open in New Window".
+        let windowItem = NSMenuItem(title: "Open in New Window", action: #selector(openWindowItem(_:)), keyEquivalent: "")
+        windowItem.representedObject = url; windowItem.target = self
+        windowItem.image = NSImage(systemSymbolName: "macwindow.badge.plus", accessibilityDescription: nil)
         menu.insertItem(switchItem, at: 0)
         menu.insertItem(backgroundItem, at: 1)
-        menu.insertItem(.separator(), at: 2)
+        menu.insertItem(windowItem, at: 2)
+        menu.insertItem(.separator(), at: 3)
     }
     @objc private func openSwitching(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { openInNewTab?(url, true) }
+    }
+    @objc private func openWindowItem(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { openInNewWindow?(url) }
     }
     @objc private func openBackground(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { openInNewTab?(url, false) }

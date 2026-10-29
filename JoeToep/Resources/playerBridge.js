@@ -1,28 +1,55 @@
+// Deze IIFE ("(() => { ... })()", een functie die zichzelf meteen aanroept) houdt de brug
+// tussen de webpagina en de native (Swift) app in stand: hij houdt de video's in de gaten
+// en stuurt statusupdates ("events") naar de app, en ontvangt opdrachten terug (PiP starten,
+// fullscreen, enz.) via window.JoeToepBridge.
 (() => {
+  // "use strict": strenger JavaScript, fouten (zoals een typefout in een variabelenaam)
+  // vallen meteen op in plaats van stil te falen.
   "use strict";
+  // Voorkom dat dit script twee keer wordt geïnstalleerd.
   if (window.JoeToepBridge) return;
+  // Een uniek ID voor dit documentbezoek: tijdstip + een willekeurig staartje, zodat de
+  // native app berichten van verschillende pagina's/tabbladen uit elkaar kan houden.
   const documentID = String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+  // WeakSet/WeakMap onthouden welke video-elementen we al "gezien" hebben en info erover,
+  // zonder te voorkomen dat de browser die elementen mag opruimen als ze uit de pagina gaan
+  // ("weak" = geen geheugenlek).
   const observed = new WeakSet();
   const ids = new WeakMap();
   const originalStyle = new WeakMap();
   const legacyFullscreen = new WeakSet();
+  // Gedeelde toestand: het laatste ID-nummer dat we uitgedeeld hebben, de actieve video,
+  // de laatst verstuurde status (om dubbele berichten te voorkomen), enz.
   let serial = 0, active = null, lastSnapshot = "", requestToken = null, zoom = 1;
   let options = { fit: "fit", pinch: "video" };
   let gesture = null;
+  // Stuurt een bericht naar de native (Swift) app via WebKit's message-handler-systeem.
+  // "?." (optional chaining) zorgt dat dit stil faalt (in plaats van een foutmelding) als
+  // die brug er niet is, bijvoorbeeld in een gewone browser tijdens het testen.
   const emit = (event, detail = {}) => {
     try { window.webkit?.messageHandlers?.joeToep?.postMessage({ event, documentID, ...detail }); }
     catch (_) { /* A detached document has no live native recipient. */ }
   };
+  // Is deze video op dit moment in Picture-in-Picture?
   const isPiP = video => Boolean(video && (
     video.webkitPresentationMode === "picture-in-picture" || document.pictureInPictureElement === video
   ));
+  // Is deze video in fullscreen (en dus NIET in PiP)? Kijkt zowel naar de moderne
+  // Fullscreen-API als naar de oudere webkit-manier (legacyFullscreen).
   const isFullscreen = video => Boolean(video && !isPiP(video) && (
     video.webkitPresentationMode === "fullscreen" || legacyFullscreen.has(video) ||
     document.fullscreenElement === video || document.fullscreenElement?.contains?.(video)
   ));
+  // Kiest, van alle <video>-elementen op de pagina, degene die het meest waarschijnlijk
+  // "de" video is waar de gebruiker naar kijkt: als er al een actieve video in PiP staat,
+  // blijf daarbij; anders geef punten (score) aan elke video en kies de hoogste score.
   const chooseVideo = () => {
     if (active?.isConnected && isPiP(active)) return active;
+    // Array.from(...) zet de resultaten van querySelectorAll (geen "echte" array) om in
+    // een gewone array, zodat we ermee kunnen filteren/sorteren.
     const videos = Array.from(document.querySelectorAll("video")).filter(v => v.isConnected !== false);
+    // Een hoger getal = waarschijnlijker de hoofdvideo: YouTube's eigen hoofdvideo-klasse
+    // telt het zwaarst, daarna of hij speelt, daarna hoe groot hij op het scherm is.
     const score = v => {
       const r = v.getBoundingClientRect();
       return (v.classList?.contains("html5-main-video") ? 1e12 : 0) +
@@ -31,6 +58,8 @@
     videos.sort((a, b) => score(b) - score(a));
     return videos[0] || null;
   };
+  // Onthoudt hoe de video's CSS-stijl (object-fit/transform) er origineel uitzag, zodat we
+  // die later precies kunnen terugzetten. Doet niets als we dat al eerder onthouden hebben.
   const rememberStyle = video => {
     if (originalStyle.has(video)) return;
     const values = {};
@@ -39,6 +68,8 @@
     }
     originalStyle.set(video, values);
   };
+  // Zet één CSS-eigenschap terug naar de onthouden originele waarde (of verwijdert hem
+  // helemaal als er origineel niets stond).
   const restoreProperty = (video, property) => {
     const [value, priority] = originalStyle.get(video)?.[property] || ["", ""];
     if (value) {
@@ -46,6 +77,8 @@
         video.style.setProperty(property, value, priority);
     } else if (video.style.getPropertyValue(property)) video.style.removeProperty(property);
   };
+  // Past de zoom/opvulstijl van de video toe (of zet hem terug), afhankelijk van de
+  // huidige presentatiemodus en de door de gebruiker gekozen instellingen (fit/pinch-zoom).
   const applyVisuals = video => {
     if (!video) return;
     if (isPiP(video) || isFullscreen(video) || document.documentElement?.hasAttribute?.("data-joetoep-stage")) {

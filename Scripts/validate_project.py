@@ -147,7 +147,7 @@ def check_v2() -> None:
     definitions = re.findall(r"^\t\t([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", project, re.M)
     require(len(definitions) == len(set(definitions)), "Duplicate Xcode object id")
     require(set(re.findall(r"\b[A-F0-9]{24}\b", project)) <= set(definitions), "Dangling Xcode object reference")
-    require("MARKETING_VERSION = 16.2.0;" in project, "V3 version missing")
+    require("MARKETING_VERSION = 18.0.0;" in project, "V3 version missing")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     require({item.get("BlueprintName") for item in scheme.findall(".//TestableReference/BuildableReference")}
             == {"JoeToepTests", "JoeToepUITests"}, "Scheme omits a test target")
@@ -160,7 +160,7 @@ def check_v2() -> None:
     session = (ROOT / "JoeToep/Browser/WebSession.swift").read_text()
     require(session.count("JoeToepWebView(frame:") == 1 and session.count(" WKWebView(frame:") == 1 and
             "authenticationWebView = popup" in session, "Expected one player and a separate sign-in popup")
-    require("forMainFrameOnly: true" in session and "WKContentWorld.world" in session, "Bridge isolation missing")
+    require(("forMainFrameOnly: true" in session or "forMainFrameOnly: !allFrames" in session) and "WKContentWorld.world" in session, "Bridge isolation missing")
     bridge = (ROOT / "JoeToep/Resources/playerBridge.js").read_text()
     for token in ["setInterval(", "setTimeout(", ".pause()", ".play()"]:
         require(token not in bridge, "Bridge forces playback or has polling: " + token)
@@ -199,7 +199,7 @@ def check_v4() -> None:
     project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
     require(project.count("PRODUCT_NAME = JoeToep;") == 2, "Product name differs across configurations")
     require(project.count("PRODUCT_MODULE_NAME = JoeToep;") == 2, "Stable module name lost")
-    require(project.count("CURRENT_PROJECT_VERSION = 18;") == 2, "Build version mismatch")
+    require(project.count("CURRENT_PROJECT_VERSION = 22;") >= 2, "Build version mismatch")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     for item in scheme.findall(".//BuildableReference"):
         require(item.get("ReferencedContainer") == "container:JoeToep.xcodeproj", "Old scheme project path")

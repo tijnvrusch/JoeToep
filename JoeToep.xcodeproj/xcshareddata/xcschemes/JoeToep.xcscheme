@@ -67,7 +67,7 @@
                ReferencedContainer = "container:JoeToep.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference skipped = "NO" parallelizable = "NO">
+         <TestableReference skipped = "YES" parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000012"

@@ -1,3 +1,6 @@
+// Dit bestand tekent de balk met tabbladen bovenaan (of onderaan) het scherm:
+// de losse tab-"chips", de +-knop voor een nieuw tabblad, en de adresbalk die
+// verschijnt zodra je op het huidige tabblad tikt.
 import SwiftUI
 #if os(iOS)
 import UIKit
@@ -8,14 +11,28 @@ import AppKit
 /// V15 tab strip. With few tabs they share the full width up to the + button (so long titles are
 /// readable); with many they shrink to a minimum width and the strip scrolls. Tapping the
 /// selected tab turns it into an address bar (type a URL or a search).
+// De volledige tabbladenbalk.
 struct TabBarView: View {
     @ObservedObject var workspace: BrowserWorkspace
     @ObservedObject var settings: AppSettings
+    // Binding: "editing" (zit de adresbalk in bewerkmodus?) wordt eigenlijk
+    // bijgehouden door de aanroeper; deze view mag hem wel aanpassen.
     @Binding var editing: Bool
     @State private var address = ""
     @FocusState private var addressFocused: Bool
     @Environment(\.joeToepTheme) private var theme
     @Environment(\.openWindow) private var openWindow
+    // Op de Mac is er wat meer ruimte, dus mogen tabbladen iets breder minimaal zijn.
+    /// V17.1: maximale tabbreedte zolang er minder dan 4 tabs zijn (Mac en iPad).
+    private let fewTabsMaxWidth: CGFloat = 220
+    /// iPhone? (daar blijven tabs de volle breedte gebruiken; het scherm is smal genoeg)
+    private var isPhone: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
     #if os(macOS)
     private let minimumTabWidth: CGFloat = 104
     #else
@@ -23,9 +40,14 @@ struct TabBarView: View {
     #endif
 
     var body: some View {
+        // HStack zet de onderdelen (tabstrip/adresbalk en de +-knoppen) naast elkaar.
         HStack(spacing: 4) {
+            // ZStack laat ons wisselen tussen twee views (adresbalk of
+            // tabstrip) die elkaar overlappen tijdens de animatie.
             ZStack {
                 if editing {
+                    // .transition bepaalt hoe deze view verschijnt/verdwijnt:
+                    // hier een combinatie van inzoomen en vervagen.
                     addressField
                         .transition(.asymmetric(insertion: .scale(scale: 0.96, anchor: .leading).combined(with: .opacity), removal: .opacity))
                 } else {
@@ -34,6 +56,7 @@ struct TabBarView: View {
             }
             .frame(maxWidth: .infinity)
             if !editing && settings.showNewTabButton {
+                // The + button: a click opens a new tab; right-click shows a small menu.
                 Button(action: workspace.addTab) {
                     Image(systemName: "plus").themedIcon(theme, size: 15 * theme.density.scale)
                         .frame(width: 36, height: theme.tabHeight + 4).contentShape(Rectangle())
@@ -54,6 +77,8 @@ struct TabBarView: View {
                 }
                 .buttonStyle(.plain).accessibilityLabel("New window").accessibilityIdentifier("windows.new")
                 #else
+                // Op iPad tonen we ook een knop om een extra apart venster te
+                // openen; op iPhone kan dat niet, dus daar laten we hem weg.
                 if UIDevice.current.userInterfaceIdiom == .pad {
                     Button { openWindow(id: "main") } label: {
                         Image(systemName: "rectangle.badge.plus").themedIcon(theme, size: 14 * theme.density.scale)
@@ -69,21 +94,34 @@ struct TabBarView: View {
         .background {
             if settings.visualizerInTabBar { SessionVisualizer(session: workspace.selected.session) }
         }
+        // .animation zorgt dat wijzigingen aan "editing" vloeiend geanimeerd worden.
         .animation(theme.anim(.addressBar), value: editing)
         .onChange(of: editing) { _, now in
             if now {
+                // Bij het starten van bewerken: vul de adresbalk met de
+                // huidige URL van het tabblad, en geef het tekstveld focus.
                 address = workspace.selected.currentURL?.absoluteString ?? ""
                 DispatchQueue.main.async { addressFocused = true }
             }
         }
     }
 
+    // De horizontale strook met alle tab-chips naast elkaar.
     private var strip: some View {
         GeometryReader { geometry in
+            // Berekent hoe breed elk tabblad zou moeten zijn als ze allemaal
+            // gelijk verdeeld worden over de beschikbare breedte.
             let count = CGFloat(max(workspace.tabs.count, 1))
             let spacing: CGFloat = 4
             let natural = (geometry.size.width - spacing * (count - 1)) / count
-            let width = max(natural, minimumTabWidth)
+            // Maar nooit smaller dan het minimum; anders scrollen we liever.
+            // V17.1 (Mac en iPad): met 1–3 tabs worden tabs niet meer over de hele breedte
+            // uitgerekt maar maximaal `fewTabsMaxWidth` breed; pas vanaf 4 tabs delen ze de ruimte.
+            let width = workspace.tabs.count < 4 && !isPhone
+                ? min(max(natural, minimumTabWidth), fewTabsMaxWidth)
+                : max(natural, minimumTabWidth)
+            // ScrollViewReader geeft toegang tot "proxy", waarmee we
+            // programmatisch naar een specifiek tabblad kunnen scrollen.
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     HStack(spacing: spacing) {
@@ -91,6 +129,8 @@ struct TabBarView: View {
                             TabChip(tab: tab, session: tab.session, selected: workspace.selectedID == tab.id, width: width,
                                     select: { tapped(tab) }, close: { workspace.close(tab) })
                                 .contextMenu { menu(for: tab) }
+                                // .id() geeft deze view een uniek label, zodat
+                                // scrollTo(id) hem later kan terugvinden.
                                 .id(tab.id)
                                 .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .leading).combined(with: .opacity),
                                                         removal: .scale(scale: 0.6).combined(with: .opacity)))
@@ -101,9 +141,14 @@ struct TabBarView: View {
                     .animation(theme.animation, value: workspace.selectedID)
                 }
                 .scrollIndicators(.hidden)
+                // Scrollen is alleen nodig/toegestaan als de natuurlijke
+                // breedte kleiner is dan het minimum (dus als tabbladen niet
+                // meer allemaal tegelijk passen).
                 .scrollDisabled(natural >= minimumTabWidth)
                 .onChange(of: workspace.selectedID) { _, id in
                     guard natural < minimumTabWidth else { return }
+                    // Scrol automatisch (met animatie) naar het net
+                    // geselecteerde tabblad, zodat het zichtbaar in beeld komt.
                     withAnimation(theme.animation) { proxy.scrollTo(id, anchor: .center) }
                 }
             }
@@ -111,13 +156,14 @@ struct TabBarView: View {
         .frame(height: theme.tabHeight + 4)
     }
 
+    // De adresbalk die verschijnt zodra je op het geselecteerde tabblad tikt.
     private var addressField: some View {
         HStack(spacing: 8) {
             Image(systemName: workspace.selected.isPrivate ? "eyeglasses" : "magnifyingglass")
                 .foregroundStyle(theme.secondary)
             TextField("Search \(settings.searchEngine.title) or enter a website", text: $address)
                 .textFieldStyle(.plain)
-                .font(theme.tabText.font.weight(.medium))
+                .font(theme.tabFont.weight(.medium))
                 .foregroundStyle(theme.foreground)
                 .focused($addressFocused)
                 .autocorrectionDisabled()
@@ -136,7 +182,7 @@ struct TabBarView: View {
                     .buttonStyle(.plain).accessibilityLabel("Clear")
             }
             Button("Cancel") { editing = false }
-                .buttonStyle(.plain).foregroundStyle(theme.accent).font(theme.tabText.font.weight(.semibold))
+                .buttonStyle(.plain).foregroundStyle(theme.accent).font(theme.tabFont.weight(.semibold))
                 .accessibilityIdentifier("tabs.address.cancel")
         }
         .padding(.horizontal, 10)
@@ -147,16 +193,22 @@ struct TabBarView: View {
         }
     }
 
+    // Wordt aangeroepen als de gebruiker in de adresbalk op Enter/Go drukt.
     private func submit() {
         let text = address
         editing = false
         workspace.selected.session.loadAddress(text)
     }
 
+    // Bepaalt wat een tik op een tabblad doet: is het al geselecteerd, ga dan
+    // naar bewerkmodus (adresbalk); is het nog niet geselecteerd, selecteer het gewoon.
     private func tapped(_ tab: BrowserTab) {
         if workspace.selectedID == tab.id { editing = true } else { workspace.select(tab) }
     }
 
+    // @ViewBuilder vertelt Swift dat deze functie meerdere views achter
+    // elkaar mag "opbouwen" (zoals in een normale SwiftUI-body), voor het
+    // rechtermuisknop-menu van een tabblad.
     @ViewBuilder
     private func menu(for tab: BrowserTab) -> some View {
         Button { workspace.togglePin(tab) } label: {
@@ -182,16 +234,22 @@ struct TabBarView: View {
 }
 
 /// One tab: icon (playing / pinned / private / site), title and a close button.
+// Eén los tabblad-"chipje" in de balk.
 struct TabChip: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject var session: WebSession
     let selected: Bool
     let width: CGFloat
+    // Deze twee zijn functies die worden meegegeven door wie TabChip gebruikt
+    // (dus geen eigen logica hier, alleen "roep dit aan als er getikt wordt").
     let select: () -> Void
     let close: () -> Void
+    // Houdt bij of de muis erboven zweeft (alleen relevant op de Mac).
     @State private var hovering = false
     @Environment(\.joeToepTheme) private var theme
 
+    // Berekent of het kruisje om te sluiten getoond moet worden, afhankelijk
+    // van de gekozen instelling (altijd/alleen geselecteerd/bij hover/nooit).
     private var showsClose: Bool {
         guard !tab.pinned else { return false }
         switch theme.tabClose {
@@ -201,6 +259,8 @@ struct TabChip: View {
         case .never: return false
         }
     }
+    // Kiest welk icoontje getoond wordt vóór de titel, op basis van de status
+    // van het tabblad (speelt af, vastgezet, privé, site-type).
     private var iconName: String {
         if session.isInPictureInPicture { return "pip" }
         if session.isPlaying { return "speaker.wave.2" }
@@ -214,6 +274,8 @@ struct TabChip: View {
         HStack(spacing: 6) {
             if theme.showTabIcons {
                 ZStack {
+                    // Terwijl de pagina laadt (en niet al aan het afspelen is)
+                    // tonen we een draaiend laad-icoontje in plaats van het gewone icoon.
                     if session.isLoading && !session.isPlaying {
                         ProgressView().controlSize(.mini)
                     } else {
@@ -224,7 +286,7 @@ struct TabChip: View {
                 .frame(width: 16)
             }
             Text(tab.title)
-                .font(theme.tabText.font.weight(selected ? .semibold : .regular))
+                .font(theme.tabFont.weight(selected ? .semibold : .regular))
                 .foregroundStyle(selected ? theme.foreground : theme.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -252,6 +314,8 @@ struct TabChip: View {
                 Capsule().fill(theme.accent).frame(height: 2.5).padding(.horizontal, 8)
             }
         }
+        // .contentShape(Rectangle()) zorgt dat de HELE rechthoek tikbaar is,
+        // ook de lege ruimtes, niet alleen de zichtbare tekst/iconen.
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         #if os(macOS)
@@ -266,6 +330,8 @@ struct TabChip: View {
         .animation(theme.animation, value: showsClose)
     }
 
+    // De achtergrondvorm/-kleur van het tabblad: verschilt per thema-stijl
+    // (onderstreping versus gevulde vorm) en of het geselecteerd/privé is.
     @ViewBuilder
     private var background: some View {
         let shape = RoundedRectangle(cornerRadius: theme.tabCornerRadius, style: .continuous)
@@ -280,6 +346,8 @@ struct TabChip: View {
     }
 }
 
+// Een klein hulpmiddel (enum met alleen "static" functies, dus geen eigen
+// data) om een URL naar het systeem-klembord te kopiëren.
 enum Clipboard {
     static func copy(_ url: URL) {
         #if os(iOS)
