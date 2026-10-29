@@ -1,4 +1,80 @@
-# 20.0.0 (27)
+# 21.0.0 (29)
+
+## Wisselen tussen Mac en iPhone (topprioriteit)
+- **Automatisch verder spelen bij wisselen.** Open JoeToep op het andere apparaat (of klik/tik erin na ≥ 4 s niet gebruiken): de video speelt daar meteen verder op de geschatte tijd. Het oude apparaat pauzeert en stuurt zijn exacte tijd; die wordt tot op ±0,3 s gecorrigeerd, zonder hapering.
+- Net terug uit de achtergrond? Eerst wordt de verbinding afgewacht (max. 3 s) voor verse info; nooit afgaan op verouderde gegevens.
+- **"Verder op iPhone/Mac"**: via het tabmenu, het mediacentrum of de zoekbalk ("Continue on …"). De video speelt daar door op precies hetzelfde moment. "Take over from …" doet het omgekeerde.
+- Een tab kiezen neemt nooit ongevraagd over. Geen dubbele overdrachtsaanvragen meer.
+- Instelbaar (Sync & devices › Switching devices): aan/uit, na hoeveel seconden een klik telt als wisselen, tijdcompensatie en maximale leeftijd. Het sync-logboek toont elke overdracht.
+- Na het opnieuw openen van de app speelt de laatste video niet meer vanzelf (fullscreen); hij staat klaar op de juiste plek. Instelbaar.
+
+## Browser zoals Safari, Arc en Dia
+- **Eén balk** (Mac en iPad): tabs en knoppen in één rij, helemaal bovenin naast de venster-knopjes. De lege plek sleept het venster; dubbelklik maximaliseert.
+- De **+ en "nieuw venster"** staan overal vlak tegen de laatste tab aan.
+- **Verticale tabs in een zijbalk** (Mac en iPad, zoals Arc):
+  - vastgezette tabs als tegels bovenaan;
+  - groepen met naam, kleur en in-/uitklappen;
+  - tabs slepen tussen groepen, vastgezet en los;
+  - "Clear" sluit alle losse tabs;
+  - mini Now Playing onderaan, breedte versleepbaar;
+  - ⌘S verbergt de zijbalk; de muis naar de linkerrand laat hem weer zien.
+- **Zwevende zoekbalk** (⌘T, ⌘L, of een klik op de actieve tab). Hij verschijnt boven de licht getinte pagina en toont voorstellen uit open tabs, favorieten en geschiedenis.
+  - **Tab om te zoeken**: typ "youtube", "spotify", "twitch", "sc", "yt music" … en druk op Tab. Wat je daarna typt, wordt op dat platform gezocht. Standaard wordt op YouTube gezocht.
+  - **Opdrachten**: typ ">" of gewoon "pin", "clear", "audio", "loop", "boost", "sidebar", "sleep" … voor 25+ acties.
+- Scrubben met trackpad of muis beweegt de pagina niet meer mee (geen elastische overscroll).
+
+## Media-extra's (elke site)
+- Volumeboost tot 300 % met begrenzer, alleen-audio (beeld uit, bespaart batterij), herhalen, huidig frame opslaan. Via het ⋯-menu en de zoekbalk.
+- Doorspelen na het verlaten van fullscreen op iPhone/iPad.
+
+## Widgets (iPhone, iPad, Mac)
+- 11 widgets:
+  - Now Playing, in 4 varianten: standaard, hoes, minimaal en vergrendelscherm;
+  - Alle apparaten;
+  - Zoeken;
+  - Bibliotheek;
+  - Verder kijken;
+  - Geschiedenis;
+  - Tabs op alle apparaten;
+  - Spotify;
+  - Snelkoppelingen.
+- Alle formaten: klein, middel, groot, extra groot, en op het vergrendelscherm rond, rechthoekig en inline.
+- Play/pauze en spoelen voor elk apparaat (ook op afstand via sync), en "Continue here".
+- De data komt uit de app via een gedeelde App Group, gebundeld hooguit 2× per seconde. Omdat de sync alle apparaten binnenhaalt, tonen de widgets overal hetzelfde.
+
+## Ontwerp
+- Liquid Glass voor de actieve tab, de zijbalk en de zwevende panelen (instelbaar).
+- Het kruisje in de instellingen is even groot als de terugknop (Mac 28 pt, iPhone/iPad 44 pt glas).
+- Nieuwe instellingenpagina "Tabs, sidebar & search bar".
+
+## Tests
+- V21FeatureTests (12 tests) en een extra validatiepoort: de widgetbestanden zijn in app en extensie gelijk, de App Group ids zijn consistent en de extensie is ingebed.
+
+# 20.0.0 (28)
+
+## Nieuw
+- **Mediacentrum in de menubalk** (golfje-knop): alle tabs met video of audio, spelend én gepauzeerd, in élk venster (YouTube, Twitch, SoundCloud, Vimeo, Spotify Web …) plus Spotify. Per bron: play/pauze, ±10 s of vorige/volgende, "alleen deze" (pauzeert de rest), dempen en een volumeschuif. Vasthouden = alles pauzeren. Bolletje toont hoeveel er spelen.
+- **Spotify-integratie**
+  - Mac: bedient de Spotify-desktopapp rechtstreeks (nummer, artiest, album, hoes, positie, play/pauze, vorige/volgende, spoelen, volume, shuffle, repeat). Spotify meldt wijzigingen zelf, dus er wordt niet voortdurend gepold.
+  - iPhone/iPad: ziet en bedient Spotify op je Mac via de sync-verbinding; anders opent de Spotify-app.
+  - Spotify pauzeren of zachter zetten zodra een video start, en daarna hervatten (instelbaar).
+  - Slaaptimer (15–90 min) die Spotify en alle tabs pauzeert.
+  - Menu "Spotify" met sneltoetsen: ⌥⌘P, ⌥⌘←/→, ⌥⌘↑/↓, en ⌥⌘. voor alles pauzeren.
+  - Zoeken op de nieuwe-tab-pagina met Spotify opent op de Mac direct in de Spotify-app.
+- **Nieuwe-tab-pagina, volledig aanpasbaar**: 12 onderdelen (klok en begroeting, zoekveld, platforms, Spotify-speler, Nu aan het spelen, eigen snelkoppelingen, verder kijken, favorieten, tabs op andere apparaten, recent gesloten, geschiedenis, snelle links). Elk onderdeel kan aan of uit, en slepen bepaalt de volgorde (potlood rechtsboven). Instelbaar: compact, uitlijning, breedte, aantal items, kolommen, achtergrond (thema, verloop of vervaagde albumhoes), kaartstijl, logo, zoekveld-focus, zichtbare platforms, begroetingsnaam en reset.
+- **Bovenbalk automatisch verbergen**: nooit, tijdens afspelen of altijd; kies tabs, knoppen of beide, plus vertraging en animatie. Hij komt terug als je de muis naar de rand beweegt of op de rand tikt.
+- **Icoonstijlen**: 7 nieuwe outline-varianten (hairline, light, bold, in cirkel, in vierkant, soft, duotone) en 6 clean/minimalistische stijlen (minimal, stip of streep bij actief, gedempt, capsule, groot dun). Met een voorbeeldgalerij om te tikken.
+- **40 nieuwe app-iconen**: de series Outline (20) en Minimal (20).
+
+## Instellingen
+- Altijd een kruisje rechtsboven, ook op subpagina's; Esc sluit. Klik buiten het venster sluit op de Mac; op de iPad sluit tikken buiten het venster.
+- Overzichtelijker: groepen (Basis · Kijken & luisteren · Apparaten & bestanden · Privacy & blokkeren · Geavanceerd), en elk onderdeel heeft een korte uitleg.
+- Nieuwe pagina's: New tab page, Music & Spotify, Top bar auto-hide. Ook doorzoekbaar.
+
+## Tests
+- V20FeatureTests (10 tests) en Scripts/test_v20_mediahub.py (JavaScript van het mediacentrum).
+
+# 20.0.0 (27) — tussenversie
 Bundelt alle 19.3-wijzigingen hieronder in één nieuwe hoofdversie (eigen map "JoeToep V20").
 
 # 19.3.0 (26) — ook: dubbelklik voor fullscreen start niet meer YouTube's 2×-spoelen (houd-timer geblokkeerd + vangnet).

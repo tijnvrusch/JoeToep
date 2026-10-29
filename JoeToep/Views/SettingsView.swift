@@ -23,6 +23,9 @@ struct SettingsView: View {
     // van die zelf mee te geven: hier de functie om dit scherm te sluiten
     // (dismiss) en het huidige thema (theme).
     @Environment(\.dismiss) private var dismiss
+    /// V20: sluiten vanuit het eigen paneel (kruisje / klik buiten / Esc).
+    var onClose: (() -> Void)? = nil
+    private func close() { if let onClose { onClose() } else { dismiss() } }
     @Environment(\.joeToepTheme) private var theme
     // @State is lokale, tijdelijke schermstatus (alleen van dit scherm):
     // hiermee onthoudt SwiftUI of een bevestigingsvenstertje open moet staan.
@@ -88,16 +91,30 @@ struct SettingsView: View {
                 // elke instellingencategorie. link(...) is de hulp-functie
                 // hieronder die zo'n rij met icoon + naam + subscherm bouwt.
                 // V17.1: eenvoudige indeling voor iedereen; technische opties staan onder "Advanced".
-                Section("Settings") {
-                    link("General", "gearshape.fill", .gray) {
+                // V20: overzichtelijke indeling in groepen, elk onderdeel met een korte uitleg.
+                Section("Basics") {
+                    link("General", "gearshape.fill", .gray, "Start page, search engine, new tab page, default browser") {
                         BrowserSettings(settings: settings, session: session, confirmClear: $confirmClear)
                     }
-                    link("Appearance", "paintbrush.fill", .pink) { AppearanceSettings(settings: settings) }
-                    link("Playback & Picture in Picture", "pip.fill", .red) { PlaybackSettings(settings: settings, session: session) }
-                    link("Privacy & cookies", "hand.raised.fill", .indigo) { PrivacySettings(settings: settings) }
-                    link("Sync & devices", "arrow.triangle.2.circlepath", .green) { SyncSettings(settings: settings) }
-                    link("Downloads", "arrow.down.circle.fill", .blue) { DownloadsView() }
-                    link("Ad blocking & SponsorBlock", "shield.lefthalf.filled", .orange) {
+                    link("Appearance", "paintbrush.fill", .pink, "Theme, colours, app icon, tabs, animations") { AppearanceSettings(settings: settings) }
+                    link("Menu bar & buttons", "menubar.rectangle", .teal, "Which buttons you see, size, hold actions") {
+                        LayoutSettings(settings: settings)
+                    }
+                    link("Tabs, sidebar & search bar", "sidebar.left", .indigo, "Vertical tabs, groups, pinned tabs, ⌘T search bar") { SidebarAndCommandBarSettings() }
+                    link("Top bar auto-hide", "rectangle.expand.vertical", .mint, "Hide tabs and buttons automatically") { AutoHideSettings() }
+                }
+                Section("Watching & listening") {
+                    link("Playback & Picture in Picture", "pip.fill", .red, "Fullscreen, theater mode, speed, gestures, PiP") { PlaybackSettings(settings: settings, session: session) }
+                    link("New tab page", "square.grid.2x2.fill", .purple, "Sections, order, shortcuts, background") { NewTabCustomizeForm() }
+                    link("Music & Spotify", "music.note", .green, "Spotify control, now playing, sleep timer") { MusicSettings() }
+                }
+                Section("Devices & files") {
+                    link("Sync & devices", "arrow.triangle.2.circlepath", .green, "Tabs and playback between Mac, iPhone and iPad") { SyncSettings(settings: settings) }
+                    link("Downloads", "arrow.down.circle.fill", .blue, "Saved videos and audio for offline") { DownloadsView() }
+                }
+                Section("Privacy & blocking") {
+                    link("Privacy & cookies", "hand.raised.fill", .indigo, "Cookies, website data, private tabs") { PrivacySettings(settings: settings) }
+                    link("Ad blocking & SponsorBlock", "shield.lefthalf.filled", .orange, "Block ads, skip sponsor segments") {
                         Form {
                             Section {
                                 NavigationLink("Ad blocking") { AdBlockSettings(settings: settings, session: session).navigationTitle("Ad blocking") }
@@ -107,9 +124,7 @@ struct SettingsView: View {
                     }
                 }
                 Section {
-                    link("Advanced settings", "exclamationmark.triangle", .gray) { AdvancedSettings(settings: settings, session: session) }
-                } footer: {
-                    Text("For tech nerds: internals, animation curves, fallbacks and diagnostics.")
+                    link("Advanced settings", "exclamationmark.triangle", .gray, "For tech nerds: internals, curves, diagnostics") { AdvancedSettings(settings: settings, session: session) }
                 }
                 // Deze losse Section bevat de "gevaarlijke" reset-knop.
                 // role: .destructive geeft de knop een rode/waarschuwende
@@ -122,18 +137,44 @@ struct SettingsView: View {
                 }
                 }
             }
+            #if os(iOS)
             .searchable(text: $search, prompt: "Search settings")
+            #else
+            // Mac: zoekveld bovenaan in het formulier (rechtsboven staat het kruisje).
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search settings", text: $search).textFieldStyle(.plain)
+                    if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain) }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                .padding(.leading, 16).padding(.trailing, 56).padding(.vertical, 10)
+                .background(.bar)
+            }
+            #endif
             // formStyle(.grouped) kiest de "gegroepeerde" opmaak van het
             // formulier, navigationTitle zet de titel in de navigatiebalk.
             .formStyle(.grouped)
             .navigationTitle("Settings")
             // toolbar voegt knoppen toe aan de navigatiebalk; hier een
             // "Done"-knop rechtsboven die het scherm sluit met dismiss().
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.accessibilityIdentifier("settings.done")
-                }
+        }
+        // V20: altijd zichtbaar kruisje rechtsboven (ook op elke subpagina); Esc sluit ook.
+        .overlay(alignment: .topTrailing) {
+            // V21: even groot als de terugknop (Mac: 28 pt toolbarknop; iPhone/iPad: 44 pt glasknop).
+            Button { close() } label: {
+                Image(systemName: "xmark").font(.system(size: SettingsCloseMetrics.glyph, weight: .semibold))
+                    .frame(width: SettingsCloseMetrics.size, height: SettingsCloseMetrics.size)
+                    .contentShape(Circle())
+                    .joeToepGlass(in: Circle())
             }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("Close settings (Esc)")
+            .accessibilityLabel("Close settings")
+            .accessibilityIdentifier("settings.done")
+            .padding(.top, SettingsCloseMetrics.top).padding(.trailing, SettingsCloseMetrics.trailing)
         }
         // confirmationDialog toont een bevestigingsvenstertje zodra de
         // gekoppelde @State-waarde (met een $ ervoor: een Binding, zodat het
@@ -160,6 +201,10 @@ struct SettingsView: View {
         case "Menu bar & buttons": LayoutSettings(settings: settings).navigationTitle(name)
         case "Privacy & cookies": PrivacySettings(settings: settings).navigationTitle(name)
         case "Sync & devices": SyncSettings(settings: settings)
+        case "New tab page": NewTabCustomizeForm().navigationTitle(name)
+        case "Music & Spotify": MusicSettings().navigationTitle(name)
+        case "Top bar auto-hide": AutoHideSettings().navigationTitle(name)
+        case "Tabs, sidebar & search bar": SidebarAndCommandBarSettings().navigationTitle(name)
         case "Ad blocking & SponsorBlock": AdBlockSettings(settings: settings, session: session).navigationTitle("Ad blocking")
         default: PlaybackSettings(settings: settings, session: session).navigationTitle("Playback & Picture in Picture")
         }
@@ -171,7 +216,7 @@ struct SettingsView: View {
     // zolang het maar een View is. @ViewBuilder destination geeft de inhoud
     // van dat subscherm mee als een stukje SwiftUI-code (een closure) dat
     // pas wordt uitgevoerd als de link echt wordt geopend.
-    private func link<Destination: View>(_ title: String, _ symbol: String, _ color: Color,
+    private func link<Destination: View>(_ title: String, _ symbol: String, _ color: Color, _ subtitle: String? = nil,
                                          @ViewBuilder destination: @escaping () -> Destination) -> some View {
         // NavigationLink is de rij zelf: tik erop, en SwiftUI schuift naar
         // het scherm dat in "destination()" wordt opgebouwd.
@@ -179,15 +224,15 @@ struct SettingsView: View {
             destination()
                 .formStyle(.grouped)
                 .navigationTitle(title)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityIdentifier("settings.done") }
-                }
         } label: {
             // Label combineert tekst en icoon in de rij die je ziet vóór je
             // erop tikt: de titel als tekst, en een gekleurd rondje met
             // SF Symbol-icoontje ernaast.
             Label {
-                Text(title)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                    if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                }
             } icon: {
                 Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 26, height: 26).background(color.gradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -264,8 +309,13 @@ private struct AppearanceSettings: View {
                 // enige) argument van de closure: in plaats van "{ item in
                 // Text(item.title) }" mag je "{ Text($0.title) }" schrijven.
                 SettingPicker("Style", selection: $settings.iconVariant) {
-                    ForEach(IconVariant.allCases) { Text($0.title).tag($0) }
+                    ForEach(["Classic", "Outline", "Clean & minimal"], id: \.self) { group in
+                        Section(group) {
+                            ForEach(IconVariant.allCases.filter { $0.group == group }) { Text($0.title).tag($0) }
+                        }
+                    }
                 }
+                IconVariantGallery(settings: settings)
                 SettingPicker("Weight", selection: $settings.iconWeight) {
                     ForEach(IconWeightChoice.allCases) { Text($0.title).tag($0) }
                 }
@@ -793,8 +843,20 @@ private struct BrowserSettings: View {
 
 private struct LayoutSettings: View {
     @ObservedObject var settings: AppSettings
+    @AppStorage("oneBarLayoutV21") private var oneBar = true
     var body: some View {
         Form {
+            #if os(macOS)
+            Section {
+                Toggle("One bar: tabs and buttons together", isOn: $oneBar)
+            } footer: { Text("Like Safari: back, forward and the other buttons sit in the same bar as the tabs, right next to the window buttons. Uses the least vertical space.") }
+            #else
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                Section {
+                    Toggle("One bar: tabs and buttons together", isOn: $oneBar)
+                } footer: { Text("Like Safari on iPad: all buttons sit in the tab bar at the top, so the page gets the most room.") }
+            }
+            #endif
             Section("Size") {
                 SettingPicker("Menu bar buttons", selection: $settings.toolbarDensity) {
                     ForEach(ToolbarDensity.allCases) { Text($0.title).tag($0) }
@@ -1116,6 +1178,7 @@ private struct SyncSettings: View {
                 SettingToggle("Live tab sync", isOn: $settings.tabSync)
                     .accessibilityIdentifier("settings.tabSync")
             }
+            HandoffSettingsSection()
             Section("Nearby devices") {
                 if sync.peers.isEmpty {
                     detail(settings.tabSync ? "Searching… Open JoeToep on your other devices (same wifi, or Bluetooth on). On iPhone/iPad allow Local Network for JoeToep." : "Sync is off.")
@@ -1265,4 +1328,49 @@ private struct GesturePresetSection: View {
                     "gesturesInWindowFullscreenV191", "touchScrubV192", "touchSeekPerPxV192", "invertTouchV192", "scrubInlineV192",
                     "pullActionV192", "backSwipeV192"] { d.removeObject(forKey: key) }
     }
+}
+
+/// V20: tik op een voorbeeld om die icoonstijl te kiezen (alle outline- en minimalistische varianten).
+private struct IconVariantGallery: View {
+    @ObservedObject var settings: AppSettings
+    private let symbols = ["chevron.backward", "house", "bookmark", "pip", "gearshape"]
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(IconVariant.allCases) { variant in
+                    let theme = { var t = settings.theme; t.iconVariant = variant; return t }()
+                    Button { settings.iconVariant = variant } label: {
+                        VStack(spacing: 6) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(symbols.enumerated()), id: \.offset) { i, name in
+                                    Image(systemName: name).themedIcon(theme, size: 15, active: i == 2)
+                                        .frame(width: 22, height: 26)
+                                }
+                            }
+                            Text(variant.title).font(.caption2).lineLimit(1)
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(settings.iconVariant == variant ? settings.accentColor.opacity(0.18) : Color.primary.opacity(0.05)))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(settings.iconVariant == variant ? settings.accentColor : .clear, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
+
+/// V21: maat en plek van het kruisje, gelijk aan de terugknop van het platform.
+enum SettingsCloseMetrics {
+    #if os(macOS)
+    static let size: CGFloat = 28, glyph: CGFloat = 12, top: CGFloat = 11, trailing: CGFloat = 12
+    #else
+    static var size: CGFloat { if #available(iOS 26.0, *) { return 44 } else { return 36 } }
+    static let glyph: CGFloat = 17
+    static var top: CGFloat { if #available(iOS 26.0, *) { return 4 } else { return 6 } }
+    static let trailing: CGFloat = 16
+    #endif
 }

@@ -58,6 +58,12 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>JoeToep shows what is playing in the Spotify app and lets you control it (play, pause, next, volume) from the toolbar and your other devices.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>spotify</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>JoeToep keeps your tabs and the playing video in sync with your other devices nearby.</string>
 	<key>NSBonjourServices</key>

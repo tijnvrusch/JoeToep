@@ -40,6 +40,8 @@ final class AppIconController: ObservableObject {
         ("Creative", ["CreativeTropic", "CreativePopsicle", "CreativeDisco", "CreativeLagoon", "CreativeDesert", "CreativeBauhaus", "CreativeGrape", "CreativeCandyfloss", "CreativeGlacier", "CreativeBlush", "CreativeStudio", "CreativeMixtape", "CreativeIris", "CreativeStarlight", "CreativeCrush", "CreativeSorbet", "CreativeCurrent", "CreativeBurst", "CreativeGraph", "CreativeEcho"]),
         ("Eccentric", ["EccentricAcid", "EccentricGlitch", "EccentricCircus", "EccentricHypno", "EccentricBubblegum", "EccentricVortex", "EccentricWobble", "EccentricChecker", "EccentricLava", "EccentricAlien", "EccentricCyclops", "EccentricArcade", "EccentricStarfish", "EccentricPunk", "EccentricTarget", "EccentricBoombox", "EccentricRecord", "EccentricPulse", "EccentricChunky", "EccentricNeonframe"]),
         ("Bold", ["BoldSignal", "BoldHazard", "BoldMint", "BoldBlaze", "BoldVolt", "BoldSnow", "BoldCobalt", "BoldRadioactive", "BoldHotpink", "BoldShadow", "BoldBarcode", "BoldBurst", "BoldPolka", "BoldBullseye", "BoldTile", "BoldFlag", "BoldBeam", "BoldSpot", "BoldOrbit", "BoldFrame"]),
+        ("Outline", ["OutlineClassic", "OutlineRed", "OutlinePaper", "OutlineHairline", "OutlineBold", "OutlineCircle", "OutlineRedCircle", "OutlineSquare", "OutlineTriangle", "OutlineOcean", "OutlineMint", "OutlineSunset", "OutlineLavender", "OutlineNight", "OutlineGold", "OutlineDouble", "OutlineNeon", "OutlinePink", "OutlineSky", "OutlineSlate"]),
+        ("Minimal", ["MinimalWhite", "MinimalBlack", "MinimalRed", "MinimalRedDot", "MinimalInk", "MinimalSand", "MinimalStone", "MinimalFog", "MinimalGraphite", "MinimalBlush", "MinimalSage", "MinimalNavy", "MinimalButter", "MinimalLilac", "MinimalOcean", "MinimalMono", "MinimalNight", "MinimalClay", "MinimalMint", "MinimalCream"]),
         ("YouTube Red", ["Red01", "Red02", "Red03", "Red04", "Red05", "Red06", "Red07", "Red08", "Red09", "Red10", "Red11", "Red12", "Red13", "Red14", "Red15", "Red16", "Red17", "Red18", "Red19", "Red20", "Red21", "Red22", "Red23", "Red24", "Red25", "Red26", "Red27", "Red28", "Red29", "Red30"]),
     ]
     /// De oorspronkelijke 43 iconen (V8–V15).
@@ -51,7 +53,7 @@ final class AppIconController: ObservableObject {
         if name == "RetroTV" { return "Retro TV" }
         // V17.1: "UniqueNebula" → "Nebula", "Red07" → "Red 07"
         if name.hasPrefix("Red"), name.count == 5 { return "Red " + name.dropFirst(3) }
-        for prefix in ["Unique", "Creative", "Eccentric", "Bold"] where name.hasPrefix(prefix) && name.count > prefix.count {
+        for prefix in ["Unique", "Creative", "Eccentric", "Bold", "Outline", "Minimal"] where name.hasPrefix(prefix) && name.count > prefix.count {
             return String(name.dropFirst(prefix.count))
         }
         return name

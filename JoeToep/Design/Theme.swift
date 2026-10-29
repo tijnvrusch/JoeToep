@@ -63,19 +63,39 @@ struct ThemedIcon: ViewModifier {
     var enabled = true
     @ViewBuilder
     func body(content: Content) -> some View {
+        let v = theme.iconVariant
         let styled = content
-            .font(.system(size: size, weight: theme.iconWeight.weight))
-            .symbolVariant(active ? theme.iconVariant.variants.fill : theme.iconVariant.variants)
-            .opacity(enabled ? 1 : 0.35)
-        switch theme.rendering {
-        case .monochrome:
-            styled.symbolRenderingMode(.monochrome).foregroundStyle(active ? theme.accent : theme.foreground)
-        case .hierarchical:
-            styled.symbolRenderingMode(.hierarchical).foregroundStyle(active ? theme.accent : theme.foreground)
-        case .accent:
-            styled.symbolRenderingMode(.monochrome).foregroundStyle(theme.accent)
-        case .palette:
-            styled.symbolRenderingMode(.palette).foregroundStyle(theme.accent, theme.foreground.opacity(0.75))
+            .font(.system(size: size * v.sizeFactor, weight: v.forcedWeight ?? theme.iconWeight.weight, design: v.fontDesign))
+            .symbolVariant(active ? v.activeVariants : v.variants)
+            .opacity(enabled ? (active ? 1 : v.inactiveOpacity) : 0.35)
+        Group {
+            if v == .outlineDuotone {
+                styled.symbolRenderingMode(.hierarchical).foregroundStyle(active ? theme.accent : theme.foreground)
+            } else {
+                switch theme.rendering {
+                case .monochrome:
+                    styled.symbolRenderingMode(.monochrome).foregroundStyle(active ? theme.accent : theme.foreground)
+                case .hierarchical:
+                    styled.symbolRenderingMode(.hierarchical).foregroundStyle(active ? theme.accent : theme.foreground)
+                case .accent:
+                    styled.symbolRenderingMode(.monochrome).foregroundStyle(theme.accent)
+                case .palette:
+                    styled.symbolRenderingMode(.palette).foregroundStyle(theme.accent, theme.foreground.opacity(0.75))
+                }
+            }
+        }
+        .background {
+            if v == .minimalCapsule {
+                Capsule().fill((active ? theme.accent : theme.foreground).opacity(active ? 0.18 : 0.07))
+                    .frame(width: size * 1.9, height: size * 1.35)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if active && v == .minimalDot {
+                Circle().fill(theme.accent).frame(width: 4, height: 4).offset(y: size * 0.55)
+            } else if active && v == .minimalUnderline {
+                Capsule().fill(theme.accent).frame(width: size * 0.9, height: 2).offset(y: size * 0.6)
+            }
         }
     }
 }

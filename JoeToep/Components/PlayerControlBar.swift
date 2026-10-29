@@ -13,16 +13,22 @@ struct PlayerControlBar: View {
     let availableWidth: CGFloat
     var actions: WorkspaceActions? = nil
     let showSettings: () -> Void
+    /// V21: hele balk, of alleen het linker- of rechterdeel (voor de Safari-achtige ene balk).
+    enum Part { case full, leading, trailing }
+    var part: Part = .full
+    /// V21: vaste knopgrootte in de ene balk (anders passend gemaakt op de breedte).
+    var fixedButtonSize: CGFloat? = nil
     @Environment(\.joeToepTheme) private var theme
     /// V17: is het Creator-tools-paneel open?
-    @State private var showingCreatorTools = false
+    @State fileprivate var showingCreatorTools = false
     /// V18: is het downloadpaneel open?
-    @State private var showingDownload = false
-    @State private var showingDownloadsList = false
+    @State fileprivate var showingDownload = false
+    @State fileprivate var showingDownloadsList = false
+    @AppStorage("showMediaHubV20") private var showMediaHub = true
     /// V19.1: snelheidspaneel.
     @State private var showingSpeedPanel = false
     /// V19.2: tabs doorzoeken.
-    @State private var showingTabSearch = false
+    @State fileprivate var showingTabSearch = false
 
     private var iconSize: CGFloat { min(17 * settings.toolbarDensity.scale, buttonSize * 0.55) }   // V17.1: krimpt mee
     /// V17.1: hoeveel knoppen staan er in de balk? Nodig om ze passend te maken zonder scrollen.
@@ -42,6 +48,7 @@ struct PlayerControlBar: View {
         if settings.showCreatorTools { n += 1 }
         if settings.showSpeedControl { n += 2 }
         if settings.showDownloadButton { n += 1 }
+        if showMediaHub { n += 1 }
         if settings.showMoreMenu { n += 1 }
         if settings.showSettingsButton { n += 1 }
         return max(n, 1)
@@ -49,6 +56,7 @@ struct PlayerControlBar: View {
     /// V17.1: knopgrootte. De balk scrolt nooit meer: passen niet alle knoppen op de normale maat,
     /// dan worden ze gelijkmatig iets kleiner (minimaal 24 pt), zodat ze altijd vast staan.
     private var buttonSize: CGFloat {
+        if let fixedButtonSize { return fixedButtonSize }
         let density = settings.toolbarDensity
         #if os(macOS)
         let preferred = 32 * density.scale
@@ -59,10 +67,14 @@ struct PlayerControlBar: View {
         return max(24, min(preferred, fits))
     }
     var body: some View {
-        HStack(spacing: 0) {
-            // V17.1: vaste knoppen, geen horizontaal scrollen meer (alle platforms).
-            leadingButtons
-                .frame(maxWidth: .infinity, minHeight: buttonSize, alignment: .leading)
+        switch part {
+        case .full: fullBar
+        case .leading: leadingButtons.modifier(PanelSheets(bar: self))
+        case .trailing: HStack(spacing: 0) { trailingButtons }.modifier(PanelSheets(bar: self))
+        }
+    }
+
+    @ViewBuilder private var trailingButtons: some View {
             #if os(iOS)
             if settings.showAirPlayButton {
                 control("airplay.video", "AirPlay video · hold for fullscreen", action: session.showVideoAirPlay, secondary: session.openFullscreenFallback)
@@ -72,6 +84,8 @@ struct PlayerControlBar: View {
             if settings.showQualityButton { qualityMenu }
             // V18: afspeelsnelheid met één klik: − langzamer, + sneller; vasthouden = terug naar 1×.
             if settings.showSpeedControl { speedControl }
+            // V20: mediacentrum (alle spelende/gepauzeerde tabs + Spotify).
+            if showMediaHub { MediaHubButton(size: buttonSize, iconSize: iconSize) }
             // V18: offline opslaan.
             if settings.showDownloadButton {
                 control("arrow.down.circle", "Download for offline · hold for downloads", action: { showingDownload = true }, secondary: { showingDownloadsList = true })
@@ -90,17 +104,21 @@ struct PlayerControlBar: View {
                 control("gearshape", "Settings · hold to search tabs", action: showSettings, secondary: { showingTabSearch = true })
                     .accessibilityIdentifier("toolbar.settings")
             }
+    }
+
+    private var fullBar: some View {
+        HStack(spacing: 0) {
+            // V17.1: vaste knoppen, geen horizontaal scrollen meer (alle platforms).
+            leadingButtons
+                .frame(maxWidth: .infinity, minHeight: buttonSize, alignment: .leading)
+            trailingButtons
         }
         // V19 redesign: meer lucht aan de zijkanten, geen harde lijn bovenaan.
         .padding(.horizontal, 10)
         .frame(height: settings.toolbarDensity.height)
         .background { ZStack { theme.background; AudioVisualizer(playing: session.isPlaying && !session.isFullscreen && !session.isInPictureInPicture) } }
         .animation(theme.anim(.toolbar), value: settings.toolbarDensity)
-        // V17: het Creator-tools-paneel als "sheet" (schuift over het scherm).
-        .sheet(isPresented: $showingCreatorTools) { CreatorToolsView(session: session) }
-        .sheet(isPresented: $showingDownload) { DownloadSheet(session: session) }
-        .sheet(isPresented: $showingDownloadsList) { NavigationStack { DownloadsView() } }
-        .sheet(isPresented: $showingTabSearch) { TabSearchView() }
+        .modifier(PanelSheets(bar: self))
         #if os(macOS)
         .overlay(alignment: .bottom) { theme.style.separator.opacity(0.5).frame(height: 0.5).allowsHitTesting(false) }
         #endif
@@ -241,6 +259,13 @@ struct PlayerControlBar: View {
             MoreAction("Download", "arrow.down.circle") { showingDownload = true },
             // V19.2: extra browserfuncties.
             MoreAction("Reader", "doc.plaintext") { session.toggleReaderMode() },
+            // V21: media-extra's.
+            MoreAction(MediaExtras.shared.state(for: session).audioOnly ? "Show Video" : "Audio Only", "waveform") { MediaExtras.shared.toggleAudioOnly(on: session) },
+            MoreAction(MediaExtras.shared.state(for: session).loop ? "Loop Off" : "Loop", "repeat") { MediaExtras.shared.toggleLoop(on: session) },
+            MoreAction("Boost \(Int(MediaExtras.shared.state(for: session).boost * 100))%", "speaker.plus") {
+                let b = MediaExtras.shared.state(for: session).boost
+                MediaExtras.shared.setBoost(b >= 2.99 ? 1 : b + 0.5, on: session) },
+            MoreAction("Save Frame", "camera") { MediaExtras.shared.captureFrame(from: session) },
             MoreAction("Save as PDF", "doc.richtext") { savePDF() },
             MoreAction("Search Tabs", "rectangle.and.text.magnifyingglass") { showingTabSearch = true },
             MoreAction("Settings", "gearshape") { showSettings() },
@@ -293,6 +318,21 @@ struct PlayerControlBar: View {
                     Button { Clipboard.copy(url) } label: { Label("Copy Link", systemImage: "link") }
                     Button { openInBrowser(url) } label: { Label("Open in Default Browser", systemImage: "safari") }
                 }
+            }
+            Section("Media") {
+                let extras = MediaExtras.shared.state(for: session)
+                Button { MediaExtras.shared.toggleAudioOnly(on: session) } label: {
+                    Label(extras.audioOnly ? "Show Video" : "Audio Only (hide video)", systemImage: extras.audioOnly ? "play.rectangle" : "waveform") }
+                Button { MediaExtras.shared.toggleLoop(on: session) } label: {
+                    Label(extras.loop ? "Stop Looping" : "Loop Video", systemImage: "repeat") }
+                Menu("Volume Boost (\(Int(extras.boost * 100))%)") {
+                    ForEach([1.0, 1.5, 2.0, 2.5, 3.0], id: \.self) { b in
+                        Button { MediaExtras.shared.setBoost(b, on: session) } label: {
+                            if abs(extras.boost - b) < 0.01 { Label("\(Int(b * 100))%", systemImage: "checkmark") } else { Text("\(Int(b * 100))%") }
+                        }
+                    }
+                }
+                Button { MediaExtras.shared.captureFrame(from: session) } label: { Label("Save Current Frame…", systemImage: "camera") }
             }
             Section("Page") {
                 Button { session.requestSite(session.effectivePresentation == .desktop ? .mobile : .desktop) } label: {
@@ -547,5 +587,18 @@ struct HoldButton<Label: View>: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { suppressTap = false }
         })
         .accessibilityAction(named: "Hold action") { hold?() }
+    }
+}
+
+
+/// V21: de panelen (Creator tools, downloads, tabs zoeken) — gedeeld door de hele balk en de delen.
+private struct PanelSheets: ViewModifier {
+    let bar: PlayerControlBar
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: bar.$showingCreatorTools) { CreatorToolsView(session: bar.session) }
+            .sheet(isPresented: bar.$showingDownload) { DownloadSheet(session: bar.session) }
+            .sheet(isPresented: bar.$showingDownloadsList) { NavigationStack { DownloadsView() } }
+            .sheet(isPresented: bar.$showingTabSearch) { TabSearchView() }
     }
 }

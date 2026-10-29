@@ -11,6 +11,14 @@
   // V19: instelbaar vanuit de app (Instellingen › Playback › Gestures).
   const cfg = {swipeSeek: 5, keySeek: 5, volumeStep: 0.01, swipeThreshold: 28, showControlsOnSwipe: true, scrubThumbnail: true, showControlsOnKeys: false, nativeWheel: false, exitFullscreenOnPause: true, touchScrub: true, touchSeekPerPx: 0.25, invertTouch: false, seekThrottleMs: 60};
   const pick = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
+  // V21: de pagina mag nooit horizontaal "meeveren" (elastische overscroll) tijdens scrubben
+  // met trackpad, muis of vinger. Verticaal scrollen blijft gewoon werken.
+  try {
+    const noBounce = document.createElement('style');
+    noBounce.id = 'joetoep-no-hbounce';
+    noBounce.textContent = 'html,body{overscroll-behavior-x:none!important}#movie_player,.html5-video-player,video{touch-action:pan-y pinch-zoom}';
+    (document.head || document.documentElement).appendChild(noBounce);
+  } catch (_) {}
   // Checkt of het element waarop getypt wordt een tekstveld is (input, textarea, etc.),
   // zodat onze sneltoetsen daar niet per ongeluk ingrijpen terwijl iemand aan het typen is.
   const editable = target => target?.closest?.('input,textarea,select,[contenteditable="true"],[role="textbox"]');
@@ -294,6 +302,38 @@
     }, 350);
   }, true);
   window.addEventListener('play', () => clearTimeout(pauseTimer), true);
+
+  // V20 — Na het verlaten van fullscreen gewoon doorspelen (iPhone/iPad pauzeren dan vanzelf).
+  // Alleen als de video vlak vóór het verlaten nog speelde; zelf gepauzeerd = gepauzeerd blijven,
+  // en niet als JoeToep zelf fullscreen sloot omdat je pauzeerde.
+  let lastPlayingAt = 0, lastUserPauseAt = 0, resumeUntil = 0;
+  const markPlaying = v => { if (v instanceof HTMLVideoElement && !v.paused) lastPlayingAt = Date.now(); };
+  window.addEventListener('playing', e => markPlaying(e.target), true);
+  window.addEventListener('timeupdate', e => markPlaying(e.target), true);
+  window.addEventListener('pause', e => {
+    const v = e.target;
+    if (!(v instanceof HTMLVideoElement) || v !== pick()) return;
+    if (Date.now() < resumeUntil && !window.__joetoepExitedByPause && !v.ended) {
+      resumeUntil = 0;
+      setTimeout(() => { if (v.paused && !v.ended) v.play()?.catch(() => {}); }, 60);
+    } else if (!fsElement() && !v.webkitDisplayingFullscreen) {
+      lastUserPauseAt = Date.now();
+    }
+  }, true);
+  const fullscreenLeft = () => {
+    if (cfg.resumeAfterFullscreenExit === false || window.__joetoepExitedByPause) return;
+    const v = pick();
+    if (!v || v.ended || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
+    const wasPlaying = Date.now() - lastPlayingAt < 700 && lastPlayingAt > lastUserPauseAt;
+    if (!wasPlaying) return;
+    resumeUntil = Date.now() + 900;
+    if (v.paused) setTimeout(() => { if (v.paused && !v.ended) v.play()?.catch(() => {}); }, 60);
+  };
+  window.addEventListener('webkitendfullscreen', fullscreenLeft, true);
+  window.addEventListener('webkitpresentationmodechanged', e => {
+    if (e.target === pick() && e.target.webkitPresentationMode === 'inline') fullscreenLeft();
+  }, true);
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(t => document.addEventListener(t, () => { if (!fsElement()) fullscreenLeft(); }));
 
   // Deze functies ook buiten dit bestand beschikbaar maken, maar wel bevroren (Object.freeze)
   // zodat niemand ze per ongeluk kan overschrijven.

@@ -134,6 +134,45 @@ enum SettingHelp {
 }
 
 extension SettingHelp {
+    /// V20: uitleg + pagina van de nieuwe instellingen (apart, zodat er nooit dubbele sleutels ontstaan).
+    static let v20Texts: [String: String] = [
+        "Spotify control": "Control the Spotify app on your Mac from JoeToep: play, pause, next, volume, shuffle, repeat.",
+        "When a video starts playing": "Pause Spotify, lower its volume, or keep it playing while a video plays.",
+        "Sleep timer": "Pause Spotify and every playing tab after 15–90 minutes.",
+        "Now playing button": "A menu bar button listing every tab with video or audio, plus Spotify, with play/pause and volume.",
+        "Also list paused tabs": "Show paused tabs in the Now playing list so you can switch with one click.",
+        "Hide automatically": "Hide the tabs and buttons after a few seconds, always or while a video plays.",
+        "What to hide": "Hide the tabs, the buttons, or both.",
+        "Hide after": "How many seconds without activity before the bars hide.",
+        "Show when the pointer reaches the top edge": "Move the pointer to the top (or tap the edge) to show the bars again.",
+        "New tab page sections": "Turn sections on or off and drag them into the order you like.",
+        "My shortcuts": "Your own tiles on the new tab page.",
+        "Background": "Background of the new tab page: theme, gradient or blurred album art.",
+        "Icon style gallery": "Outline and clean, minimal icon styles for the buttons in the app.",
+        "Outline and Minimal app icons": "Forty new app icons: line-art Outline and extra-clean Minimal series.",
+        // V21
+        "Continue playing when you switch devices": "Open JoeToep on your iPhone while the Mac plays (or the other way round) and the video continues there at the same moment. Sync handoff.",
+        "Timing compensation": "A small head start so both devices line up exactly after switching.",
+        "Keep playing when JoeToep reopens": "After restarting the app the last video continues by itself (off by default).",
+        "Sync & devices": "Live tab sync, nearby devices, switching devices and the sync log.",
+        "Vertical sidebar (like Arc)": "Vertical tabs with pinned tiles, groups and a Clear button. ⌘S hides it.",
+        "Search bar (⌘T / ⌘L)": "Floating search bar; type a platform name and press Tab to search there. Commands with >.",
+        "Liquid Glass": "Glass effect for tabs, sidebar and panels.",
+        "One bar: tabs and buttons together": "Safari-style single bar: buttons and tabs in one row at the top.",
+    ]
+    static let v20Pages: [String: String] = [
+        "Spotify control": "Music & Spotify", "When a video starts playing": "Music & Spotify", "Sleep timer": "Music & Spotify",
+        "Now playing button": "Music & Spotify", "Also list paused tabs": "Music & Spotify",
+        "Hide automatically": "Top bar auto-hide", "What to hide": "Top bar auto-hide", "Hide after": "Top bar auto-hide",
+        "Show when the pointer reaches the top edge": "Top bar auto-hide",
+        "New tab page sections": "New tab page", "My shortcuts": "New tab page", "Background": "New tab page",
+        "Icon style gallery": "Appearance", "Outline and Minimal app icons": "Appearance",
+        "Continue playing when you switch devices": "Sync & devices", "Timing compensation": "Sync & devices",
+        "Keep playing when JoeToep reopens": "Sync & devices", "Sync & devices": "Sync & devices",
+        "Vertical sidebar (like Arc)": "Tabs, sidebar & search bar", "Search bar (⌘T / ⌘L)": "Tabs, sidebar & search bar",
+        "Liquid Glass": "Tabs, sidebar & search bar", "One bar: tabs and buttons together": "Menu bar & buttons",
+    ]
+
     /// V19.2: op welke instellingenpagina staat elke instelling (voor zoeken in de instellingen).
     static let pages: [String: String] = [
         "Theme": "Appearance",
@@ -255,10 +294,11 @@ extension SettingHelp {
         let q = query.trimmingCharacters(in: .whitespaces).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         guard !q.isEmpty else { return [] }
         let words = q.split(separator: " ").map(String.init)
-        return texts.compactMap { title, help in
+        let all = texts.merging(v20Texts) { a, _ in a }
+        return all.compactMap { title, help in
             let hay = (title + " " + help).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             guard words.allSatisfy({ hay.contains($0) }) else { return nil }
-            return (title, help, pages[title] ?? "Playback & Picture in Picture")
+            return (title, help, pages[title] ?? v20Pages[title] ?? "Playback & Picture in Picture")
         }
         .sorted { a, b in
             let aTitle = a.title.lowercased().contains(q), bTitle = b.title.lowercased().contains(q)

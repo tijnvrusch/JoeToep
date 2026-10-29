@@ -11,6 +11,8 @@ struct SavedBrowserTab: Codable, Equatable, Identifiable {
     /// V15: pinned tabs never expire; the title shows before the tab loads.
     var pinned: Bool? = nil
     var title: String? = nil
+    /// V21: tabgroep (zijbalk/tabbalk), optioneel zodat oudere data leesbaar blijft.
+    var groupID: UUID? = nil
 }
 struct SavedTabSession: Codable, Equatable {
     var tabs: [SavedBrowserTab]

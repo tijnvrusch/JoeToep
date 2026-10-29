@@ -177,6 +177,7 @@ final class TabSyncService: NSObject, ObservableObject {
         guard let snapshot = ledger.makeLocal(name: deviceName, tabs: tabs, selectedID: selectedID, playingID: playingID) else { return }
         lastSync = Date()
         broadcast(.snapshot(snapshot))
+        WidgetBridge.shared.setNeedsUpdate()
     }
 
     private var lastDownloads: [DownloadItem] = []
@@ -201,6 +202,7 @@ final class TabSyncService: NSObject, ObservableObject {
 
     fileprivate func handle(_ data: Data, from peer: MCPeerID) {
         guard let message = SyncMessage.decode(data) else { return }
+        defer { WidgetBridge.shared.setNeedsUpdate() }
         switch message {
         case .hello(let id, let name):
             peerDevice[peer] = id; devices[id] = name
@@ -225,6 +227,11 @@ final class TabSyncService: NSObject, ObservableObject {
         case .downloads(let listing):
             devices[listing.origin] = listing.originName
             DownloadManager.shared.receive(listing)
+        case .spotify(let id, let state):
+            peerDevice[peer] = id
+            SpotifyController.shared.receive(state, from: id)
+        case .spotifyCommand(let target, let action, let value, let uri):
+            if target == deviceID { SpotifyController.shared.performRemote(action, value: value, uri: uri) }
         }
     }
 
@@ -240,6 +247,9 @@ final class TabSyncService: NSObject, ObservableObject {
         note("connected: \(peer.displayName)")
         guard let session, let hello = SyncMessage.hello(deviceID: deviceID, name: deviceName).encoded() else { return }
         try? session.send(hello, toPeers: [peer], with: .reliable)
+        if let spotify = lastSpotify, let data = SyncMessage.spotify(deviceID: deviceID, state: spotify).encoded() {
+            try? session.send(data, toPeers: [peer], with: .reliable)
+        }
         // Nieuw apparaat: meteen de huidige toestand sturen, zodat het direct gelijk loopt.
         if let current = ledger.current, let data = SyncMessage.snapshot(current).encoded() {
             try? session.send(data, toPeers: [peer], with: .reliable)
@@ -249,14 +259,29 @@ final class TabSyncService: NSObject, ObservableObject {
     }
 
     fileprivate func disconnected(_ peer: MCPeerID) {
-        if let id = peerDevice.removeValue(forKey: peer) { devices[id] = nil; peerStates[id] = nil }
+        if let id = peerDevice.removeValue(forKey: peer) { devices[id] = nil; peerStates[id] = nil; SpotifyController.shared.forget(deviceID: id) }
         refreshPeers()
         note("disconnected: \(peer.displayName) — searching again")
         if running && (session?.connectedPeers.isEmpty ?? true) { scheduleReconnect() }
     }
 
+    /// V21: overdracht-gebeurtenissen in het sync-logboek (Instellingen › Sync & devices).
+    func noteHandoff(_ text: String) { note("handoff: " + text) }
+
+    // MARK: V20 — Spotify via sync
+
+    private var lastSpotify: SpotifyState?
+    func publishSpotify(_ state: SpotifyState) {
+        lastSpotify = state
+        broadcast(.spotify(deviceID: deviceID, state: state))
+    }
+    func sendSpotify(_ action: SpotifyAction, value: Double?, uri: String?, to target: String) {
+        broadcast(.spotifyCommand(target: target, action: action, value: value, uri: uri))
+    }
+
     private func refreshPeers() {
         peers = (session?.connectedPeers ?? []).map(\.displayName).sorted()
+        WidgetBridge.shared.setNeedsUpdate()
     }
 
     /// Voor tests: past een snapshot toe alsof hij van een ander apparaat kwam.

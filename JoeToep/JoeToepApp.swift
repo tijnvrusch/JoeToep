@@ -148,6 +148,10 @@ struct BrowserCommands: Commands {
             }
         }
         // Eigen zoom-knoppen, toegevoegd ná de bestaande werkbalk-groep.
+        CommandGroup(before: .toolbar) {
+            Button("Show / Hide Sidebar") { NotificationCenter.default.post(name: .joeToepToggleSidebar, object: nil) }
+                .keyboardShortcut("s", modifiers: .command)
+        }
         CommandGroup(after: .toolbar) {
             Button("Zoom In") { actions?.zoomIn() }.keyboardShortcut("+", modifiers: .command).disabled(actions == nil)
             Button("Zoom Out") { actions?.zoomOut() }.keyboardShortcut("-", modifiers: .command).disabled(actions == nil)
@@ -156,6 +160,27 @@ struct BrowserCommands: Commands {
         // Een klein menu voor het aan/uitzetten van Picture in Picture.
         CommandMenu("Playback") {
             Button("Toggle Picture in Picture") { actions?.pictureInPicture() }.keyboardShortcut("z", modifiers: .option).disabled(actions == nil)
+            Divider()
+            Button("Pause Everything") { MediaHub.shared.scan(); MediaHub.shared.pauseAll() }.keyboardShortcut(".", modifiers: [.command, .option])
+        }
+        // V20: Spotify bedienen vanuit JoeToep (Mac: de desktopapp; iPhone/iPad: Spotify op je Mac).
+        CommandMenu("Spotify") {
+            Button("Play / Pause") { SpotifyController.shared.perform(.playPause) }.keyboardShortcut("p", modifiers: [.command, .option])
+            Button("Next Track") { SpotifyController.shared.perform(.next) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            Button("Previous Track") { SpotifyController.shared.perform(.previous) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            Button("Volume Up") { let v = SpotifyController.shared.current?.volume ?? 50; SpotifyController.shared.perform(.setVolume, value: min(100, v + 10)) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            Button("Volume Down") { let v = SpotifyController.shared.current?.volume ?? 50; SpotifyController.shared.perform(.setVolume, value: max(0, v - 10)) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Divider()
+            Button("Shuffle On/Off") { SpotifyController.shared.perform(.toggleShuffle) }
+            Button("Repeat On/Off") { SpotifyController.shared.perform(.toggleRepeat) }
+            Divider()
+            Menu("Sleep Timer") {
+                ForEach([15, 30, 45, 60, 90], id: \.self) { m in Button("\(m) minutes") { SpotifyCoordinator.shared.startSleepTimer(minutes: m) } }
+                Button("Off") { SpotifyCoordinator.shared.cancelSleepTimer() }
+            }
+            Button("Open Spotify") { SpotifyController.shared.perform(.launch) }
         }
     }
 }

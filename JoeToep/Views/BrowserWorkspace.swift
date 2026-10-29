@@ -15,6 +15,8 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published private(set) var title: String
     @Published private(set) var fullTitle: String
     @Published var pinned: Bool
+    /// V21: in welke tabgroep deze tab zit (nil = los).
+    @Published var groupID: UUID?
     /// V18: er staat een wijziging van een ander apparaat klaar (stipje in de tab).
     @Published var syncPending = false
     var lastActive: Date
@@ -26,7 +28,7 @@ final class BrowserTab: ObservableObject, Identifiable {
     init(saved: SavedBrowserTab = SavedBrowserTab(), privateMode: Bool = false) {
         id = saved.id; isPrivate = privateMode
         session = WebSession(privateMode: privateMode)
-        lastActive = saved.lastActive ?? Date(); pinned = saved.pinned ?? false
+        lastActive = saved.lastActive ?? Date(); pinned = saved.pinned ?? false; groupID = saved.groupID
         let initial = saved.title ?? TabTitleSummarizer.fallbackTitle(for: saved.url)
         title = initial; fullTitle = initial
         session.restoredURL = saved.url
@@ -98,6 +100,7 @@ final class BrowserWorkspace: ObservableObject {
     init(store suppliedStore: TabSessionStore? = nil) {
         let store = suppliedStore ?? Self.defaultStore
         self.store = store
+        _ = LaunchPrefs.started
         if let saved = store.restore(lifetime: TabLifetime.stored().seconds) {
             tabs = saved.tabs.map { BrowserTab(saved: $0) }; selectedID = saved.selectedID
         } else {
@@ -107,6 +110,7 @@ final class BrowserWorkspace: ObservableObject {
         claimSync()
         persist()
         startExpiryChecks()
+        Self.registry.add(self)
     }
     private var expiryTask: Task<Void, Never>?
     /// V13: close tabs that have been inactive longer than the chosen lifetime (never pinned tabs).
@@ -156,6 +160,8 @@ final class BrowserWorkspace: ObservableObject {
     /// sturen; die springen we dan in (±0,1 s, zoals AirPods-overdracht).
     func requestDeviceHandoff(for tab: BrowserTab) {
         guard let url = tab.currentURL, NavigationPolicy.isPlaybackPage(url) else { return }
+        // V21: net zelf overgenomen? Dan loopt die aanvraag al.
+        if let deadline = awaitingHandoff[url.absoluteString], deadline > Date() { return }
         let sync = TabSyncService.shared
         for (device, snapshot) in sync.latestByDevice where device != sync.deviceID {
             guard let remoteTab = snapshot.tabs.first(where: { SyncDiff.sameDestination($0.url, url) }) else { continue }
@@ -185,6 +191,17 @@ final class BrowserWorkspace: ObservableObject {
         case .toggle: mediaTab.session.remoteToggle()
         case .seek: mediaTab.session.remoteSeek(by: command.value ?? 10)
         case .rate: mediaTab.session.stepPlaybackRate(Int(command.value ?? 1))
+        case .continueThere:
+            // V21: het andere apparaat duwt zijn video naar ons: meteen verder spelen op die tijd.
+            guard let url = command.url else { return }
+            let tab = tabs.first { SyncDiff.sameDestination($0.currentURL, url) }
+            let target: BrowserTab
+            if let tab { target = tab } else { addTab(url: url, activate: true, after: selected); target = selected }
+            if target.id != selectedID { selected.session.leaveFullscreenForTabSwitch(); select(target) }
+            remotePlayback = nil
+            ignoreRemoteSelectionUntil = Date().addingTimeInterval(6); pendingSelection = nil
+            target.session.takeOverPlayback(url: url, time: (command.value ?? 0) + HandoffPrefs.latencyCompensation)
+            TabSyncService.shared.noteHandoff("continued from \(TabSyncService.shared.devices[command.from ?? ""] ?? "device")")
         case .handoffRequest:
             // Een ander apparaat neemt het over: hier pauzeren en de exacte tijd terugsturen.
             guard let from = command.from else { return }
@@ -200,7 +217,13 @@ final class BrowserWorkspace: ObservableObject {
             // Antwoord: spring naar precies waar het andere apparaat stopte.
             guard let time = command.value,
                   let tab = tabs.first(where: { SyncDiff.sameDestination($0.currentURL, command.url) }) else { return }
-            tab.session.seekExact(time)
+            if let key = command.url?.absoluteString, let deadline = awaitingHandoff[key], deadline > Date() {
+                // V21: wij speelden al (overgenomen) → alleen corrigeren als het echt verschilt.
+                tab.session.correctPosition(time + HandoffPrefs.latencyCompensation)
+                TabSyncService.shared.noteHandoff("exact time \(String(format: "%.2f", time)) s")
+            } else {
+                tab.session.seekExact(time)
+            }
         }
     }
 
@@ -235,6 +258,13 @@ final class BrowserWorkspace: ObservableObject {
             // Samengevoegd? Dan heeft dit apparaat nu méér dan de afzender: dat terugsturen,
             // zodat iedereen op dezelfde (volledige) lijst uitkomt.
             if merge { publishSync() }
+        }
+        // V21: onthoud wat het andere apparaat NU speelt (voor automatisch overnemen bij wisselen).
+        if let playing = snapshot.playingID, let remote = snapshot.tabs.first(where: { $0.id == playing }), let url = remote.url {
+            remotePlayback = RemotePlayback(device: snapshot.origin, tabID: playing, url: url, time: remote.time ?? 0, receivedAt: Date())
+        } else if remotePlayback?.device == snapshot.origin {
+            remotePlayback = nil          // daar gepauzeerd/gestopt → niets over te nemen
+            if sentAway?.device == snapshot.origin { sentAway = nil }
         }
         // 1. Speelt het andere apparaat? Dan stoppen we hier (één apparaat tegelijk).
         if snapshot.playingID != nil {
@@ -271,8 +301,86 @@ final class BrowserWorkspace: ObservableObject {
             pendingPosition[remote.id] = time
         }
         // 7. Selectie: onthouden, toepassen zodra je hier weer verder gaat.
-        if tabs.contains(where: { $0.id == snapshot.selectedID }) { pendingSelection = snapshot.selectedID }
+        //    V21: vlak na een overname niet (dat is de "echo" van het apparaat dat net stopte).
+        if tabs.contains(where: { $0.id == snapshot.selectedID }), Date() >= ignoreRemoteSelectionUntil { pendingSelection = snapshot.selectedID }
         tabs.forEach { $0.syncPending = pendingNavigation[$0.id] != nil }
+    }
+
+    // MARK: V21 — automatisch overnemen bij wisselen van apparaat
+
+    enum SwitchTrigger { case appActivated, interaction, tabSelection }
+    struct RemotePlayback: Equatable {
+        var device: String, tabID: UUID, url: URL, time: Double, receivedAt: Date
+        /// Geschatte positie nu: laatste bekende tijd + hoe lang geleden (de video liep door).
+        func estimatedTime(at now: Date = Date()) -> Double { time + max(0, now.timeIntervalSince(receivedAt)) }
+    }
+    private(set) var remotePlayback: RemotePlayback?
+    private var lastLocalInteraction = Date.distantPast
+    private var waitingForPeers = false
+    /// V21: na een overname even geen selectie van het andere apparaat overnemen.
+    private var ignoreRemoteSelectionUntil = Date.distantPast
+    /// V21: bewust naar een ander apparaat gestuurd → daar niet automatisch weer vandaan pakken.
+    private var sentAway: (device: String, url: URL, until: Date)?
+    /// url → deadline: wachten we op de exacte tijd van het andere apparaat?
+    private var awaitingHandoff: [String: Date] = [:]
+
+    /// V21: "Verder op <apparaat>": de video van deze tab daar laten doorspelen (exacte tijd) en hier pauzeren.
+    func continuePlayback(of tab: BrowserTab? = nil, on device: String) {
+        let tab = tab ?? mediaTab
+        guard let url = tab.currentURL else { return }
+        sentAway = (device, url, Date().addingTimeInterval(1800))
+        let sync = TabSyncService.shared
+        tab.session.pauseAndReportTime { time in
+            sync.send(SyncCommand(kind: .continueThere, target: device, url: url, value: time ?? tab.session.resumePoint?.time ?? 0,
+                                  from: sync.deviceID))
+            sync.noteHandoff("sent to \(sync.devices[device] ?? "device") at \(String(format: "%.1f", time ?? 0)) s")
+        }
+        if tab.session.isInPictureInPicture { tab.session.stopPiPAndPause() }
+    }
+    /// Verbonden apparaten (id, naam) — voor de "Verder op …"-menu's.
+    var otherDevices: [(id: String, name: String)] {
+        let sync = TabSyncService.shared
+        return sync.devices.filter { $0.key != sync.deviceID }.map { (id: $0.key, name: $0.value) }.sorted { $0.name < $1.name }
+    }
+
+    /// V21: overnemen vanaf een widget of het mediacentrum (ook als het andere apparaat net pauzeerde).
+    func takeOverFrom(device: String) {
+        sentAway = nil
+        guard let snap = TabSyncService.shared.latestByDevice[device] else { return }
+        let tab = snap.playingID.flatMap { id in snap.tabs.first { $0.id == id } } ?? snap.tabs.first { $0.id == snap.selectedID }
+        guard let tab, let url = tab.url else { return }
+        // Speelt het daar nog: vanaf wanneer we die tijd kennen doorrekenen; anders precies die tijd.
+        let known = remotePlayback?.device == device ? remotePlayback?.receivedAt : nil
+        takeOver(RemotePlayback(device: device, tabID: tab.id, url: url, time: tab.time ?? 0,
+                                receivedAt: snap.playingID != nil ? (known ?? Date()) : Date()))
+    }
+
+    /// Pak de video over: tab kiezen, meteen spelen op de geschatte tijd, het andere apparaat laten
+    /// pauzeren en zijn exacte tijd sturen (dan corrigeren we tot op ±0,3 s).
+    private func takeOver(_ remote: RemotePlayback) {
+        remotePlayback = nil
+        ignoreRemoteSelectionUntil = Date().addingTimeInterval(6)
+        let tab = tabs.first(where: { $0.id == remote.tabID })
+            ?? tabs.first(where: { SyncDiff.sameDestination($0.currentURL, remote.url) })
+        let target: BrowserTab
+        if let tab { target = tab } else {
+            addTab(url: remote.url, activate: true, after: selected); target = selected
+        }
+        if target.id != selectedID { selected.session.leaveFullscreenForTabSwitch(); select(target) }
+        pendingNavigation[target.id] = nil; pendingPosition[target.id] = nil
+        let estimate = remote.estimatedTime() + HandoffPrefs.latencyCompensation
+        target.session.takeOverPlayback(url: remote.url, time: estimate)
+        awaitingHandoff[remote.url.absoluteString] = Date().addingTimeInterval(4)
+        TabSyncService.shared.send(SyncCommand(kind: .handoffRequest, target: remote.device, url: remote.url, value: nil,
+                                               from: TabSyncService.shared.deviceID))
+        TabSyncService.shared.noteHandoff("takeover \(String(format: "%.1f", estimate)) s from \(TabSyncService.shared.devices[remote.device] ?? "device")")
+        // Overige uitgestelde wijzigingen ook meteen toepassen.
+        pendingSelection = nil
+        for (id, change) in pendingNavigation { tabs.first { $0.id == id }?.session.syncNavigate(to: change.url, time: change.time) }
+        pendingNavigation = [:]
+        for (id, time) in pendingPosition { tabs.first { $0.id == id }?.session.syncPosition(time) }
+        pendingPosition = [:]
+        tabs.forEach { $0.syncPending = false }
     }
 
     // MARK: V18 — uitgestelde toepassing ("verder waar je was" op het apparaat waar je naartoe gaat)
@@ -282,9 +390,43 @@ final class BrowserWorkspace: ObservableObject {
 
     /// Roep aan zodra de gebruiker dit apparaat weer gebruikt. Zet selectie, pagina en positie
     /// gelijk met het apparaat waar je vandaan komt — gepauzeerd, klaar om verder te kijken.
-    func resumeFromOtherDevice() {
-        guard pendingSelection != nil || !pendingNavigation.isEmpty || !pendingPosition.isEmpty else { return }
+    func resumeFromOtherDevice(trigger: SwitchTrigger = .interaction) {
+        let now = Date()
+        let idle = now.timeIntervalSince(lastLocalInteraction)
+        lastLocalInteraction = now
         let localPlaying = tabs.contains { $0.session.isPlaying || $0.session.isInPictureInPicture }
+        // V21: net terug uit de achtergrond en (nog) niet verbonden? Eerst even wachten op verse
+        // info van het andere apparaat, anders beslissen we op verouderde gegevens.
+        if trigger == .appActivated, HandoffPrefs.autoResume, !localPlaying, TabSyncService.shared.peers.isEmpty,
+           remotePlayback != nil, !waitingForPeers {
+            waitingForPeers = true
+            Task { @MainActor [weak self] in
+                for _ in 0..<30 {               // max 3 s
+                    try? await Task.sleep(for: .milliseconds(100))
+                    if !TabSyncService.shared.peers.isEmpty { break }
+                }
+                // Verbonden → kort wachten op de eerste snapshot (die stuurt de ander meteen).
+                if !TabSyncService.shared.peers.isEmpty { try? await Task.sleep(for: .milliseconds(350)) }
+                guard let self else { return }
+                self.waitingForPeers = false
+                // Nooit verbonden: alleen overnemen als de info heel vers is.
+                if TabSyncService.shared.peers.isEmpty, let r = self.remotePlayback, Date().timeIntervalSince(r.receivedAt) > 20 {
+                    self.remotePlayback = nil
+                }
+                self.lastLocalInteraction = .distantPast
+                self.resumeFromOtherDevice(trigger: .appActivated)
+            }
+            return
+        }
+        // V21: het andere apparaat speelt → hier meteen verder spelen (instelbaar).
+        if !localPlaying, let remote = remotePlayback, HandoffPrefs.autoResume,
+           !(sentAway?.device == remote.device && SyncDiff.sameDestination(sentAway?.url, remote.url) && Date() < (sentAway?.until ?? .distantPast)),
+           now.timeIntervalSince(remote.receivedAt) < HandoffPrefs.maxAge,
+           trigger == .appActivated || (trigger == .interaction && idle >= HandoffPrefs.idleBeforeTakeover) {
+            takeOver(remote)
+            return
+        }
+        guard pendingSelection != nil || !pendingNavigation.isEmpty || !pendingPosition.isEmpty else { return }
         if !localPlaying, let target = pendingSelection, target != selectedID, tabs.contains(where: { $0.id == target }) {
             selected.session.leaveFullscreenForTabSwitch()
             selectedID = target
@@ -312,7 +454,7 @@ final class BrowserWorkspace: ObservableObject {
     private static func saved(_ tab: BrowserTab, url override: URL? = nil) -> SavedBrowserTab {
         let session = tab.session
         let url = override ?? session.currentURL ?? session.restoredURL
-        var result = SavedBrowserTab(id: tab.id, url: url, lastActive: tab.lastActive, pinned: tab.pinned ? true : nil, title: tab.title)
+        var result = SavedBrowserTab(id: tab.id, url: url, lastActive: tab.lastActive, pinned: tab.pinned ? true : nil, title: tab.title, groupID: tab.groupID)
         if let point = session.resumePoint, let url, Self.sameVideo(point.url, url) {
             result.time = point.time; result.playing = point.playing
         } else if session.currentURL == nil, let restored = session.restoredURL, restored == url {
@@ -369,7 +511,13 @@ final class BrowserWorkspace: ObservableObject {
             }
             // Keep the screen awake while any tab plays (iPhone/iPad setting). `async` runs it
             // a moment later, after all tabs have updated their state.
-            DispatchQueue.main.async { self.updateIdleTimer(); self.publishSync() }
+            DispatchQueue.main.async {
+                self.updateIdleTimer(); self.publishSync()
+                // V20: Spotify pauzeren/zachter als een video start, en daarna weer terug.
+                let anyPlaying = BrowserWorkspace.registry.allObjects.contains { $0.tabs.contains { $0.session.isPlaying } }
+                SpotifyCoordinator.shared.videoPlaybackChanged(anyPlaying: anyPlaying)
+                ChromeAutoHide.shared.playbackChanged()
+            }
         }
     }
     /// V15: keep the screen on while any tab plays (setting).
@@ -557,11 +705,68 @@ final class BrowserWorkspace: ObservableObject {
     /// V17: de werkruimte (het venster) waar je het laatst mee werkte. De Mac-muisknoppen en
     /// ⌘←/⌘→ sturen hun opdracht hierheen. `weak` = houdt het venster niet kunstmatig in leven.
     static weak var active: BrowserWorkspace?
+    // MARK: V21 — tabgroepen, zijbalk en de nieuwe-tab-overlay
+
+    @Published var groups: [TabGroup] = TabGroupStore.load() { didSet { if groups != oldValue { TabGroupStore.save(groups) } } }
+    /// De zwevende zoek-/adresbalk (Arc-stijl) boven de pagina.
+    @Published var showCommandBar = false
+    /// true = de overlay past het adres van de huidige tab aan (⌘L); false = nieuwe tab (⌘T).
+    @Published var commandBarEditsCurrent = false
+
+    /// "+" / ⌘T: Arc-stijl overlay (standaard), of meteen een lege tab (instelbaar).
+    func requestNewTab() {
+        if CommandBarPrefs.overlayForNewTab { commandBarEditsCurrent = false; showCommandBar = true } else { addTab() }
+    }
+    func requestEditAddress() { commandBarEditsCurrent = true; showCommandBar = true }
+
+    @discardableResult
+    func newGroup(named name: String = "New group", with tab: BrowserTab? = nil) -> TabGroup {
+        let colors = TabGroup.palette
+        let group = TabGroup(name: name, color: colors[groups.count % colors.count])
+        groups.append(group)
+        if let tab { tab.groupID = group.id; tab.pinned = false; persist() }
+        return group
+    }
+    func setGroup(_ tab: BrowserTab, to id: UUID?) {
+        tab.groupID = id
+        if id != nil { tab.pinned = false }
+        persist()
+    }
+    func renameGroup(_ id: UUID, to name: String) {
+        guard let i = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[i].name = name.trimmingCharacters(in: .whitespaces).isEmpty ? "Group" : name
+    }
+    func recolorGroup(_ id: UUID, to color: String) {
+        guard let i = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[i].color = color
+    }
+    func toggleGroupCollapsed(_ id: UUID) {
+        guard let i = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[i].collapsed.toggle()
+    }
+    /// Groep opheffen: tabs worden los (of gesloten).
+    func removeGroup(_ id: UUID, closingTabs: Bool) {
+        for tab in tabs where tab.groupID == id {
+            if closingTabs, tabs.count > 1 { close(tab) } else { tab.groupID = nil }
+        }
+        groups.removeAll { $0.id == id }
+        persist()
+    }
+    /// Arc "Clear": alle losse (niet vastgezette, niet gegroepeerde) tabs sluiten.
+    func clearLooseTabs() {
+        let loose = tabs.filter { !$0.pinned && $0.groupID == nil && $0.id != selectedID }
+        for tab in loose where tabs.count > 1 { close(tab) }
+    }
+    func tabs(in group: UUID?) -> [BrowserTab] { tabs.filter { !$0.pinned && $0.groupID == group } }
+    var pinnedTabs: [BrowserTab] { tabs.filter(\.pinned) }
+
+    /// V20: alle open vensters (zwak), voor het mediacentrum.
+    static let registry = NSHashTable<BrowserWorkspace>.weakObjects()
     func select(_ tab: BrowserTab) {
         Self.active = self
         // Eigen keuze gaat voor; de rest van wat het andere apparaat deed nu toepassen.
         pendingSelection = nil
-        resumeFromOtherDevice()
+        resumeFromOtherDevice(trigger: .tabSelection)
         guard tab.id != selectedID else { return }
         leaveCurrent()
         selectedID = tab.id; tab.lastActive = Date(); persist()
@@ -678,6 +883,8 @@ struct WorkspaceActions {
 extension Notification.Name {
     /// Object: the WebSession whose tab should present Settings (Cmd+,).
     static let joeToepOpenSettings = Notification.Name("nl.tijn.JoeToep.openSettings")
+    /// V21: zijbalk in-/uitklappen (⌘S / knop).
+    static let joeToepToggleSidebar = Notification.Name("nl.tijn.JoeToep.toggleSidebar")
 }
 struct WorkspaceActionsKey: FocusedValueKey { typealias Value = WorkspaceActions }
 extension FocusedValues {
@@ -692,6 +899,38 @@ struct PlayerShellView: View {
     @StateObject private var workspace = BrowserWorkspace()
     @ObservedObject private var library = BrowserLibrary.shared
     @State private var editingAddress = false
+    @ObservedObject private var chrome = ChromeAutoHide.shared
+    @AppStorage("autoHideAnimationV20") private var autoHideAnimated = true
+    @AppStorage("autoHideRevealEdgeV20") private var autoHideRevealEdge = true
+    @AppStorage("oneBarLayoutV21") private var oneBarSetting = true
+    @AppStorage("sidebarTabsV21") private var sidebarSetting = false
+    @AppStorage("sidebarHiddenV21") private var sidebarHidden = false
+    @State private var sidebarPeek = false
+    private var useSidebar: Bool { SidebarPrefs.enabled(sidebarSetting) }
+    @State private var windowIsFullscreen = false
+    private var oneBar: Bool { LayoutPrefs.oneBar(oneBarSetting) }
+    private var oneBarInTitlebar: Bool {
+        #if os(macOS)
+        oneBar && !useSidebar
+        #else
+        false
+        #endif
+    }
+    /// V21: zijbalk op de Mac loopt door tot bovenin (venster-knopjes staan in de zijbalk, zoals Arc).
+    private var oneBarInTitlebarForSidebar: Bool {
+        #if os(macOS)
+        useSidebar && (!sidebarHidden || sidebarPeek)
+        #else
+        false
+        #endif
+    }
+    private var sidebarTopInset: CGFloat {
+        #if os(macOS)
+        4
+        #else
+        0
+        #endif
+    }
     @State private var showingLibrary = false
     @State private var findVisible = false
     /// V18: download die offline wordt afgespeeld (vanaf de Watch).
@@ -701,12 +940,12 @@ struct PlayerShellView: View {
 
     private var actions: WorkspaceActions {
         WorkspaceActions(
-            newTab: workspace.addTab, closeTab: { workspace.close(workspace.selected) },
+            newTab: workspace.requestNewTab, closeTab: { workspace.close(workspace.selected) },
             pictureInPicture: { workspace.selected.session.togglePictureInPicture() },
             closeWindow: { dismissWindow() }, reload: { workspace.selected.session.reload() },
             openSettings: { NotificationCenter.default.post(name: .joeToepOpenSettings, object: workspace.selected.session) },
             newPrivateTab: workspace.addPrivateTab, reopenClosedTab: workspace.reopenClosedTab,
-            editAddress: { editingAddress = true }, find: showFind,
+            editAddress: { if CommandBarPrefs.overlayForAddress { workspace.requestEditAddress() } else { editingAddress = true } }, find: showFind,
             toggleBookmark: toggleBookmark, showLibrary: { showingLibrary = true },
             nextTab: workspace.selectNext, previousTab: workspace.selectPrevious,
             selectTab: { index in index >= 8 ? workspace.select(index: workspace.tabs.count - 1) : workspace.select(index: index) },
@@ -716,6 +955,12 @@ struct PlayerShellView: View {
             recentTab: workspace.selectRecent, forceRefresh: { workspace.selected.session.forceRefresh() },
             duplicateTab: { workspace.duplicate(workspace.selected) },
             copyLink: { if let url = workspace.selected.currentURL { Clipboard.copy(url) } })
+    }
+    /// V21: linker- of rechterdeel van de knoppen, voor de ene balk.
+    private func oneBarPart(_ part: PlayerControlBar.Part) -> some View {
+        PlayerControlBar(session: workspace.selected.session, settings: settings, availableWidth: 600, actions: actions,
+                         showSettings: actions.openSettings, part: part, fixedButtonSize: LayoutPrefs.oneBarButtonSize)
+            .id(workspace.selectedID)
     }
     private func toggleBookmark() {
         let tab = workspace.selected
@@ -737,6 +982,8 @@ struct PlayerShellView: View {
             }
             .onAppear {
                 TabSyncService.shared.bind(to: settings)
+                ChromeAutoHide.shared.schedule()
+                WidgetBridge.shared.startOnce()
                 #if os(iOS)
                 WatchBridge.shared.activate(workspace: workspace)
                 #endif
@@ -746,13 +993,13 @@ struct PlayerShellView: View {
                 TabSyncService.shared.resume(); workspace.publishSync()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                workspace.resumeFromOtherDevice()
+                workspace.resumeFromOtherDevice(trigger: .appActivated)
             }
             // Elke aanraking = "ik gebruik dit apparaat weer" → verder waar je op het andere was.
             .simultaneousGesture(TapGesture().onEnded { workspace.resumeFromOtherDevice() })
             #else
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                TabSyncService.shared.resume(); workspace.resumeFromOtherDevice()
+                TabSyncService.shared.resume(); workspace.resumeFromOtherDevice(trigger: .appActivated)
             }
             .onAppear {
                 // Mac: een klik, toets of scroll in JoeToep telt als "weer op dit apparaat".
@@ -762,8 +1009,30 @@ struct PlayerShellView: View {
     }
 
     @ViewBuilder private func content(_ theme: JoeToepTheme) -> some View {
+        HStack(spacing: 0) {
+        // V21: verticale tabs in een zijbalk (Arc/Dia), Mac en iPad.
+        if useSidebar && (!sidebarHidden || sidebarPeek) && !chrome.tabsHidden {
+            SidebarView(workspace: workspace, settings: settings, actions: actions, topInset: sidebarTopInset,
+                        leadingInset: oneBarInTitlebarForSidebar && !windowIsFullscreen ? 70 : 0)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+                #if os(macOS)
+                .onHover { inside in if !inside && sidebarHidden { withAnimation(.snappy) { sidebarPeek = false } } }
+                #endif
+            Rectangle().fill(theme.style.separator.opacity(0.4)).frame(width: 0.5)
+        }
         VStack(spacing: 0) {
-            TabBarView(workspace: workspace, settings: settings, editing: $editingAddress)
+            // V20: tabbalk kan automatisch verbergen (Instellingen › Top bar auto-hide).
+            if !useSidebar && (!chrome.tabsHidden || editingAddress) {
+                TabBarView(workspace: workspace, settings: settings, editing: $editingAddress,
+                           leading: oneBar && !chrome.buttonsHidden ? AnyView(oneBarPart(.leading)) : nil,
+                           trailing: oneBar && !chrome.buttonsHidden ? AnyView(oneBarPart(.trailing)) : nil,
+                           leadingInset: oneBarInTitlebar && !windowIsFullscreen ? 70 : 0)
+                    #if os(macOS)
+                    .onHover { chrome.setHovering($0) }
+                    #endif
+                    .simultaneousGesture(TapGesture().onEnded { chrome.reveal() })
+                    .transition(autoHideAnimated ? .move(edge: .top).combined(with: .opacity) : .identity)
+            }
             ZStack(alignment: .top) {
                 ForEach(workspace.tabs) { tab in
                     TabPlayerView(settings: settings, session: tab.session, selected: workspace.selectedID == tab.id,
@@ -792,7 +1061,42 @@ struct PlayerShellView: View {
             }
             .animation(theme.anim(.tabs), value: workspace.selectedID)
             .animation(theme.anim(.findBar), value: findVisible)
+            .overlay(alignment: .top) {
+                if chrome.hidden && autoHideRevealEdge { AutoHideRevealZone(height: 8) }
+            }
+            .overlay(alignment: .leading) {
+                // V21: zijbalk verborgen → muis naar de linkerrand laat hem tijdelijk verschijnen (Arc).
+                if useSidebar && sidebarHidden && !sidebarPeek {
+                    Color.black.opacity(0.001).frame(width: 6).contentShape(Rectangle())
+                        #if os(macOS)
+                        .onHover { if $0 { withAnimation(.snappy) { sidebarPeek = true } } }
+                        #endif
+                        .onTapGesture { withAnimation(.snappy) { sidebarPeek = true } }
+                }
+            }
         }
+        }
+        .animation(.snappy(duration: 0.22), value: sidebarHidden)
+        .animation(.snappy(duration: 0.18), value: sidebarPeek)
+        .onReceive(NotificationCenter.default.publisher(for: .joeToepToggleSidebar)) { _ in
+            guard BrowserWorkspace.active === workspace || BrowserWorkspace.active == nil else { return }
+            sidebarPeek = false; sidebarHidden.toggle()
+        }
+        .animation(autoHideAnimated ? .easeInOut(duration: 0.25) : nil, value: chrome.hidden)
+        // V21: zwevende zoekbalk (Arc-stijl) boven de pagina.
+        .overlay {
+            if workspace.showCommandBar {
+                CommandBarOverlay(workspace: workspace, settings: settings).zIndex(20)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: workspace.showCommandBar)
+        // V21 (Mac): de ene balk staat helemaal bovenin, naast de venster-knopjes (zoals Safari).
+        .ignoresSafeArea(.container, edges: (oneBarInTitlebar || oneBarInTitlebarForSidebar) && !chrome.tabsHidden ? .top : [])
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in windowIsFullscreen = true }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in windowIsFullscreen = false }
+        #endif
+        .onChange(of: editingAddress) { _, editing in if editing { chrome.reveal() } }
         .background(theme.background)
         .environment(\.joeToepTheme, theme)
         .joeToepTextScale(theme.textScale)        // V16.2.1: Settings › Appearance › Text size
@@ -811,6 +1115,26 @@ struct PlayerShellView: View {
         // monitors voor muis-zijknoppen, ⌘←/⌘→ en trackpad-vegen (één keer voor de hele app).
         // V17.1: een link van buitenaf (JoeToep als standaardbrowser, of "Open met") → nieuwe tab.
         .onOpenURL { url in
+            // V21: links uit widgets: joetoep://search?p=…, joetoep://open?url=…, joetoep://newtab, joetoep://takeover?device=…
+            if url.scheme?.lowercased() == WidgetShared.urlScheme, let host = url.host?.lowercased(),
+               ["search", "newtab", "open", "takeover", "library"].contains(host) {
+                let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                func value(_ n: String) -> String? { items.first { $0.name == n }?.value }
+                switch host {
+                case "search":
+                    if let p = value("p"), MediaPlatform(rawValue: p) != nil { UserDefaults.standard.set(p, forKey: "newTabPlatformV192") }
+                    workspace.commandBarEditsCurrent = false; workspace.showCommandBar = true
+                case "newtab": workspace.requestNewTab()
+                case "library": showingLibrary = true
+                case "takeover": if let d = value("device") { workspace.takeOverFrom(device: d) }
+                default:
+                    if let raw = value("url"), let target = URL(string: raw) {
+                        if let existing = workspace.tabs.first(where: { SyncDiff.sameDestination($0.currentURL, target) }) { workspace.select(existing) }
+                        else { workspace.addTab(url: target) }
+                    }
+                }
+                return
+            }
             // V18: joetoep://… (Opdrachten/deelmenu-omweg op iPhone/iPad) → gewone webpagina.
             if let web = DefaultBrowser.webURL(fromCustom: url) { workspace.addTab(url: web); return }
             guard ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") else { return }
@@ -835,7 +1159,7 @@ struct PlayerShellView: View {
         .background {
             // Hardware-keyboard shortcuts on iPad (and iPhone with a keyboard).
             VStack {
-                Button("New Tab") { workspace.addTab() }.keyboardShortcut("t", modifiers: .command)
+                Button("New Tab") { workspace.requestNewTab() }.keyboardShortcut("t", modifiers: .command)
                 Button("New Private Tab") { workspace.addPrivateTab() }.keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Reopen Closed Tab") { workspace.reopenClosedTab() }.keyboardShortcut("t", modifiers: [.command, .shift])
                 Button("Reload") { workspace.selected.session.reload() }.keyboardShortcut("r", modifiers: .command)

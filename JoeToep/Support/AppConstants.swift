@@ -10,7 +10,7 @@ enum AppConstants {
     // "static let" betekent: een vaste waarde die bij het type zelf hoort (niet per instantie)
     // en die nooit meer verandert nadat hij is gezet.
     static let appName = "JoeToep"
-    static let version = "20.0.0"
+    static let version = "21.0.0"
     // URL(string:) probeert een tekst om te zetten naar een geldige URL. Dit kan mislukken
     // (bijvoorbeeld bij een typefout), daarom is het resultaat optioneel (URL?).
     static let youtubeTermsURL = URL(string: "https://www.youtube.com/t/terms")

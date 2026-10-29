@@ -302,7 +302,11 @@ final class WebSession: NSObject, ObservableObject {
                     self.pendingResume = (time, false)
                     self.load(time >= 3 ? Self.url(url, at: time) : url)
                 } else if let time = self.restoredTime, time >= 3, NavigationPolicy.isPlaybackPage(url) {
-                    self.pendingResume = (time, true)
+                    // V21: direct na het opstarten niet vanzelf verder spelen (instelbaar), wél bij
+                    // overnemen van een ander apparaat of als je later zelf deze tab opent.
+                    let play = self.forcePlayOnStart || !LaunchPrefs.isLaunchPhase || LaunchPrefs.resumeOnLaunch
+                    self.forcePlayOnStart = false
+                    self.pendingResume = (time, play)
                     self.load(Self.url(url, at: time))
                 } else { self.load(url) }
             } else { self.load(self.settings.startPage.url) }
@@ -1345,6 +1349,34 @@ final class WebSession: NSObject, ObservableObject {
             }
         }
     }
+    /// V21 — Neem het afspelen over van een ander apparaat: meteen naar `time` en spelen.
+    /// Staat dezelfde video al klaar, dan zonder herladen (dus binnen ±50 ms speelt hij).
+    func takeOverPlayback(url: URL, time: Double) {
+        let t = max(0, time)
+        if hasStarted, let current = currentURL, SyncDiff.sameDestination(current, url) {
+            let s = String(format: "%.3f", t)
+            webView.evaluateJavaScript("""
+            (()=>{const p=document.getElementById('movie_player');const v=document.querySelector('video.html5-main-video')||document.querySelector('video');
+            try{if(p&&p.seekTo){p.seekTo(\(s),true);p.playVideo&&p.playVideo();}else if(v){v.currentTime=\(s);v.play&&v.play().catch(()=>{});}}catch(_){}
+            return 0;})()
+            """, completionHandler: nil)
+            recordLifecycle("takeover: seek+play \(s)")
+        } else if hasStarted {
+            pendingResume = (max(t, 1), true)
+            load(t >= 3 ? Self.url(url, at: t) : url)
+            recordLifecycle("takeover: load+play \(Int(t))")
+        } else {
+            restoredURL = url; restoredTime = t; restoredPlaying = true; syncedStartPaused = false; forcePlayOnStart = true
+        }
+    }
+    /// V21: deze tab moet bij het (eerste) laden meteen spelen (overname van een ander apparaat).
+    var forcePlayOnStart = false
+    /// V21: kleine correctie na de overdracht — alleen spoelen als het echt verschilt (geen hapering).
+    func correctPosition(_ time: Double, tolerance: Double = 0.3) {
+        guard time.isFinite, time >= 0 else { return }
+        let t = String(format: "%.3f", time)
+        webView.evaluateJavaScript("(()=>{const p=document.getElementById('movie_player');const v=document.querySelector('video.html5-main-video')||document.querySelector('video');if(!v)return 0;const c=(p&&p.getCurrentTime)?Number(p.getCurrentTime()):v.currentTime;if(Math.abs(c-\(t))<=\(tolerance))return 0;if(p&&p.seekTo)p.seekTo(\(t),true);else v.currentTime=\(t);return 1;})()", completionHandler: nil)
+    }
     /// V19.1 overdracht: spring naar precies deze tijd (zonder te pauzeren/starten).
     func seekExact(_ time: Double) {
         guard time.isFinite, time >= 0 else { return }
@@ -2086,8 +2118,26 @@ final class WebSession: NSObject, ObservableObject {
         #endif
         let wasNativePiP = pip.state == .native
         let previousVideo = videoID
+        let wasPlaying = isPlaying
         videoID = event.videoID
         isPlaying = event.playing; isBuffering = event.buffering
+        // V21: native vangnet voor "gepauzeerd → uit fullscreen". De JavaScript-versie slaat het over
+        // als de pagina zich "verborgen" voelt (Mac: fullscreen-venster terwijl JoeToep niet actief is);
+        // daarom ook hier: na 0,45 s nog steeds gepauzeerd in fullscreen → fullscreen verlaten.
+        if wasPlaying && !event.playing && event.fullscreen && !event.pip && !event.buffering && settings.exitFullscreenOnPause {
+            let token = event.videoID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                guard let self, !self.isPlaying, self.isFullscreen, !self.isBuffering, !self.isInPictureInPicture,
+                      self.videoID == token else { return }
+                self.recordLifecycle("paused in fullscreen → leave fullscreen (native)")
+                self.webView.evaluateJavaScript("(()=>{window.__joetoepExitedByPause=true;try{if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document);return 1}}catch(_){}const v=document.querySelector('video');try{if(v&&v.webkitDisplayingFullscreen){v.webkitExitFullscreen();return 2}}catch(_){}window.JoeToepStage&&window.JoeToepStage.exit&&window.JoeToepStage.exit();return 0})()", completionHandler: nil)
+                #if os(macOS)
+                if let w = self.webView.window, w.styleMask.contains(.fullScreen), self.settings.macFullscreenMode == .youtube || self.isVideoStage {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if w.styleMask.contains(.fullScreen), !self.isPlaying { w.toggleFullScreen(nil) } }
+                }
+                #endif
+            }
+        }
         updatePositionTracking()
         playbackSession.notePlayback(event.playing)
         isFullscreen = event.fullscreen
@@ -2312,6 +2362,7 @@ extension WebSession: WKNavigationDelegate {
         isLoading = false; failedNavigationURL = nil; networkRetryCount = 0
         refreshNavigationState(); configureCompatibility()
         scheduleHistoryRecord(delay: 0.3)
+        MediaExtras.shared.reapply(to: self)      // V21: boost / alleen audio / herhalen blijven aan
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: Error) {
         guard webView === self.webView else { return }

@@ -7,10 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000091 /* JoeToepWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* JoeToepWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000090 /* JoeToepWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A10000000000000000000023 /* JoeToepWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A10000000000000000000038 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000014;
+			remoteInfo = JoeToepWidgets;
+		};
 		A10000000000000000000031 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A10000000000000000000001 /* Project object */;
@@ -35,6 +43,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		A1000000000000000000006D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000091 /* JoeToepWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000068 /* Embed Watch Content */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -49,6 +68,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000024 /* JoeToepWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JoeToepWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000020 /* JoeToep.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JoeToep.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000021 /* JoeToepTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JoeToepTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000023 /* JoeToepWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JoeToepWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -56,10 +76,21 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A10000000000000000000043 /* Exceptions for "JoeToepWidgets" folder in "JoeToepWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				JoeToepWidgets.entitlements,
+				JoeToepWidgets.iOS.entitlements,
+			);
+			target = A10000000000000000000014 /* JoeToepWidgets */;
+		};
 		A10000000000000000000041 /* Exceptions for "JoeToep" folder in "JoeToep" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				JoeToep.iOS.entitlements,
+				JoeToep.macOS.entitlements,
 			);
 			target = A10000000000000000000010 /* JoeToep */;
 		};
@@ -73,6 +104,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000009 /* JoeToepWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000000000000000000043 /* Exceptions for "JoeToepWidgets" folder in "JoeToepWidgets" target */,
+			);
+			path = JoeToepWidgets;
+			sourceTree = "<group>";
+		};
 		A10000000000000000000005 /* JoeToep */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -102,6 +141,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A1000000000000000000006B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000050 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -140,6 +186,7 @@
 				A10000000000000000000006 /* JoeToepTests */,
 				A10000000000000000000007 /* JoeToepUITests */,
 				A10000000000000000000008 /* JoeToepWatch */,
+				A10000000000000000000009 /* JoeToepWidgets */,
 				A10000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -151,6 +198,7 @@
 				A10000000000000000000021 /* JoeToepTests.xctest */,
 				A10000000000000000000022 /* JoeToepUITests.xctest */,
 				A10000000000000000000023 /* JoeToepWatch.app */,
+				A10000000000000000000024 /* JoeToepWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -158,6 +206,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A10000000000000000000014 /* JoeToepWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000075 /* Build configuration list for PBXNativeTarget "JoeToepWidgets" */;
+			buildPhases = (
+				A1000000000000000000006A /* Sources */,
+				A1000000000000000000006B /* Frameworks */,
+				A1000000000000000000006C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000009 /* JoeToepWidgets */,
+			);
+			name = JoeToepWidgets;
+			packageProductDependencies = (
+			);
+			productName = JoeToepWidgets;
+			productReference = A10000000000000000000024 /* JoeToepWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		A10000000000000000000010 /* JoeToep */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXNativeTarget "JoeToep" */;
@@ -166,11 +236,13 @@
 				A10000000000000000000050 /* Frameworks */,
 				A10000000000000000000063 /* Resources */,
 				A10000000000000000000068 /* Embed Watch Content */,
+				A1000000000000000000006D /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				A10000000000000000000035 /* PBXTargetDependency */,
+				A10000000000000000000037 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000005 /* JoeToep */,
@@ -274,6 +346,9 @@
 					A10000000000000000000013 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					A10000000000000000000014 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = A10000000000000000000073 /* Build configuration list for PBXProject "JoeToep" */;
@@ -294,11 +369,19 @@
 				A10000000000000000000011 /* JoeToepTests */,
 				A10000000000000000000012 /* JoeToepUITests */,
 				A10000000000000000000013 /* JoeToepWatch */,
+				A10000000000000000000014 /* JoeToepWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000006C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000063 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -330,6 +413,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000006A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000060 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -361,6 +451,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A10000000000000000000037 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000014 /* JoeToepWidgets */;
+			targetProxy = A10000000000000000000038 /* PBXContainerItemProxy */;
+		};
 		A10000000000000000000033 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A10000000000000000000010 /* JoeToep */;
@@ -380,6 +475,80 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A1000000000000000000008A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToepWidgets/JoeToepWidgets.iOS.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToepWidgets/JoeToepWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 29;
+				DEVELOPMENT_TEAM = 37WRZNSADT;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JoeToepWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 21.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.widgets;
+				PRODUCT_NAME = JoeToepWidgets;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1000000000000000000008B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToepWidgets/JoeToepWidgets.iOS.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToepWidgets/JoeToepWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 29;
+				DEVELOPMENT_TEAM = 37WRZNSADT;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JoeToepWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 21.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.widgets;
+				PRODUCT_NAME = JoeToepWidgets;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		A10000000000000000000080 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -420,12 +589,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "White Ocean Mint Sunset Neon Candy Arcade Vinyl Orbit Aurora Lava Blueprint Cassette Prism Monochrome Jelly Sunrise Cyberpunk Midnight Gold Rose Forest Grape Coral Sky Slate Carbon Paper Glass Sakura Ice Ember Lime Terminal Pixel RetroTV Bubble Synthwave Rainbow Holo Heart Noir UniqueNebula UniqueMosaic UniqueHalo UniqueTangram UniqueGramophone UniqueBlueprint2 UniqueSunburst UniquePastel UniqueTide UniqueWatcher UniqueSupernova UniqueTape UniqueMatrix UniqueInferno UniqueRipple UniqueShard UniqueValentine UniqueRave UniqueTerra UniqueMidas CreativeTropic CreativePopsicle CreativeDisco CreativeLagoon CreativeDesert CreativeBauhaus CreativeGrape CreativeCandyfloss CreativeGlacier CreativeBlush CreativeStudio CreativeMixtape CreativeIris CreativeStarlight CreativeCrush CreativeSorbet CreativeCurrent CreativeBurst CreativeGraph CreativeEcho EccentricAcid EccentricGlitch EccentricCircus EccentricHypno EccentricBubblegum EccentricVortex EccentricWobble EccentricChecker EccentricLava EccentricAlien EccentricCyclops EccentricArcade EccentricStarfish EccentricPunk EccentricTarget EccentricBoombox EccentricRecord EccentricPulse EccentricChunky EccentricNeonframe BoldSignal BoldHazard BoldMint BoldBlaze BoldVolt BoldSnow BoldCobalt BoldRadioactive BoldHotpink BoldShadow BoldBarcode BoldBurst BoldPolka BoldBullseye BoldTile BoldFlag BoldBeam BoldSpot BoldOrbit BoldFrame Red01 Red02 Red03 Red04 Red05 Red06 Red07 Red08 Red09 Red10 Red11 Red12 Red13 Red14 Red15 Red16 Red17 Red18 Red19 Red20 Red21 Red22 Red23 Red24 Red25 Red26 Red27 Red28 Red29 Red30";
+                ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "White Ocean Mint Sunset Neon Candy Arcade Vinyl Orbit Aurora Lava Blueprint Cassette Prism Monochrome Jelly Sunrise Cyberpunk Midnight Gold Rose Forest Grape Coral Sky Slate Carbon Paper Glass Sakura Ice Ember Lime Terminal Pixel RetroTV Bubble Synthwave Rainbow Holo Heart Noir UniqueNebula UniqueMosaic UniqueHalo UniqueTangram UniqueGramophone UniqueBlueprint2 UniqueSunburst UniquePastel UniqueTide UniqueWatcher UniqueSupernova UniqueTape UniqueMatrix UniqueInferno UniqueRipple UniqueShard UniqueValentine UniqueRave UniqueTerra UniqueMidas CreativeTropic CreativePopsicle CreativeDisco CreativeLagoon CreativeDesert CreativeBauhaus CreativeGrape CreativeCandyfloss CreativeGlacier CreativeBlush CreativeStudio CreativeMixtape CreativeIris CreativeStarlight CreativeCrush CreativeSorbet CreativeCurrent CreativeBurst CreativeGraph CreativeEcho EccentricAcid EccentricGlitch EccentricCircus EccentricHypno EccentricBubblegum EccentricVortex EccentricWobble EccentricChecker EccentricLava EccentricAlien EccentricCyclops EccentricArcade EccentricStarfish EccentricPunk EccentricTarget EccentricBoombox EccentricRecord EccentricPulse EccentricChunky EccentricNeonframe BoldSignal BoldHazard BoldMint BoldBlaze BoldVolt BoldSnow BoldCobalt BoldRadioactive BoldHotpink BoldShadow BoldBarcode BoldBurst BoldPolka BoldBullseye BoldTile BoldFlag BoldBeam BoldSpot BoldOrbit BoldFrame Red01 Red02 Red03 Red04 Red05 Red06 Red07 Red08 Red09 Red10 Red11 Red12 Red13 Red14 Red15 Red16 Red17 Red18 Red19 Red20 Red21 Red22 Red23 Red24 Red25 Red26 Red27 Red28 Red29 Red30 OutlineClassic OutlineRed OutlinePaper OutlineHairline OutlineBold OutlineCircle OutlineRedCircle OutlineSquare OutlineTriangle OutlineOcean OutlineMint OutlineSunset OutlineLavender OutlineNight OutlineGold OutlineDouble OutlineNeon OutlinePink OutlineSky OutlineSlate MinimalWhite MinimalBlack MinimalRed MinimalRedDot MinimalInk MinimalSand MinimalStone MinimalFog MinimalGraphite MinimalBlush MinimalSage MinimalNavy MinimalButter MinimalLilac MinimalOcean MinimalMono MinimalNight MinimalClay MinimalMint MinimalCream";
                 ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToep/JoeToep.iOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToep/JoeToep.macOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_APP_SANDBOX = YES;
@@ -438,7 +608,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 20.0.0;
+				MARKETING_VERSION = 21.0.0;
 				JOETOEP_BUNDLE_ID = nl.tijn.JoeToep;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(JOETOEP_BUNDLE_ID)";
 				PRODUCT_MODULE_NAME = JoeToep;
@@ -458,12 +628,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "White Ocean Mint Sunset Neon Candy Arcade Vinyl Orbit Aurora Lava Blueprint Cassette Prism Monochrome Jelly Sunrise Cyberpunk Midnight Gold Rose Forest Grape Coral Sky Slate Carbon Paper Glass Sakura Ice Ember Lime Terminal Pixel RetroTV Bubble Synthwave Rainbow Holo Heart Noir UniqueNebula UniqueMosaic UniqueHalo UniqueTangram UniqueGramophone UniqueBlueprint2 UniqueSunburst UniquePastel UniqueTide UniqueWatcher UniqueSupernova UniqueTape UniqueMatrix UniqueInferno UniqueRipple UniqueShard UniqueValentine UniqueRave UniqueTerra UniqueMidas CreativeTropic CreativePopsicle CreativeDisco CreativeLagoon CreativeDesert CreativeBauhaus CreativeGrape CreativeCandyfloss CreativeGlacier CreativeBlush CreativeStudio CreativeMixtape CreativeIris CreativeStarlight CreativeCrush CreativeSorbet CreativeCurrent CreativeBurst CreativeGraph CreativeEcho EccentricAcid EccentricGlitch EccentricCircus EccentricHypno EccentricBubblegum EccentricVortex EccentricWobble EccentricChecker EccentricLava EccentricAlien EccentricCyclops EccentricArcade EccentricStarfish EccentricPunk EccentricTarget EccentricBoombox EccentricRecord EccentricPulse EccentricChunky EccentricNeonframe BoldSignal BoldHazard BoldMint BoldBlaze BoldVolt BoldSnow BoldCobalt BoldRadioactive BoldHotpink BoldShadow BoldBarcode BoldBurst BoldPolka BoldBullseye BoldTile BoldFlag BoldBeam BoldSpot BoldOrbit BoldFrame Red01 Red02 Red03 Red04 Red05 Red06 Red07 Red08 Red09 Red10 Red11 Red12 Red13 Red14 Red15 Red16 Red17 Red18 Red19 Red20 Red21 Red22 Red23 Red24 Red25 Red26 Red27 Red28 Red29 Red30";
+                ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "White Ocean Mint Sunset Neon Candy Arcade Vinyl Orbit Aurora Lava Blueprint Cassette Prism Monochrome Jelly Sunrise Cyberpunk Midnight Gold Rose Forest Grape Coral Sky Slate Carbon Paper Glass Sakura Ice Ember Lime Terminal Pixel RetroTV Bubble Synthwave Rainbow Holo Heart Noir UniqueNebula UniqueMosaic UniqueHalo UniqueTangram UniqueGramophone UniqueBlueprint2 UniqueSunburst UniquePastel UniqueTide UniqueWatcher UniqueSupernova UniqueTape UniqueMatrix UniqueInferno UniqueRipple UniqueShard UniqueValentine UniqueRave UniqueTerra UniqueMidas CreativeTropic CreativePopsicle CreativeDisco CreativeLagoon CreativeDesert CreativeBauhaus CreativeGrape CreativeCandyfloss CreativeGlacier CreativeBlush CreativeStudio CreativeMixtape CreativeIris CreativeStarlight CreativeCrush CreativeSorbet CreativeCurrent CreativeBurst CreativeGraph CreativeEcho EccentricAcid EccentricGlitch EccentricCircus EccentricHypno EccentricBubblegum EccentricVortex EccentricWobble EccentricChecker EccentricLava EccentricAlien EccentricCyclops EccentricArcade EccentricStarfish EccentricPunk EccentricTarget EccentricBoombox EccentricRecord EccentricPulse EccentricChunky EccentricNeonframe BoldSignal BoldHazard BoldMint BoldBlaze BoldVolt BoldSnow BoldCobalt BoldRadioactive BoldHotpink BoldShadow BoldBarcode BoldBurst BoldPolka BoldBullseye BoldTile BoldFlag BoldBeam BoldSpot BoldOrbit BoldFrame Red01 Red02 Red03 Red04 Red05 Red06 Red07 Red08 Red09 Red10 Red11 Red12 Red13 Red14 Red15 Red16 Red17 Red18 Red19 Red20 Red21 Red22 Red23 Red24 Red25 Red26 Red27 Red28 Red29 Red30 OutlineClassic OutlineRed OutlinePaper OutlineHairline OutlineBold OutlineCircle OutlineRedCircle OutlineSquare OutlineTriangle OutlineOcean OutlineMint OutlineSunset OutlineLavender OutlineNight OutlineGold OutlineDouble OutlineNeon OutlinePink OutlineSky OutlineSlate MinimalWhite MinimalBlack MinimalRed MinimalRedDot MinimalInk MinimalSand MinimalStone MinimalFog MinimalGraphite MinimalBlush MinimalSage MinimalNavy MinimalButter MinimalLilac MinimalOcean MinimalMono MinimalNight MinimalClay MinimalMint MinimalCream";
                 ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToep/JoeToep.iOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToep/JoeToep.macOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -475,7 +646,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 20.0.0;
+				MARKETING_VERSION = 21.0.0;
 				JOETOEP_BUNDLE_ID = nl.tijn.JoeToep;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(JOETOEP_BUNDLE_ID)";
 				PRODUCT_MODULE_NAME = JoeToep;
@@ -575,7 +746,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -584,7 +755,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 20.0.0;
+				MARKETING_VERSION = 21.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.watchkitapp;
 				PRODUCT_NAME = JoeToepWatch;
 				SDKROOT = watchos;
@@ -604,7 +775,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -613,7 +784,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 20.0.0;
+				MARKETING_VERSION = 21.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.watchkitapp;
 				PRODUCT_NAME = JoeToepWatch;
 				SDKROOT = watchos;
@@ -630,6 +801,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A10000000000000000000075 /* Build configuration list for PBXNativeTarget "JoeToepWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000008A /* Debug */,
+				A1000000000000000000008B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A10000000000000000000070 /* Build configuration list for PBXNativeTarget "JoeToep" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

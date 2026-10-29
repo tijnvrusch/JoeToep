@@ -21,6 +21,10 @@ struct TabPlayerView: View {
     // die alleen op macOS vanuit het menu worden doorgegeven.
     var actions: WorkspaceActions? = nil
     @State private var showingSettings = false
+    @ObservedObject private var chrome = ChromeAutoHide.shared
+    @AppStorage("autoHideRevealEdgeV20") private var autoHideRevealEdge = true
+    @AppStorage("oneBarLayoutV21") private var oneBarSetting = true
+    @AppStorage("sidebarTabsV21") private var sidebarSetting = false
     @Environment(\.joeToepTheme) private var theme
     // Leest de systeeminstelling "Beweging verminderen" (toegankelijkheid).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -33,10 +37,12 @@ struct TabPlayerView: View {
                 // Op de Mac staat de bedieningsbalk bovenaan (behalve tijdens
                 // een echte video-fullscreen/"video stage").
                 #if os(macOS)
-                if !session.isVideoStage {
+                if !session.isVideoStage && !chrome.buttonsHidden && !LayoutPrefs.buttonsElsewhere(oneBar: oneBarSetting, sidebar: sidebarSetting) {
                 PlayerControlBar(session: session, settings: settings, availableWidth: geometry.size.width, actions: actions) {
                     showingSettings = true
                 }
+                .onHover { chrome.setHovering($0) }
+                .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 #endif
                 // ZStack stapelt views bovenop elkaar (in plaats van naast of
@@ -85,15 +91,26 @@ struct TabPlayerView: View {
                 .clipped()
                 // Op iPhone/iPad staat de bedieningsbalk juist ONDERaan.
                 #if os(iOS)
-                if !session.isVideoStage {
+                if !session.isVideoStage && !chrome.buttonsHidden && !LayoutPrefs.buttonsElsewhere(oneBar: oneBarSetting, sidebar: sidebarSetting) {
                 PlayerControlBar(session: session, settings: settings, availableWidth: geometry.size.width, actions: actions) {
                     showingSettings = true
                 }
+                .simultaneousGesture(TapGesture().onEnded { chrome.reveal() })
+                .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 #endif
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
+            #if os(iOS)
+            .overlay(alignment: .bottom) {
+                if chrome.buttonsHidden && autoHideRevealEdge && !session.isVideoStage { AutoHideRevealZone(height: 18) }
+            }
+            #else
+            .overlay(alignment: .top) {
+                if chrome.buttonsHidden && chrome.parts == .buttons && autoHideRevealEdge && !session.isVideoStage { AutoHideRevealZone(height: 8) }
+            }
+            #endif
             // .overlay(alignment: .top) legt extra inhoud bovenop, hier
             // uitgelijnd aan de bovenkant: een tijdelijke meldingsbanner.
             .overlay(alignment: .top) {
@@ -158,8 +175,12 @@ struct TabPlayerView: View {
                 .frame(minWidth: 500, minHeight: 650)
                 #endif
             } else {
-                SettingsView(settings: settings, session: session)
+                SettingsView(settings: settings, session: session, onClose: { showingSettings = false })
                     .environment(\.joeToepTheme, theme)
+                    #if os(macOS)
+                    // V20: klik buiten het instellingenvenster = sluiten.
+                    .background(ClickOutsideCloser { showingSettings = false })
+                    #endif
                     .joeToepTextScale(theme.textScale)   // V16.2.1: settings follow the text size
                     .preferredColorScheme(theme.style.colorScheme)
                     .tint(theme.accent)
@@ -172,7 +193,7 @@ struct TabPlayerView: View {
         // systeem om gebeurtenissen door de hele app te versturen). Hier:
         // reageer op het bericht "open instellingen" als dit tabblad actief is.
         .onReceive(NotificationCenter.default.publisher(for: .joeToepOpenSettings)) { note in
-            if selected, (note.object as AnyObject?) === session { showingSettings = true }
+            if selected, (note.object as AnyObject?) === session { showingSettings = true; chrome.reveal() }
         }
         // De volgende blokken luisteren naar systeemgebeurtenissen: app naar
         // de achtergrond/voorgrond, scherm vergrendeld/ontgrendeld, gedraaid,
@@ -213,3 +234,32 @@ struct TabPlayerView: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// V20 — Sluit een sheet zodra je buiten het sheet-venster klikt (in het venster eronder).
+struct ClickOutsideCloser: NSViewRepresentable {
+    let onClose: () -> Void
+    func makeNSView(context: Context) -> NSView { Tracker(onClose: onClose) }
+    func updateNSView(_ view: NSView, context: Context) { (view as? Tracker)?.onClose = onClose }
+    final class Tracker: NSView {
+        var onClose: () -> Void
+        private var monitor: Any?
+        init(onClose: @escaping () -> Void) { self.onClose = onClose; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { return nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+                guard let self, let sheet = self.window else { return event }
+                if let clicked = event.window, clicked !== sheet, clicked.attachedSheet === sheet || sheet.sheetParent === clicked {
+                    DispatchQueue.main.async { self.onClose() }
+                    return nil
+                }
+                return event
+            }
+        }
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+    }
+}
+#endif

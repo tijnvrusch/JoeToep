@@ -18,6 +18,11 @@ struct TabBarView: View {
     // Binding: "editing" (zit de adresbalk in bewerkmodus?) wordt eigenlijk
     // bijgehouden door de aanroeper; deze view mag hem wel aanpassen.
     @Binding var editing: Bool
+    /// V21: Safari-achtige ene balk — knoppen links en rechts van de tabs (Mac/iPad).
+    var leading: AnyView? = nil
+    var trailing: AnyView? = nil
+    /// V21: ruimte links voor de venster-knopjes (rood/geel/groen) als de balk helemaal bovenin staat.
+    var leadingInset: CGFloat = 0
     @State private var address = ""
     @FocusState private var addressFocused: Bool
     @Environment(\.joeToepTheme) private var theme
@@ -42,12 +47,12 @@ struct TabBarView: View {
     var body: some View {
         // HStack zet de onderdelen (tabstrip/adresbalk en de +-knoppen) naast elkaar.
         HStack(spacing: 4) {
+            if leadingInset > 0 { WindowDragArea().frame(width: leadingInset, height: theme.tabHeight + 4) }
+            if let leading { leading.fixedSize() }
             // ZStack laat ons wisselen tussen twee views (adresbalk of
             // tabstrip) die elkaar overlappen tijdens de animatie.
             ZStack {
                 if editing {
-                    // .transition bepaalt hoe deze view verschijnt/verdwijnt:
-                    // hier een combinatie van inzoomen en vervagen.
                     addressField
                         .transition(.asymmetric(insertion: .scale(scale: 0.96, anchor: .leading).combined(with: .opacity), removal: .opacity))
                 } else {
@@ -55,27 +60,9 @@ struct TabBarView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            if !editing && settings.showNewTabButton {
-                // V19.2: de +-knop staat nu direct achter de laatste tab (zie `strip`).
-                #if os(macOS)
-                Button { openWindow(id: "main") } label: {
-                    Image(systemName: "macwindow.badge.plus").themedIcon(theme, size: 14 * theme.density.scale)
-                        .frame(width: 34, height: theme.tabHeight + 4).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).accessibilityLabel("New window").accessibilityIdentifier("windows.new")
-                #else
-                // Op iPad tonen we ook een knop om een extra apart venster te
-                // openen; op iPhone kan dat niet, dus daar laten we hem weg.
-                if UIDevice.current.userInterfaceIdiom == .pad {
-                    Button { openWindow(id: "main") } label: {
-                        Image(systemName: "rectangle.badge.plus").themedIcon(theme, size: 14 * theme.density.scale)
-                            .frame(width: 34, height: theme.tabHeight + 4).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).accessibilityLabel("New window")
-                }
-                #endif
-            }
+            if let trailing { trailing.fixedSize() }
         }
+        .frame(height: theme.tabHeight + 8)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background {
@@ -101,7 +88,7 @@ struct TabBarView: View {
             let count = CGFloat(max(workspace.tabs.count, 1))
             let spacing: CGFloat = 4
             // V19.2: ruimte voor de +-knop direct achter de tabs.
-            let plusWidth: CGFloat = settings.showNewTabButton ? 36 + spacing : 0
+            let plusWidth: CGFloat = settings.showNewTabButton ? (showsWindowButton ? 64 : 32) + spacing : 0
             let room = geometry.size.width - plusWidth
             let natural = (room - spacing * (count - 1)) / count
             // Maar nooit smaller dan het minimum; anders scrollen we liever.
@@ -135,13 +122,24 @@ struct TabBarView: View {
                                 .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .leading).combined(with: .opacity),
                                                         removal: .scale(scale: 0.6).combined(with: .opacity)))
                         }
-                        if settings.showNewTabButton { newTabButton }
+                        // V21: + en "nieuw venster" vlak tegen de laatste tab aan (minimale ruimte).
+                        if settings.showNewTabButton {
+                            HStack(spacing: 0) {
+                                newTabButton
+                                if showsWindowButton { newWindowButton }
+                            }
+                            .padding(.leading, -spacing + 1)
+                        }
                         // V19.2: sleep je een tab voorbij de laatste (op + of de lege ruimte), dan komt hij achteraan.
                         Color.clear.frame(maxWidth: .infinity, minHeight: theme.tabHeight)
                             .contentShape(Rectangle())
-                            // V19.3 (Mac): dubbelklik op de lege balk bovenin = venster maximaliseren
+                            // V19.3/V21 (Mac): lege balk = venster verslepen; dubbelklik = maximaliseren
                             // (volgt je macOS-instelling: zoomen/vullen of minimaliseren).
+                            #if os(macOS)
+                            .overlay(WindowDragArea())
+                            #else
                             .onTapGesture(count: 2) { WindowZoom.titleBarDoubleClick() }
+                            #endif
                             .dropDestination(for: String.self) { items, _ in
                                 guard let raw = items.first, let id = UUID(uuidString: raw) else { return false }
                                 return workspace.moveTabToEnd(id: id)
@@ -167,11 +165,28 @@ struct TabBarView: View {
         .frame(height: theme.tabHeight + 4)
     }
 
+    /// V21: "nieuw venster" direct naast de + (Mac en iPad; iPhone heeft geen losse vensters).
+    private var showsWindowButton: Bool {
+        #if os(macOS)
+        true
+        #else
+        UIDevice.current.userInterfaceIdiom == .pad
+        #endif
+    }
+    private var newWindowButton: some View {
+        Button { openWindow(id: "main") } label: {
+            Image(systemName: "macwindow.badge.plus").themedIcon(theme, size: 13 * theme.density.scale)
+                .frame(width: 32, height: theme.tabHeight + 4).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityLabel("New window").accessibilityIdentifier("windows.new")
+        .help("New window (⌘N)")
+    }
+
     /// V19.2: de +-knop, direct achter de laatste tab. Ook een plek om een tab achteraan neer te zetten.
     private var newTabButton: some View {
-        Button(action: workspace.addTab) {
+        Button(action: workspace.requestNewTab) {
             Image(systemName: "plus").themedIcon(theme, size: 15 * theme.density.scale)
-                .frame(width: 36, height: theme.tabHeight + 4).contentShape(Rectangle())
+                .frame(width: 32, height: theme.tabHeight + 4).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -235,7 +250,9 @@ struct TabBarView: View {
     // Bepaalt wat een tik op een tabblad doet: is het al geselecteerd, ga dan
     // naar bewerkmodus (adresbalk); is het nog niet geselecteerd, selecteer het gewoon.
     private func tapped(_ tab: BrowserTab) {
-        if workspace.selectedID == tab.id { editing = true } else { workspace.select(tab) }
+        if workspace.selectedID == tab.id {
+            if CommandBarPrefs.overlayForAddress { workspace.requestEditAddress() } else { editing = true }
+        } else { workspace.select(tab) }
     }
 
     // @ViewBuilder vertelt Swift dat deze functie meerdere views achter
@@ -249,6 +266,13 @@ struct TabBarView: View {
         Button { workspace.select(tab); editing = true } label: { Label("Edit Address…", systemImage: "character.cursor.ibeam") }
         Button { tab.session.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
         Button { workspace.duplicate(tab) } label: { Label("Duplicate Tab", systemImage: "plus.square.on.square") }
+        if !workspace.otherDevices.isEmpty {
+            Menu("Continue on…") {
+                ForEach(workspace.otherDevices, id: \.id) { d in
+                    Button(d.name) { workspace.continuePlayback(of: tab, on: d.id) }
+                }
+            }
+        }
         if let url = tab.currentURL {
             Button { Clipboard.copy(url) } label: { Label("Copy Link", systemImage: "link") }
             ShareLink(item: url) { Label("Share…", systemImage: "square.and.arrow.up") }
@@ -369,6 +393,9 @@ struct TabChip: View {
         let shape = RoundedRectangle(cornerRadius: theme.tabCornerRadius, style: .continuous)
         if theme.tabShape == .underline {
             shape.fill(hovering ? theme.style.hover : .clear)
+        } else if selected && GlassPrefs.enabled && !tab.isPrivate {
+            // V21: Liquid Glass voor de actieve tab (strak, minimaal).
+            Color.clear.joeToepGlass(in: shape)
         } else if selected {
             shape.fill(tab.isPrivate ? Color.purple.opacity(0.35) : theme.style.surface)
                 .overlay(shape.stroke(theme.accent.opacity(theme.rendering == .monochrome ? 0 : 0.5), lineWidth: 1))
@@ -405,4 +432,29 @@ enum WindowZoom {
         }
         #endif
     }
+}
+
+
+/// V21 — Lege plek in de balk: slepen verplaatst het venster, dubbelklik maximaliseert (Mac).
+struct WindowDragArea: View {
+    var body: some View {
+        #if os(macOS)
+        DragRepresentable()
+        #else
+        Color.clear
+        #endif
+    }
+    #if os(macOS)
+    private struct DragRepresentable: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView { DragView() }
+        func updateNSView(_ nsView: NSView, context: Context) {}
+    }
+    private final class DragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 { WindowZoom.titleBarDoubleClick(); return }
+            window?.performDrag(with: event)
+        }
+    }
+    #endif
 }

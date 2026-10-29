@@ -43,7 +43,10 @@ final class GestureScrubber {
 
         let device: Device = (event.phase.isEmpty && event.momentumPhase.isEmpty) ? .mouse : .trackpad
         // Uitloop (momentum) na het loslaten van het trackpad negeren: anders "schiet" het door.
-        if device == .trackpad && !event.momentumPhase.isEmpty && flag("ignoreMomentumV191", true) { return true }
+        // V21: inline alleen de uitloop van een SCRUB-gebaar inslikken; verticale uitloop = gewoon scrollen.
+        if device == .trackpad && !event.momentumPhase.isEmpty && flag("ignoreMomentumV191", true) {
+            return fullscreen || axis == .horizontal
+        }
         if event.phase == .began || event.timestamp - lastEventTime > 0.25 { reset() }
         lastEventTime = event.timestamp
         lastDevice = device
@@ -60,7 +63,9 @@ final class GestureScrubber {
         if axis == .none {
             lockDistanceX += abs(dx); lockDistanceY += abs(dy)
             let lock = double("axisLockPointsV191", 6)
-            if max(lockDistanceX, lockDistanceY) < lock && device == .trackpad { return fullscreen }
+            // V21: inline ook al tijdens het "beslissen" horizontale bewegingen inslikken, anders
+            // begint WebKit's elastische overscroll en schuift de pagina mee.
+            if max(lockDistanceX, lockDistanceY) < lock && device == .trackpad { return fullscreen || lockDistanceX >= lockDistanceY }
             let ratio = double("axisRatioV191", 1.3)
             axis = lockDistanceX >= lockDistanceY * ratio ? .horizontal : (lockDistanceY >= lockDistanceX * ratio ? .vertical : (lockDistanceX >= lockDistanceY ? .horizontal : .vertical))
         }

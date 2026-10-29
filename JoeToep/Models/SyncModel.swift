@@ -79,6 +79,8 @@ struct SyncCommand: Codable, Equatable, Sendable {
         case handoffRequest
         /// Antwoord: de exacte tijd (value) waarop de video bij de afzender stopte.
         case handoffTime
+        /// V21: "speel dit verder bij jou" — url + exacte tijd (value); de afzender pauzeert.
+        case continueThere
     }
     var kind: Kind
     var target: String            // apparaat-id dat de opdracht moet uitvoeren
@@ -97,6 +99,10 @@ enum SyncMessage: Codable, Equatable, Sendable {
     case downloads(DownloadListing)
     /// Bevestiging: "ik zit op versie X met N tabs" (voor de ✓ in Instellingen).
     case ack(deviceID: String, name: String, version: UInt64, tabs: Int)
+    /// V20: wat er in Spotify speelt op het apparaat van de afzender.
+    case spotify(deviceID: String, state: SpotifyState)
+    /// V20: bedien Spotify op apparaat `target` (actie + optionele waarde / Spotify-URI).
+    case spotifyCommand(target: String, action: SpotifyAction, value: Double?, uri: String?)
 
     func encoded() -> Data? { try? JSONEncoder().encode(self) }
     static func decode(_ data: Data) -> SyncMessage? { try? JSONDecoder().decode(SyncMessage.self, from: data) }

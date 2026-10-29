@@ -76,6 +76,10 @@ enum AccentChoice: String, CaseIterable, Identifiable, Sendable {
 
 enum IconVariant: String, CaseIterable, Identifiable, Sendable {
     case outline, filled, circle, circleFilled, square, squareFilled
+    // V20: meer outline-varianten
+    case outlineHairline, outlineLight, outlineBold, outlineRounded, outlineSquared, outlineSoft, outlineDuotone
+    // V20: clean & minimalistisch
+    case minimal, minimalDot, minimalMuted, minimalCapsule, minimalGlyph, minimalUnderline
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -85,18 +89,69 @@ enum IconVariant: String, CaseIterable, Identifiable, Sendable {
         case .circleFilled: "Circle filled"
         case .square: "Square"
         case .squareFilled: "Square filled"
+        case .outlineHairline: "Outline · hairline"
+        case .outlineLight: "Outline · light"
+        case .outlineBold: "Outline · bold"
+        case .outlineRounded: "Outline · in a thin circle"
+        case .outlineSquared: "Outline · in a thin square"
+        case .outlineSoft: "Outline · soft (rounded, lighter)"
+        case .outlineDuotone: "Outline · duotone"
+        case .minimal: "Minimal"
+        case .minimalDot: "Minimal · dot when active"
+        case .minimalMuted: "Minimal · muted grey"
+        case .minimalCapsule: "Minimal · soft capsule"
+        case .minimalGlyph: "Minimal · large thin glyph"
+        case .minimalUnderline: "Minimal · underline when active"
+        }
+    }
+    /// Groep in de kiezer.
+    var group: String {
+        switch self {
+        case .outline, .filled, .circle, .circleFilled, .square, .squareFilled: "Classic"
+        case .outlineHairline, .outlineLight, .outlineBold, .outlineRounded, .outlineSquared, .outlineSoft, .outlineDuotone: "Outline"
+        default: "Clean & minimal"
         }
     }
     var variants: SymbolVariants {
         switch self {
-        case .outline: .none
+        case .outline, .outlineHairline, .outlineLight, .outlineBold, .outlineSoft, .outlineDuotone,
+             .minimal, .minimalDot, .minimalMuted, .minimalCapsule, .minimalGlyph, .minimalUnderline: .none
         case .filled: .fill
-        case .circle: .circle
+        case .circle, .outlineRounded: .circle
         case .circleFilled: .circle.fill
-        case .square: .square
+        case .square, .outlineSquared: .square
         case .squareFilled: .square.fill
         }
     }
+    /// Actieve knoppen: gevuld, behalve bij de minimalistische stijlen (die markeren anders).
+    var activeVariants: SymbolVariants {
+        switch self {
+        case .minimalDot, .minimalUnderline, .minimalCapsule, .minimalMuted: variants
+        default: variants.fill
+        }
+    }
+    /// Vaste lijndikte (anders de gekozen "Weight").
+    var forcedWeight: Font.Weight? {
+        switch self {
+        case .outlineHairline: .ultraLight
+        case .outlineLight, .outlineRounded, .outlineSquared, .outlineSoft: .light
+        case .outlineBold: .semibold
+        case .minimal, .minimalDot, .minimalMuted, .minimalCapsule, .minimalUnderline: .light
+        case .minimalGlyph: .thin
+        default: nil
+        }
+    }
+    var sizeFactor: CGFloat {
+        switch self {
+        case .minimal, .minimalDot, .minimalMuted, .minimalUnderline: 0.88
+        case .minimalCapsule: 0.8
+        case .minimalGlyph: 1.12
+        case .outlineSoft: 0.94
+        default: 1
+        }
+    }
+    var fontDesign: Font.Design { self == .outlineSoft || group == "Clean & minimal" ? .rounded : .default }
+    var inactiveOpacity: Double { self == .minimalMuted ? 0.55 : (self == .outlineSoft ? 0.8 : 1) }
 }
 
 enum IconWeightChoice: String, CaseIterable, Identifiable, Sendable {
