@@ -89,6 +89,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             | tee test.log | grep -E "error:|Test Case .* failed|Executed [0-9]+ test|TEST (SUCCEEDED|FAILED)" || true
           grep -q "TEST SUCCEEDED" test.log
+      - name: Fouten als annotaties (leesbaar via de API, ook vanuit de cloudsessie)
+        if: failure()
+        run: |
+          cat build.log test.log 2>/dev/null | grep -E ": error: |error: -|Test Case .* failed|XCTAssert" | sed "s#$GITHUB_WORKSPACE/##" | sort -u > errors.txt || true
+          i=0
+          while IFS= read -r line; do
+            i=$((i+1)); msg=$(echo "$line" | tr -d '\r' | cut -c1-900)
+            if [ $i -le 10 ]; then echo "::error::$msg"; elif [ $i -le 20 ]; then echo "::warning::$msg"; elif [ $i -le 30 ]; then echo "::notice::$msg"; fi
+          done < errors.txt
+          echo "totaal $(wc -l < errors.txt) foutregels"
       - name: Foutmeldingen samenvatten
         if: failure()
         run: |
