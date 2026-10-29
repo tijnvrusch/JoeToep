@@ -212,7 +212,8 @@ final class BrowserWorkspace: ObservableObject {
                 TabSyncService.shared.send(SyncCommand(kind: .handoffTime, target: from, url: url, value: time,
                                                        from: TabSyncService.shared.deviceID))
             }
-            if tab.session.isInPictureInPicture { tab.session.stopPiPAndPause() }
+            // V22.1: ook als PiP net (automatisch) aanging bij het wisselen: altijd sluiten, geen placeholder laten staan.
+            tab.session.stopPiPAndPause()
         case .handoffTime:
             // Antwoord: spring naar precies waar het andere apparaat stopte.
             guard let time = command.value,

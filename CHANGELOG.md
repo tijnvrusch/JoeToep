@@ -1,3 +1,17 @@
+# 22.1.0 (31)
+
+## iPhone: pagina van rand tot rand (echt opgelost)
+- Oorzaak gevonden met een meting op je iPhone zelf: de iPhone laadde de *desktop*-versie van YouTube. De kolom onder de video had daarin een minimale breedte van 443 px, breder dan je scherm van 390 px, en viel links en rechts ±18 px weg.
+- In smalle vensters (< 760 px) krimpt die kolom nu tot de schermbreedte. De desktop-startpagina past weer precies op het scherm en staat altijd op "passend".
+
+## Verder
+- Tab-icoon: starten via het icoon wisselt nu ook echt naar die tab en gaat niet ineens fullscreen (instelbaar).
+- Bij overnemen door een ander apparaat sluit de Mac altijd zijn PiP; er blijft geen "Playing in picture in picture"-placeholder meer staan.
+- Getest via het live iPhone-scherm op de Mac:
+  - PiP ✕ stopt de video, zonder fullscreen terug;
+  - iPhone → Mac: de video speelt direct verder;
+  - Mac → iPhone: de iPhone neemt over.
+
 # 22.0.0 (30)
 
 ## Sync Mac ⇄ iPhone (topprioriteit)

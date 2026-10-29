@@ -295,6 +295,7 @@ struct TabBarView: View {
     private func tapped(_ tab: BrowserTab) {
         // V22: een klik op het geluid-icoontje is geen klik op de tab zelf.
         // (Eén beurt later beslissen: de knop en de tab-klik komen in willekeurige volgorde binnen.)
+        if TabAudioIcon.selecting { workspace.select(tab); return }
         let wasSelected = workspace.selectedID == tab.id
         DispatchQueue.main.async {
             if Date().timeIntervalSince(TabAudioIcon.lastAction) < 0.4 { return }

@@ -542,8 +542,6 @@ private struct PlaybackSettings: View {
                 SettingToggle("Show new tab page (search & shortcuts)", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: "newTabPageV192") as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: "newTabPageV192") }))
-                SettingToggle("Leave fullscreen when paused", isOn: $settings.exitFullscreenOnPause)
-                    .accessibilityIdentifier("settings.exitFullscreenOnPause")
                 SettingPicker("Pull down action", selection: Binding(
                     get: { UserDefaults.standard.string(forKey: "pullActionV192") ?? "fullscreen" },
                     set: { UserDefaults.standard.set($0, forKey: "pullActionV192") })) {
@@ -575,6 +573,7 @@ private struct PlaybackSettings: View {
                 SettingToggle("Fullscreen when you press play", isOn: $settings.fullscreenOnPlay)
                     .accessibilityIdentifier("settings.fullscreenOnPlay")
                 SettingToggle("Leave fullscreen when paused", isOn: $settings.exitFullscreenOnPause)
+                    .accessibilityIdentifier("settings.exitFullscreenOnPause")
                 detail("Click a video and it starts in fullscreen; press play on a paused video and it goes fullscreen again. Leaving fullscreen on pause is off by default.")
                 SettingToggle("Keep the screen on while a video plays", isOn: $settings.keepScreenAwake)
                 SettingToggle("Turn off video captions", isOn: $settings.disableCaptions)

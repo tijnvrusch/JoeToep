@@ -16,8 +16,38 @@
   try {
     const noBounce = document.createElement('style');
     noBounce.id = 'joetoep-no-hbounce';
-    noBounce.textContent = (/Mobile|iPhone|iPad/.test(navigator.userAgent) ? 'html,body{overflow-x:hidden!important;max-width:100%!important}' : '') + 'html,body{overscroll-behavior-x:none!important}#movie_player,.html5-video-player,video{touch-action:pan-y pinch-zoom}';
+    noBounce.textContent = (/iPhone/.test(navigator.userAgent) ? 'html,body{overflow-x:hidden!important;max-width:100vw!important;width:100%!important;margin:0!important}ytm-app,#app,ytm-mobile-topbar-renderer,ytm-pivot-bar-renderer{max-width:100vw!important;left:0!important}' : (/Mobile|iPad/.test(navigator.userAgent) ? 'html,body{overflow-x:hidden!important;max-width:100%!important}' : '')) + 'html,body{overscroll-behavior-x:none!important}#movie_player,.html5-video-player,video{touch-action:pan-y pinch-zoom}';
+    // V22.1: desktop-YouTube (ytd-…) in een smal venster (iPhone met "Desktop site", smalle iPad/Mac-
+    // vensters): de kolom onder de speler had een minimale breedte van ±443 px en viel links en rechts
+    // van het scherm af. In smalle vensters mag alles krimpen tot de schermbreedte.
+    noBounce.textContent += '@media (max-width: 760px){ytd-app,ytd-page-manager,ytd-watch-flexy,ytd-browse{min-width:0!important}' +
+      'ytd-watch-flexy{--ytd-watch-flexy-min-player-width:0px!important;--ytd-watch-flexy-sidebar-min-width:0px!important}' +
+      'ytd-watch-flexy #columns,ytd-watch-flexy #primary,ytd-watch-flexy #primary-inner,ytd-watch-flexy #below,ytd-watch-flexy #secondary,ytd-watch-metadata,ytd-watch-flexy #player-container-outer{min-width:0!important;max-width:100vw!important;box-sizing:border-box!important}' +
+      'ytd-watch-flexy #primary,ytd-watch-flexy #secondary{margin-left:0!important;margin-right:0!important;padding-left:12px!important;padding-right:12px!important;width:100%!important}' +
+      'ytd-watch-flexy #columns{display:block!important}}';
     (document.head || document.documentElement).appendChild(noBounce);
+    // V22.1 (iPhone): altijd een viewport van precies de schermbreedte.
+    if (/iPhone/.test(navigator.userAgent)) {
+      const fixViewport = () => {
+        let m = document.querySelector('meta[name=viewport]');
+        if (!m) { m = document.createElement('meta'); m.name = 'viewport'; (document.head || document.documentElement).appendChild(m); }
+        const want = 'width=device-width,initial-scale=1,viewport-fit=cover';
+        if (!/width=device-width/.test(m.content) || /minimum-scale=0|initial-scale=0/.test(m.content)) m.content = want;
+        if (document.scrollingElement && document.scrollingElement.scrollLeft) document.scrollingElement.scrollLeft = 0;
+      };
+      fixViewport();
+      document.addEventListener('DOMContentLoaded', fixViewport);
+      window.addEventListener('resize', fixViewport);
+      window.addEventListener('scroll', () => { if (window.scrollX) window.scrollTo(0, window.scrollY); }, {passive: true});
+      // Een binnen-container die per ongeluk een klein stukje horizontaal is verschoven (veeg/scrub)
+      // → terug naar links. Echte carrousels (chips, shelves) zijn veel breder en blijven werken.
+      const unshift = el => { if (el && el.nodeType === 1 && el.scrollLeft && el.scrollWidth - el.clientWidth < 90) el.scrollLeft = 0; };
+      document.addEventListener('scroll', e => unshift(e.target), {capture: true, passive: true});
+      const sweep = () => { try { document.querySelectorAll('ytm-app *, body > *').forEach(unshift); } catch (_) {} };
+      setTimeout(sweep, 800); setTimeout(sweep, 2500);
+      document.addEventListener('yt-navigate-finish', () => setTimeout(sweep, 500));
+      window.addEventListener('state-navigateend', () => setTimeout(sweep, 500));
+    }
   } catch (_) {}
   // Checkt of het element waarop getypt wordt een tekstveld is (input, textarea, etc.),
   // zodat onze sneltoetsen daar niet per ongeluk ingrijpen terwijl iemand aan het typen is.

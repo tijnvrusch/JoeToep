@@ -95,7 +95,8 @@
     // V22: twee aparte opties — "bij laden" (eerste start van een video) en "bij afspelen"
     // (weer op play drukken terwijl hij inline stond).
     const firstStart = startedKey !== key();
-    const allowed = firstStart ? config.automaticFullscreen : (config.fullscreenOnPlay && resumeRequested);
+    if (firstStart && Date.now() <= (window.__jtSkipFSUntil || 0) && v && !v.paused) startedKey = key();
+    const allowed = Date.now() > (window.__jtSkipFSUntil || 0) && (firstStart ? config.automaticFullscreen : (config.fullscreenOnPlay && resumeRequested));
     if (window.JoeToepMedia.diagnostics().rawVisibility !== "visible" || !allowed || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||
         lastFullscreenKey === key() || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
     // Only one attempt per video; exiting fullscreen never immediately reopens it.

@@ -21,15 +21,18 @@ enum TabAudioIcon {
 
     /// Wanneer het icoon het laatst gebruikt werd (zodat de tab-klik eronder niet óók reageert).
     static var lastAction = Date.distantPast
+    /// true terwijl het icoon zelf de tab kiest (die keuze mag niet worden tegengehouden).
+    static var selecting = false
+    private static func choose(_ select: () -> Void) { selecting = true; select(); selecting = false }
 
     static func perform(_ tab: BrowserTab, _ session: WebSession, select: () -> Void) {
         lastAction = Date()
-        if TabAudioIconPrefs.action == "switch" { select(); return }
+        if TabAudioIconPrefs.action == "switch" { choose(select); return }
         if session.isPlaying || session.isInPictureInPicture {
             session.remoteToggle()                       // pauzeren
             return
         }
-        if TabAudioIconPrefs.switchOnPlay { select() }
+        if TabAudioIconPrefs.switchOnPlay { choose(select) }
         session.releaseQuiet()
         if session.hasLoadedContent {
             if !TabAudioIconPrefs.fullscreenOnStart {
@@ -45,6 +48,7 @@ enum TabAudioIcon {
         } else {
             // Nog niet geladen (tab van een ander apparaat / na herstart): laden en meteen spelen.
             session.forcePlayOnStart = true
+            session.suppressAutoFullscreenOnce = !TabAudioIconPrefs.fullscreenOnStart
             session.syncedStartPaused = false
         }
     }

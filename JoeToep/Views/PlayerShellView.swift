@@ -267,3 +267,4 @@ struct ClickOutsideCloser: NSViewRepresentable {
     }
 }
 #endif
+

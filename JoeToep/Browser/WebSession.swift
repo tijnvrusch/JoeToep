@@ -223,12 +223,24 @@ final class WebSession: NSObject, ObservableObject {
         // bewust ingezoomd is, blijft hij altijd precies van rand tot rand staan.
         webView.scrollView.contentInset = .zero
         webView.scrollView.showsHorizontalScrollIndicator = false
-        horizontalLock = webView.scrollView.observe(\.contentOffset, options: [.new]) { scroll, _ in
+        // V22.1: ook als de pagina (per ongeluk) breder is dan het scherm of licht ingezoomd staat:
+        // zolang knijpen niet voor de pagina is ingesteld, staat hij altijd op 100 % en links op 0.
+        horizontalLock = webView.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scroll, _ in
             MainActor.assumeIsolated {
-                guard !scroll.isZooming, !scroll.isZoomBouncing, scroll.zoomScale <= scroll.minimumZoomScale + 0.01 else { return }
+                guard let self, self.settings.pinchMode != .page, !scroll.isZooming else { return }
                 if abs(scroll.contentOffset.x) > 0.5 { scroll.contentOffset.x = 0 }
             }
         }
+        zoomLock = webView.scrollView.observe(\.zoomScale, options: [.new]) { [weak self] scroll, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.settings.pinchMode != .page, !scroll.isZooming else { return }
+                // Altijd "passend op de breedte" (ook de desktopweergave, 980 px breed).
+                let fit = scroll.minimumZoomScale
+                if abs(scroll.zoomScale - fit) > 0.001 { scroll.setZoomScale(fit, animated: false) }
+                if abs(scroll.contentOffset.x) > 0.5 { scroll.contentOffset.x = 0 }
+            }
+        }
+        webView.scrollView.bouncesZoom = false
         // V19.1: trekken om te verversen (iPhone/iPad), instelbaar.
         // V19.2: "trekken" = fullscreen (standaard), verversen, of uit.
         if Self.pullAction != "off" {
@@ -1294,6 +1306,7 @@ final class WebSession: NSObject, ObservableObject {
     var syncedStartPaused = false
     #if os(iOS)
     private var horizontalLock: NSKeyValueObservation?
+    private var zoomLock: NSKeyValueObservation?
     #endif
     var hasLoadedContent: Bool { hasStarted }
     /// V22: tot dit moment mag deze tab niet zelf gaan spelen (hij werd net door sync bijgewerkt).
@@ -1408,6 +1421,8 @@ final class WebSession: NSObject, ObservableObject {
     }
     /// V21: deze tab moet bij het (eerste) laden meteen spelen (overname van een ander apparaat).
     var forcePlayOnStart = false
+    /// V22.1: gestart via het tab-icoon → deze keer niet automatisch fullscreen.
+    var suppressAutoFullscreenOnce = false
     /// V21: kleine correctie na de overdracht — alleen spoelen als het echt verschilt (geen hapering).
     func correctPosition(_ time: Double, tolerance: Double = 0.3) {
         guard time.isFinite, time >= 0 else { return }
@@ -2411,6 +2426,10 @@ extension WebSession: WKNavigationDelegate {
         isLoading = false; failedNavigationURL = nil; networkRetryCount = 0
         refreshNavigationState(); configureCompatibility()
         scheduleHistoryRecord(delay: 0.3)
+        if suppressAutoFullscreenOnce {
+            suppressAutoFullscreenOnce = false
+            webView.evaluateJavaScript("window.__jtSkipFSUntil=Date.now()+5000;0", completionHandler: nil)
+        }
         let quietLeft = syncQuietUntil.timeIntervalSinceNow
         if quietLeft > 0 { webView.evaluateJavaScript("window.JoeToepMedia?.quiet(\(Int(quietLeft * 1000)))", completionHandler: nil) }
         MediaExtras.shared.reapply(to: self)      // V21: boost / alleen audio / herhalen blijven aan

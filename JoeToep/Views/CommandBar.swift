@@ -85,6 +85,11 @@ struct CommandBarOverlay: View {
             panel
                 .padding(.top, topPadding)
                 .padding(.horizontal, 12)
+            // V22: Escape sluit altijd eerst de zoekbalk (ook als het tekstveld geen focus heeft) —
+            // anders verliet het venster fullscreen.
+            Button("") { if customizing { withAnimation(.snappy) { customizing = false } } else { close() } }
+                .keyboardShortcut(.cancelAction)
+                .opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
         }
         .onAppear {
             token = workspace.commandBarToken; workspace.commandBarToken = nil; selection = 0
