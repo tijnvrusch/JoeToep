@@ -61,7 +61,8 @@ JoeToep wordt in deze versie een volwaardige browser in de stijl van Arc en Dia,
 - **Nieuwe tests:** `JoeToepTests/LinuxV26Tests.swift` (pure logica, ook in Xcode), `JoeToepTests/V26FeatureTests.swift` (werkruimte: Spaces wisselen, sluiten, verwijderen, Split View, Peek, opslaan na herstart en een stresstest van 500 bewerkingen) en `Scripts/test_v26_arc_scripts.cjs` (15 jsdom-scenario's voor Boosts, Zap en de paginalezer). `npm test` draait nu álle JS-suites.
 - **Projectcontrole:** `Scripts/validate_project.py` controleerde nog op versie 23.0.0 en faalde daardoor al een tijd; de versie staat nu op één plek en wordt overal vergeleken (alle targets, AppConstants, CHANGELOG). Nieuwe poort `check_v26`: pure modellen alleen Foundation, scripts in de afgeschermde wereld, geen `innerHTML`/timers/netwerk in de nieuwe scripts, uitleg bij elke nieuwe instelling, en hooguit 10 menu's per niveau in de menubalk (anders bouwt het menu niet).
 - Het lege `Views/DebugHUD.swift` is weg. De V25-versietest eist nu "≥ 25" in plaats van precies "25.x".
-- **Nog op de toestellen te testen:** bouwen voor macOS en iOS in Xcode, en de lijst in `Docs/HANDOFF-V27.md` (Spaces, Split View, Peek, Boosts, assistent; plus de openstaande punten van V25: iPhone-rotatie, BenQ/HP-fullscreen, Live Activity-knoppen, Watch, UI-tests).
+- **GitHub Actions:** elke push bouwt de app nu met de nieuwste Xcode voor macOS en de iOS Simulator, draait daarna `JoeToepTests` op beide, plus alle JS-suites, de projectcontrole en de Swift-tests op Linux. Compilerfouten verschijnen als annotaties (ook leesbaar vanuit een cloudsessie). V26 is op beide platforms groen.
+- **Nog op de toestellen te testen:** de lijst in `Docs/HANDOFF-V27.md` (Spaces, Split View, Peek, Boosts, assistent; plus de openstaande punten van V25: iPhone-rotatie, BenQ/HP-fullscreen, Live Activity-knoppen, Watch, UI-tests).
 
 # 25.1.0 (38)
 
