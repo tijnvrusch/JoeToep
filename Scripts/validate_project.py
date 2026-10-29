@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 # V26: de huidige versie staat op één plek. Ophogen = deze twee waarden, project.pbxproj (alle targets),
 # JoeToep/Support/AppConstants.swift en een nieuw bovenste kopje in CHANGELOG.md.
-EXPECTED_VERSION = "26.0.0"
-EXPECTED_BUILD = 39
+EXPECTED_VERSION = "26.1.0"
+EXPECTED_BUILD = 40
 
 
 def require(condition: bool, message: str) -> None:

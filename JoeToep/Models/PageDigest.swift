@@ -45,6 +45,12 @@ enum PageDigest {
         "kan", "kunnen", "zal", "zou", "moet", "mag", "wat", "wie", "waar", "wanneer", "waarom", "hoe", "meer", "veel", "zo",
     ]
 
+    /// V26.1: webwoorden en maandafkortingen die nooit een onderwerp zijn (alleen voor `keywords`).
+    static let topicNoise: Set<String> = [
+        "http", "https", "www", "com", "html", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
+        "oct", "okt", "nov", "dec", "mrt", "mei",
+    ]
+
     /// Woorden (kleine letters, zonder leestekens, minstens 2 tekens).
     static func words(in text: String) -> [String] {
         text.lowercased()
@@ -81,7 +87,11 @@ enum PageDigest {
     /// De belangrijkste woorden van de pagina (geen stopwoorden of getallen), zwaarste eerst.
     static func keywords(in text: String, limit: Int = 12) -> [String] {
         var counts: [String: Int] = [:]
-        for word in words(in: text) where !stopWords.contains(word) && word.count >= 3 && !word.allSatisfy(\.isNumber) {
+        // V26.1: links en datumstukjes zijn geen onderwerpen (YouTube-beschrijvingen gaven "https", "com", "oct", "18th").
+        let withoutLinks = text.replacingOccurrences(of: #"(https?://|www\.)\S+|\S+\.(com|nl|net|org|be|io|tv|ly)\b\S*"#,
+                                                     with: " ", options: [.regularExpression, .caseInsensitive])
+        for word in words(in: withoutLinks) where !stopWords.contains(word) && !topicNoise.contains(word) && word.count >= 3
+            && !(word.first?.isNumber ?? false) {
             counts[word, default: 0] += 1
         }
         return counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(limit).map(\.key)

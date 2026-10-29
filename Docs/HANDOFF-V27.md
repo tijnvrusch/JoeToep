@@ -35,3 +35,29 @@
 - Assistent: vragen over meerdere tabs tegelijk (Dia "@tab").
 
 ## Vaste afspraken: zie HANDOFF-V23.md (ongewijzigd).
+
+---
+
+# Aanvulling na 26.1.0 (40) — eerste test op de Mac
+
+## Stand
+- `main` en `versie/v26.1` = 26.1.0 (40). Gebouwd met Xcode 27.0 beta (27A5218g) via `xcodebuild` (geen Xcode-UI nodig): Mac en eiFoon. Mac-`JoeToepTests`: 169 groen (+1 nieuwe test).
+- iPad stond op "unavailable" in `devicectl` → niet gebouwd. iPhone Mirroring werkt niet in Tijns regio, dus de eiFoon kan Claude niet bedienen: iPhone/iPad/Watch-tests doet Tijn zelf (lijst hieronder).
+- Opgelost: onderwerpen in de pagina-assistent (`PageDigest.keywords`, zie CHANGELOG).
+
+## Open punt: video speelt vanzelf na herstart (Mac)
+Twee keer na elkaar: afsluiten → starten → de laatst gekozen YouTube-tab (linkerpaneel van een Split View) speelt en gaat fullscreen op de HP-monitor. Bij de eerste keer stond de video bij het afsluiten op pauze. Verdachte paden: sync-overname (`WebSession` "takeover: …", `forcePlayOnStart`) als de eiFoon dezelfde video speelde, of het herstel van Split View/Space. Eerst testen met de eiFoon-app dicht en wifi/bluetooth uit; speelt hij dan nog, dan is het een regressie van de 22.2-fix ("geen vanzelf spelende video's").
+
+## Afvinklijst voor Tijn (eiFoon, iPad, Watch)
+- [ ] eiFoon: JoeToep 26.1 opent, tabs en Spaces kloppen met de Mac (sync).
+- [ ] eiFoon: Space wisselen via de Space-knop in de tabbalk; tab naar een andere Space.
+- [ ] eiFoon: linkmenu › "Open in Peek"; sluiten; video in Peek pauzeert de andere tab.
+- [ ] eiFoon: m.youtube.com deelt de Boost van de Mac (reacties verbergen).
+- [ ] eiFoon: pagina-assistent als blad; onderwerpen zonder "https/com".
+- [ ] eiFoon: fullscreen → automatisch draaien (rotatievergrendeling aan en uit), omlaag vegen = inline.
+- [ ] eiFoon: PiP aan/uit, terugknop → fullscreen, pauze in PiP.
+- [ ] eiFoon: play/pauze precies één keer; "Continue on" van/naar de Mac.
+- [ ] eiFoon: widgets en de knoppen van de Live Activity.
+- [ ] Watch: bediening play/pauze en de huidige titel.
+- [ ] iPad (aansluiten en ontgrendelen, dan bouwen): Split View, lijn slepen, fullscreen in een paneel en terug.
+- [ ] Mac, open punt hierboven: herstart met de eiFoon-app dicht.

@@ -1,3 +1,22 @@
+# 26.1.0 (40)
+
+Eerste test van V26 op echte apparaten (Mac). Gebouwd en geïnstalleerd op de Mac en de eiFoon; `JoeToepTests` op de Mac: 169 geslaagd, 0 mislukt.
+
+## Opgelost: pagina-assistent toonde "https", "com" en "oct" als onderwerpen
+- **Wat merkte je**: bij een YouTube-video stonden onder "Topics" woorden als `https`, `com`, `oct` en `18th` in plaats van echte onderwerpen.
+- **Oorzaak**: `PageDigest.keywords` telde ook de woorden uit links in de videobeschrijving mee, plus maandafkortingen en datums zoals "18th".
+- **Oplossing**: links (`https://…`, `www.…`, `iets.com/…`) gaan eruit vóór het tellen; webwoorden en maandafkortingen worden overgeslagen, net als woorden die met een cijfer beginnen. Nieuwe test `testKeywordsSkipLinksAndDates`.
+
+## Getest op de Mac (OK)
+- Spaces: nieuwe Space maken (opent met een Home-tab), heen en terug wisselen.
+- Split View: openen via het menu; een opgeschorte tab is een paar seconden wit tot hij geladen is, daarna staan beide panelen goed.
+- Boosts: reacties en aanbevelingen verbergen en weer tonen werkt direct, in beide panelen.
+- Pagina-assistent: samenvatten met Apple Intelligence werkt.
+
+## Nog open (zie Docs/HANDOFF-V27.md › 26.1)
+- Na een herstart begon de laatste video twee keer vanzelf te spelen, fullscreen op de HP-monitor. Mogelijk een overname door de sync (speelde de eiFoon dezelfde video?), anders een regressie van de 22.2-fix.
+- iPhone, iPad, Watch, widgets en Live Activity zijn nog niet getest (iPhone Mirroring is in deze regio niet beschikbaar).
+
 # 26.0.0 (39)
 
 JoeToep wordt in deze versie een volwaardige browser in de stijl van Arc en Dia, met alles van de eerdere versies erbij. Alle nieuwe functies zijn uit te zetten en in te stellen onder **Instellingen › Spaces, Split View & Boosts**.

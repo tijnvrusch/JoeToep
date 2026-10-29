@@ -344,6 +344,20 @@ final class LinuxV26Tests: XCTestCase {
         XCTAssertEqual(PageDigest.keyPoints(of: article, count: 4).count, 4)
     }
 
+    // V26.1: links en datums in een YouTube-beschrijving zijn geen onderwerpen.
+    func testKeywordsSkipLinksAndDates() {
+        let text = """
+        Remix live show Oct 18th at the theatre! Tickets https://www.example.com/tickets?id=3 and spotify.com/remix.
+        Follow on https://linktr.ee/remix — remix remix theatre synthesizer. Next show oct 25th, www.shows.nl/remix
+        """
+        let keywords = PageDigest.keywords(in: text)
+        XCTAssertEqual(keywords.first, "remix")
+        XCTAssertTrue(keywords.contains("theatre"))
+        for noise in ["https", "www", "com", "oct", "18th", "25th", "linktr", "example", "spotify"] {
+            XCTAssertFalse(keywords.contains(noise), noise)
+        }
+    }
+
     func testAnswerFindsTheRelevantSentence() {
         let permit = PageDigest.answer("Do I need a permit?", from: article, count: 1)
         XCTAssertEqual(permit.count, 1)
