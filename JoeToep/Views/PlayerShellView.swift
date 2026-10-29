@@ -69,6 +69,7 @@ struct TabPlayerView: View {
                     // V19.2: nieuwe-tab-pagina (meteen typen, platform kiezen, snelkoppelingen).
                     if session.showsNewTabPage && !session.isTestMode {
                         NewTabPage(session: session, settings: settings)
+                            .environment(\.tabIsVisible, selected)   // V22.2: verborgen tab → geen Spotify/media-timers
                             .transition(.opacity)
                     }
                     // Als de video losgekoppeld in een zwevend mini-venster

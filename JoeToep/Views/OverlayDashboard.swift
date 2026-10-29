@@ -296,7 +296,14 @@ struct OverlayDashboard: View {
             control(s.isPlaying ? "pause.fill" : "play.fill", big: true) { s.remoteToggle() }
             control("goforward.10") { s.remoteSeek(by: 10) }
             control("pip") { s.togglePictureInPicture(); close() }
-            if !workspace.otherDevices.isEmpty {
+            // V22.3: één ander apparaat → gewoon een knop (een menu in de overlay was lastig te raken).
+            if workspace.otherDevices.count == 1, let only = workspace.otherDevices.first {
+                Button { workspace.continuePlayback(on: only.id); close() } label: {
+                    Image(systemName: "arrow.up.forward.app").frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain).help("Continue on \(only.name)")
+                .accessibilityLabel("Continue on \(only.name)")
+            } else if !workspace.otherDevices.isEmpty {
                 Menu {
                     ForEach(workspace.otherDevices, id: \.id) { d in
                         Button("Continue on \(d.name)") { workspace.continuePlayback(on: d.id); close() }
@@ -326,20 +333,30 @@ struct OverlayDashboard: View {
                         .frame(width: 22).foregroundStyle(theme.accent)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(d.title ?? d.name).font(.callout).lineLimit(1)
-                        Text(d.name + (d.playing ? " · playing" : (sync.devices[d.id] != nil ? " · paused" : " · offline")) + (d.time.map { " · " + Self.clock($0) } ?? ""))
+                        // V22.3: "paused" en een tijd alleen bij een video.
+                        let isVideo = d.url.map { NavigationPolicy.isPlaybackPage($0) } ?? false
+                        Text(d.name + (d.playing ? " · playing" : (sync.devices[d.id] == nil ? " · offline" : (isVideo ? " · paused" : "")))
+                             + (isVideo ? (d.time.map { " · " + Self.clock($0) } ?? "") : ""))
                             .font(.caption2).foregroundStyle(theme.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    if sync.devices[d.id] != nil {
+                    // V22.3: afspeelknoppen en "Play here" alleen bij een video; een gewone pagina kun je openen.
+                    let media = d.url.map { NavigationPolicy.isPlaybackPage($0) } ?? false
+                    if media, sync.devices[d.id] != nil {
                         control(d.playing ? "pause.fill" : "play.fill") {
                             sync.send(SyncCommand(kind: .toggle, target: d.id, url: nil, value: nil))
                         }
                         control("goforward.10") { sync.send(SyncCommand(kind: .seek, target: d.id, url: nil, value: 10)) }
                     }
-                    Button { workspace.takeOverFrom(device: d.id); close() } label: {
-                        Text("Play here").font(.caption.weight(.semibold)).padding(.horizontal, 9).padding(.vertical, 5)
-                            .background(Capsule().fill(theme.accent.opacity(0.9))).foregroundStyle(.white)
-                    }.buttonStyle(.plain)
+                    if media || d.url != nil {
+                        Button {
+                            if media { workspace.takeOverFrom(device: d.id) } else if let url = d.url { workspace.addTab(url: url) }
+                            close()
+                        } label: {
+                            Text(media ? "Play here" : "Open here").font(.caption.weight(.semibold)).padding(.horizontal, 9).padding(.vertical, 5)
+                                .background(Capsule().fill(theme.accent.opacity(0.9))).foregroundStyle(.white)
+                        }.buttonStyle(.plain)
+                    }
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(theme.foreground.opacity(0.06)))
@@ -428,7 +445,7 @@ struct OverlayDashboard: View {
 
     private var recent: some View {
         VStack(spacing: 2) {
-            ForEach(library.history.filter { NavigationPolicy.isPlaybackPage($0.url) }.prefix(store.layout.recentCount)) { item in
+            ForEach(library.recentVideos(store.layout.recentCount)) { item in
                 Button { open(item.url) } label: {
                     HStack(spacing: 10) {
                         thumb(item.url, small: true)

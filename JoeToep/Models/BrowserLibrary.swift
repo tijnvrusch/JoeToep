@@ -20,6 +20,19 @@ final class BrowserLibrary: ObservableObject {
     private static let historyLimit = 3000
     private var saveTask: Task<Void, Never>?
 
+    /// V22.2: recent bekeken video's, elke video maar één keer (de geschiedenis bevat dezelfde video
+    /// vaak meerdere keren met een andere &t=/&pp=) — stopt zodra er genoeg zijn (geen volle scan).
+    func recentVideos(_ limit: Int) -> [LibraryItem] {
+        var seen = Set<String>(), result: [LibraryItem] = []
+        for item in history where NavigationPolicy.isPlaybackPage(item.url) {
+            let key = SponsorBlockService.videoID(from: item.url) ?? item.url.absoluteString
+            guard seen.insert(key).inserted else { continue }
+            result.append(item)
+            if result.count >= limit { break }
+        }
+        return result
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         bookmarks = Self.load(Self.bookmarksKey, defaults)

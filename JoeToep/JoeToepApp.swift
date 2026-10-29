@@ -24,7 +24,30 @@ struct JoeToepApp: App {
     /// V17: bij het starten eerst eventueel de websitegegevens wissen ("wissen bij afsluiten"),
     /// en een melding aanvragen voor het moment dat de app afsluit.
     init() {
+        // V22.2: de opstartfase begint NU (de static let is lui en startte pas bij de eerste tab).
+        _ = LaunchPrefs.started
         PrivacyCleaner.clearPendingAtLaunch()
+        // V22.3: eenmalig de sync-"grafstenen" wissen. Een andere build (QA-kopie) kon via de sync
+        // tabs sluiten; die grafstenen zouden anders verhinderen dat een apparaat dat ze nog heeft
+        // (bijv. de iPhone) ze bij het volgende samenvoegen terugbrengt.
+        #if os(macOS)
+        // V22.3: bij afsluiten sluiten alle vensters — dat is geen "venster dicht, tabs vergeten".
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { BrowserWorkspace.appTerminating = true }
+        }
+        // V22.3: nooit twee JoeToeps tegelijk (bijv. een al open app + een start vanuit Xcode/Finder):
+        // die schreven door elkaar in dezelfde tabopslag en zagen elkaar als "ander apparaat".
+        // De nieuwste wint; de oude sluit netjes af (en bewaart zijn tabs).
+        if let id = Bundle.main.bundleIdentifier {
+            for other in NSRunningApplication.runningApplications(withBundleIdentifier: id) where other != NSRunningApplication.current {
+                other.terminate()
+            }
+        }
+        #endif
+        if !UserDefaults.standard.bool(forKey: "tombstoneReset22_3") {
+            UserDefaults.standard.removeObject(forKey: "closedSyncIDsV22")
+            UserDefaults.standard.set(true, forKey: "tombstoneReset22_3")
+        }
         #if DEBUG
         // V17.1 stresstest: met "--cpu-load" houden 3 achtergrond-threads 4 minuten lang de
         // processor bezig, zodat UI-tests PiP en schermvullend "onder zware belasting" testen.
@@ -45,7 +68,16 @@ struct JoeToepApp: App {
         let quit = UIApplication.willTerminateNotification
         #endif
         NotificationCenter.default.addObserver(forName: quit, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { PrivacyCleaner.markForClearingOnQuit() }
+            MainActor.assumeIsolated { BrowserWorkspace.flushAllPendingPersists(); PrivacyCleaner.markForClearingOnQuit() }
+        }
+        // V22.2: afspeelpositie (samengevoegd opgeslagen) meteen wegschrijven bij achtergrond / app inactief.
+        #if os(macOS)
+        let away = NSApplication.willResignActiveNotification
+        #else
+        let away = UIApplication.didEnterBackgroundNotification
+        #endif
+        NotificationCenter.default.addObserver(forName: away, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { BrowserWorkspace.flushAllPendingPersists() }
         }
     }
     var body: some Scene {

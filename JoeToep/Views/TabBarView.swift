@@ -203,6 +203,12 @@ struct TabBarView: View {
                     // geselecteerde tabblad, zodat het zichtbaar in beeld komt.
                     withAnimation(theme.animation) { proxy.scrollTo(id, anchor: .center) }
                 }
+                // V22.2: ook bij het openen (na een herstart stond de actieve tab buiten beeld).
+                .onAppear {
+                    guard natural < minimumTabWidth else { return }
+                    let id = workspace.selectedID
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
+                }
             }
         }
         .frame(height: theme.tabHeight + 4)

@@ -39,6 +39,8 @@ final class NativePiPController: NSObject {
     private var restoreRequested = false
     /// V22.2: close() loopt; restore-delegate en onStop mogen dan niet "terugkeren" melden.
     private var closing = false
+    /// V22.2: speelt de PiP-speler zelf (niet gepauzeerd in het PiP-venster)?
+    var isPlayingInPiP: Bool { player.rate != 0 }
     /// V22: vlak vóór de terugkeer uit PiP; geeft terug hoelang de animatie nog moet wachten.
     var onRestoreRequested: ((Double, Bool) -> TimeInterval)?
     private var automaticAllowed = true
@@ -199,6 +201,8 @@ extension NativePiPController: AVPictureInPictureControllerDelegate {
         MainActor.assumeIsolated {
             isStarting = false; isActive = true
             lastEvent = "active"
+            // V22.2: tijdens het starten al gesloten → nu alsnog stoppen (AVKit negeerde het eerder).
+            if closing { player.pause(); controller.stopPictureInPicture() }
             onDidStart?()
         }
     }

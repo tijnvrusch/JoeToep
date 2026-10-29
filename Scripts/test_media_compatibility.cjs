@@ -849,6 +849,19 @@ test('V22 quiet window expires by itself', () => {
   const h=harness(); h.rawPause(h.v); h.api.quiet(1000); h.advance(1500);
   h.rawPlay(h.v); assert.equal(h.v.paused,false); h.close();
 });
+test('V22.2 quiet(-1) blocks autoplay without time limit until a real gesture', () => {
+  const h=harness(); h.rawPause(h.v); h.api.quiet(-1); h.advance(60000);
+  h.rawPlay(h.v); assert.equal(h.v.paused,true, 'still blocked after a minute');
+  h.userClick(h.v); h.advance(5000); h.rawPlay(h.v); assert.equal(h.v.paused,false, 'a real tap ends the quiet');
+  h.close();
+});
+test('V22.3 a stray click outside the player does not end the until-gesture quiet', () => {
+  const h=harness(); h.rawPause(h.v); h.api.quiet(-1);
+  h.userClick({closest: () => null}); h.rawPlay(h.v); assert.equal(h.v.paused,true, 'click elsewhere: still blocked');
+  h.advance(3000); h.rawPlay(h.v); assert.equal(h.v.paused,true);
+  h.userClick(h.v); h.rawPlay(h.v); assert.equal(h.v.paused,false, 'tap on the player plays');
+  h.close();
+});
 
 (async()=>{
   const failed=[];

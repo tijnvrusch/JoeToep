@@ -19,19 +19,14 @@ final class ContentFilterController {
     private(set) var experimentalStatus = "No downloaded experimental rules"
     private let defaults = UserDefaults.standard
 
-    // "async" betekent: deze functie kan tijd kosten (bijv. wachten op WebKit) zonder de
-    // hoofdthread te blokkeren; de aanroeper moet "await" gebruiken. Ze geeft een lijst met
-    // namen van filters terug die NIET geladen konden worden (voor foutmeldingen/logging).
-    func prepare() async -> [String] {
-        // Zoekt het meegeleverde bestand "contentFilters.json" in de app-bundel en probeert
-        // het in te lezen en om te zetten naar JSON. Als iets hiervan mislukt (try? geeft dan
-        // nil), stopt de functie meteen via guard.
+    /// V22.2: de meegeleverde filter-JSON één keer inlezen en parsen (gedeeld door alle tabs).
+    private static var cachedDefinitions: [String: Any]?
+    private static func bundledDefinitions() -> [String: Any]? {
+        if let cachedDefinitions { return cachedDefinitions }
         guard let url = Bundle.main.url(forResource: "contentFilters", withExtension: "json", subdirectory: "Resources")
             ?? Bundle.main.url(forResource: "contentFilters", withExtension: "json"),
               let data = try? Data(contentsOf: url),
-              var definitions = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let store = WKContentRuleListStore.default() else { return ["Rules unavailable"] }
-        var failures: [String] = []
+              var definitions = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         // Splitst de "ads"-lijst in twee delen: regels die verzoeken blokkeren ("block") en
         // regels die alleen elementen visueel verbergen ("css-display-none", de advertentiekaarten).
         if let ads = definitions["ads"] as? [[String: Any]] {
@@ -44,6 +39,20 @@ final class ContentFilterController {
             definitions["strictAds"] = rules.filter { ($0["action"] as? [String: Any])?["type"] as? String == "block" }
             definitions["strictCards"] = rules.filter { ($0["action"] as? [String: Any])?["type"] as? String == "css-display-none" }
         }
+        cachedDefinitions = definitions
+        return definitions
+    }
+
+    // "async" betekent: deze functie kan tijd kosten (bijv. wachten op WebKit) zonder de
+    // hoofdthread te blokkeren; de aanroeper moet "await" gebruiken. Ze geeft een lijst met
+    // namen van filters terug die NIET geladen konden worden (voor foutmeldingen/logging).
+    func prepare() async -> [String] {
+        // Zoekt het meegeleverde bestand "contentFilters.json" in de app-bundel en probeert
+        // het in te lezen en om te zetten naar JSON. Als iets hiervan mislukt (try? geeft dan
+        // nil), stopt de functie meteen via guard.
+        guard let definitions = Self.bundledDefinitions(),
+              let store = WKContentRuleListStore.default() else { return ["Rules unavailable"] }
+        var failures: [String] = []
         // Voor elke filterlijst-naam (gesorteerd, voor voorspelbaarheid): probeer eerst een
         // eerder gecompileerde versie uit WebKit's eigen opslag te hergebruiken (sneller dan
         // opnieuw compileren). "identifier" is de unieke sleutel waaronder WebKit dit bewaart.

@@ -505,11 +505,43 @@
   // V22: "stil" na een sync-wijziging: een video in een tab die van een ander apparaat komt,
   // mag niet zelf gaan spelen (YouTube-autoplay, seekTo op een gepauzeerde speler). Alleen een
   // echte klik/toets of een opdracht van JoeToep zelf (remoteAction) start hem.
-  let quietUntil = 0, lastGestureAt = 0;
+  let quietUntil = 0, lastGestureAt = 0, quietKey = "", lastPlayerGestureAt = 0;
+  const currentV = () => {
+    try {
+      const v = new URLSearchParams(location.search).get("v");
+      if (v) return v;
+      const m = location.pathname.match(/^\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{6,})/);
+      return m ? m[1] : "";
+    } catch (_) { return ""; }
+  };
+  // V22.3: hersteld tabblad dat stil moet blijven → al vanaf het begin van de pagina (alleen voor díe video).
+  try {
+    const qv = window.JOETOEP_QUIET_VIDEO;
+    if (qv && currentV() === qv) { quietUntil = Infinity; quietKey = qv; }
+  } catch (_) {}
+  // V22.2/22.3: quiet(-1) = stil tot je de SPELER zelf aanraakt of op spatie/K/de mediatoets drukt.
+  // (Een willekeurige klik of toets elders telde eerst ook — en WebKit levert soms zo'n "echte" gebeurtenis
+  //  zonder dat jij iets doet, waarna YouTube de herstelde video alsnog startte.)
+  const playerGesture = e => e.type === "keydown"
+    ? [" ", "k", "K", "MediaPlayPause"].includes(e.key) && !e.target?.closest?.("input, textarea, [contenteditable='true']")
+    : Boolean(e.target?.closest?.("#movie_player, .html5-video-player, ytd-player, ytm-player, #player, video, .player-container"));
   for (const t of ["pointerdown", "touchstart", "keydown", "mousedown"])
-    window.addEventListener(t, e => { if (e.isTrusted) lastGestureAt = Date.now(); }, true);
+    window.addEventListener(t, e => {
+      if (!e.isTrusted) return;
+      lastGestureAt = Date.now();
+      if (playerGesture(e)) { lastPlayerGestureAt = Date.now(); if (quietUntil === Infinity) quietUntil = 0; }
+    }, true);
+  // Zou de stil-bewaking dit afspelen nu tegenhouden?
+  const quietBlocks = () => {
+    const now = Date.now();
+    if (quietUntil === Infinity) {
+      if (currentV() !== quietKey) { quietUntil = 0; return false; }   // andere video gekozen → niet meer stil
+      return now - lastPlayerGestureAt >= 1500;
+    }
+    return now < quietUntil && now - lastGestureAt >= 1500;
+  };
   const quietGuard = e => {
-    if (Date.now() >= quietUntil || Date.now() - lastGestureAt < 1500) return;
+    if (!quietBlocks()) return;
     const v = e.target; if (!(v instanceof HTMLMediaElement)) return;
     desiredPlaying = false; userPause = true; returnWantsPlay = false;
     try { native.pause.call(v); } catch (_) {}
@@ -532,7 +564,7 @@
   // Zodra de video echt begint te spelen: onthoud dat we willen dat hij speelt, en dat de
   // gebruiker hem niet (meer) gepauzeerd heeft.
   window.addEventListener("playing", e => {
-    if (e.target === pick()) { desiredPlaying = true; userPause = false; lastPauseAt = 0; }
+    if (e.target === pick() && !quietBlocks()) { desiredPlaying = true; userPause = false; lastPauseAt = 0; }
   }, true);
   // The "pause" event fires AFTER a video has paused, whoever paused it. Below we decide
   // whether that pause should stand or be undone (resumed).
@@ -746,7 +778,7 @@
     // Past de instellingen aan met nieuwe waarden ("next"). De spread "..." kopieert eerst
     // alle bestaande instellingen, en overschrijft daarna alleen wat in "next" zit.
     configure(next) { config = { ...config, ...next }; if (!config.fallback && fallbackRoot) fallbackRoot.hidden = true; return true; },
-    quiet(ms) { quietUntil = ms > 0 ? Date.now() + ms : 0; return true; },
+    quiet(ms) { quietUntil = ms < 0 ? Infinity : (ms > 0 ? Date.now() + ms : 0); if (ms < 0) quietKey = currentV(); return true; },
     prepareHandoff, beginAutomaticHandoff, returnToApp, remoteAction, sourceInfo, nativeHandoff, nativeReturn,
     // Record explicit user intent when the site's own player performs the action.
     noteIntent(action) {
@@ -874,7 +906,8 @@
     // (debuggen) vanuit de native app zonder de website zelf te hoeven aanpassen.
     diagnostics: () => {
       const v = pick();
-      return { status: lastStatus, mediaSessionAvailable: typeof nativeSetAction === "function", interrupted, rawVisibility: rawVisibility(), recoveryUsed, platform,
+      return { quiet: quietUntil === Infinity ? "until-gesture" : Math.max(0, quietUntil - Date.now()), quietVideo: window.JOETOEP_QUIET_VIDEO || "", lastGestureAt,
+        status: lastStatus, mediaSessionAvailable: typeof nativeSetAction === "function", interrupted, rawVisibility: rawVisibility(), recoveryUsed, platform,
           pipOrigin, lastMode, nativeOwner, nativeActive, systemHandoff, requestPending: Date.now() < requestUntil, desiredPlaying, userPause, interruptionWantsPlay, protectedHandoff: Date.now() < handoffUntil,
         videoConnected: Boolean(v?.isConnected), paused: v?.paused, readyState: v?.readyState,
         width: v?.videoWidth, height: v?.videoHeight, time: v?.currentTime,

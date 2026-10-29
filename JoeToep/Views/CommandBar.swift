@@ -47,7 +47,7 @@ struct CommandBarOverlay: View {
             if CommandBarPrefs.showTabs {
                 list += workspace.tabs.filter { $0.id != workspace.selectedID }.sorted { $0.lastActive > $1.lastActive }.prefix(4).map(Suggestion.tab)
             }
-            list += library.history.filter { NavigationPolicy.isPlaybackPage($0.url) }.prefix(4).map { .item($0, "history") }
+            list += library.recentVideos(4).map { .item($0, "history") }
             return Array(list.prefix(CommandBarPrefs.maxSuggestions))
         }
         // V21: opdrachten ("> pin", of gewoon "clear", "audio only", "sidebar" …).
@@ -99,6 +99,19 @@ struct CommandBarOverlay: View {
             token = workspace.commandBarToken; workspace.commandBarToken = nil; selection = 0
             text = editsCurrent ? (workspace.selected.currentURL?.absoluteString ?? "") : ""
             DispatchQueue.main.async { focused = true }
+            // V22.2: een pagina die net klaar is met laden kan de toetsenbordfocus wegpakken, terwijl
+            // SwiftUI nog denkt dat het veld focus heeft → de eerste 3 s echt controleren en herstellen.
+            for delay in stride(from: 0.2, through: 3.0, by: 0.4) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    guard workspace.showCommandBar, !customizing else { return }
+                    #if os(macOS)
+                    let inTextField = NSApp.keyWindow?.firstResponder is NSTextView
+                    if !inTextField { focused = false; DispatchQueue.main.async { focused = true } }
+                    #else
+                    if !focused { focused = true }
+                    #endif
+                }
+            }
         }
         // V22.2: ⌘L terwijl de ⌘T-overlay al open is (of andersom) → veld opnieuw vullen zoals bij onAppear.
         .onChange(of: workspace.commandBarEditsCurrent) { _, now in
@@ -420,14 +433,27 @@ enum EscapeStack {
 private struct ClosesOnEscape: ViewModifier {
     let action: () -> Void
     @State private var id = UUID()
+    @State private var appeared = false
+    @State private var windowNumber: Int?
     func body(content: Content) -> some View {
         content
             #if os(macOS)
             // V22.2: het venster waarin dit paneel ÉCHT staat (niet het venster dat toevallig key was).
-            .background(WindowNumberReader { number in EscapeStack.push(id, windowNumber: number, action) })
+            // Alleen registreren met een bekend venster én zolang het paneel zichtbaar is.
+            .background(WindowNumberReader { number in
+                windowNumber = number
+                if appeared, let number { EscapeStack.push(id, windowNumber: number, action) }
+            })
             #endif
-            .onAppear { EscapeStack.push(id, action) }
-            .onDisappear { EscapeStack.pop(id) }
+            .onAppear {
+                appeared = true
+                #if os(macOS)
+                if let windowNumber { EscapeStack.push(id, windowNumber: windowNumber, action) }
+                #else
+                EscapeStack.push(id, action)
+                #endif
+            }
+            .onDisappear { appeared = false; EscapeStack.pop(id) }
     }
 }
 

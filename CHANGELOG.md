@@ -1,3 +1,37 @@
+# 22.3.0 (33)
+
+## Stabiliteit, sync en zuinigheid (getest op Mac, iPhone en iPad)
+- **Grote fix: "spook-overname" bij opstarten**: een ander apparaat stuurt bij verbinden de laatst bekende stand van déze Mac/iPhone/iPad terug. Die werd ten onrechte gezien als "een ander apparaat dat speelt", waarna het apparaat zichzelf overnam: een herstelde of heropende video begon vanzelf te spelen (en ging fullscreen). Eigen oude standen worden nu alleen nog gebruikt om de klok bij te werken.
+- **Tabs kunnen niet meer in één klap verdwijnen**: komt er een snapshot binnen waarin ineens veel tabs ontbreken (≥ 8 en meer dan de helft), dan sluit JoeToep alleen de tabs die het andere apparaat echt als gesloten meldt. "Sluit andere tabs" op een ander apparaat werkt gewoon.
+- **Herstel na het sync-incident**: 22.3 wist bij de eerste start eenmalig de oude sluit-markeringen, zodat een apparaat dat je tabs nog heeft (bijv. de iPhone) ze bij het samenvoegen terugbrengt op alle apparaten.
+- **Sync alleen met JoeToep zelf**: een andere build op hetzelfde apparaat (zoals een QA-kopie met een eigen, kleine tablijst) kon via hetzelfde sync-kanaal meedoen en tabs op je andere apparaten overschrijven. Apparaten herkennen nu elkaars app en negeren de rest.
+- **Nooit twee JoeToeps tegelijk op de Mac**: start je JoeToep terwijl er al een draait (bijv. vanuit Xcode of een tweede kopie), dan sluit de oude netjes af; ze schreven anders door elkaar in dezelfde tabopslag en zagen elkaar als "ander apparaat".
+- **Gesloten vensters blijven gesloten**: tabs van een extra venster dat je sluit kwamen bij elke herstart terug (vaak als stapel "Home"-tabs). Nu verdwijnen ze met dat venster. Sluit je het hoofdvenster terwijl er nog een ander open is, dan verhuizen zijn tabs naar dat venster (niets kwijt, ook niet op je andere apparaten). Sluit je het laatste venster, dan blijven je tabs bewaard en haalt een nieuw venster ze gewoon terug. Speelt er iets in het venster dat je sluit, dan stopt dat. De selectie na een herstart is die van het hoofdvenster.
+- **Mac opent met één venster**: macOS herstelde bij elke start alle vensters van de vorige keer; omdat het eerste venster alle tabs overneemt, stapelden zich lege "Home"-vensters op en kwam een venster soms in fullscreen op een eigen Space terug. Nu altijd één venster met al je tabs, op de plek en in de grootte van de vorige keer.
+- **Geen autoplay meer bij het opstarten**: herstelde tabs (ook korter dan 3 s of zonder tijd) blijven gepauzeerd op hun plek tenzij "Hervatten bij starten" aan staat; YouTube-autoplay wordt tijdens het herstel tegengehouden.
+- **Spoelen naar een positie** (sync/klik) start een afgelopen of gepauzeerde video niet meer opnieuw.
+- **Snel typen na ⌘T** gaat niet meer verloren: het zoekveld houdt de focus, ook als de pagina nog laadt.
+- **"Verder kijken"** toont elke video maar één keer (ook in widgets en de zoekbalk).
+- **Tabbalk** scrollt na het opstarten meteen naar de geselecteerde tab.
+- **Zuiniger tijdens afspelen met verbonden apparaten**: positie 1× per seconde i.p.v. 2× (halveert de JS-aanroepen), widgets alleen herschrijven bij een echte wijziging.
+- **Geen vanzelf spelende video's meer na sync of sluiten**: een herstelde videotab speelt alleen meteen als jij hem zelf kiest (tik/klik/⌃Tab, nieuwe tab). Kwam hij in beeld door de sync, door het sluiten van een buurtab of door een trage eerste start, dan blijft hij gepauzeerd op zijn plek (de iPad begon na een herstart soms zelf te spelen).
+- **Veel minder sync-verkeer tijdens afspelen**: de positie van de spelende video wordt doorgerekend; er gaat alleen een snapshot over de lijn bij spoelen, pauze of hooguit 1× per minuut (was elke 5 s) — zuiniger op alle apparaten en geen onnodige spoelacties op de andere apparaten.
+- **Alleen echt verbonden apparaten zijn "online"**: een apparaat dat al weg was (bijv. de iPhone) kon via een doorgestuurde snapshot als bedienbaar verschijnen in de overlay, widgets en "Verder op …".
+- **Sync robuuster in randgevallen**: oude sluit-markeringen (ouder dan 7 dagen) tellen niet meer mee, zodat twee apparaten het nooit eindeloos oneens kunnen blijven over gesloten tabs; houdt een ander apparaat een oudere stand van dit apparaat met een hoger versienummer vast (snelle herstart), dan publiceert dit apparaat zijn huidige stand opnieuw.
+- **Sync herstelt zichzelf**: loopt een apparaat achter (gemiste snapshot of halve verbinding), dan stuurt het andere apparaat de huidige toestand vanzelf opnieuw; "In sync" klopt nu ook voor apparaten die hun update via een derde apparaat kregen.
+- **Snel door tabs bladeren (⌃Tab)** start geen video's meer in tabs die je alweer voorbij bent (die speelden op de achtergrond en pauzeerden de tab die je wél zag); kom je later terug naar zo'n tab, dan speelt hij alsnog.
+- **Gesloten tab heropenen (⇧⌘T)** herstelt ook de afspeelstand: speelde hij, dan speelt hij weer; stond hij op pauze, dan blijft hij gepauzeerd (startte eerst altijd, ook fullscreen).
+- **Stil vanaf de eerste milliseconde**: een herstelde video die niet mag spelen wordt nu al bij het begin van het laden tegengehouden (YouTube was soms sneller dan de pagina klaar was).
+- **⌘T/⌘L tijdens een fullscreen video**: de overlay verscheen onzichtbaar áchter de video; nu verlaat de video eerst fullscreen.
+- **"Verder op iPad/iPhone"** in de overlay is één knop als er één ander apparaat is (het menu was lastig te raken).
+- **Overlay › Andere apparaten**: afspeelknoppen en "Play here" alleen bij een video; staat het andere apparaat op een gewone pagina, dan kun je die met "Open here" openen.
+- **Herstelde video's blijven echt stil**: YouTube kon een herstelde video na een paar seconden alsnog gedempt laten starten (en fullscreen openen, gezien op de iPhone). Nu blijft hij gepauzeerd tot je hem zelf aanraakt, op play drukt of hem vanaf een ander apparaat/de Watch/een widget start.
+- **Eén video tegelijk, ook met meerdere Mac-vensters**: start je een video in een tweede venster, dan pauzeert het andere venster én het apparaat dat nu speelt. "Pauzeer alles" en de pauzeknop in widgets gebruiken een echte pauze-opdracht (kan een video nooit per ongeluk starten).
+- **Geen tabsprong meer door een herstart elders**: kwam je terug op de Mac terwijl de iPad net (her)startte, dan sprong de Mac naar de tab die de iPad toevallig open had. Nu volgt een apparaat alleen een échte tabwissel op het andere apparaat.
+- **"Verder op …" laat je nooit in stilte achter**: neemt het andere apparaat de video niet binnen 8 seconden over (scherm op slot, app op de achtergrond, verbinding weg), dan speelt hij hier gewoon verder met een melding — niet als het andere apparaat hem wél even speelde of hier intussen iets anders speelt.
+- **Tabkeuze terwijl een ander apparaat speelt**: je eigen keuze wordt alleen overschreven als je echt terugkomt (app geactiveerd of lang inactief).
+
+
 # 22.2.0 (32)
 
 ## Fixes na uitgebreid testen (Mac, iPhone, iPad)

@@ -30,8 +30,16 @@ enum TabAudioIcon {
         if TabAudioIconPrefs.action == "switch" { choose(select); return }
         // V22.2: native PiP speelt in een eigen AVPlayer terwijl de webvideo gepauzeerd is;
         // remoteToggle() zou die webvideo juist starten → PiP sluiten en pauzeren.
-        if session.nativePiPActive || session.isNativePiPStarting {
+        if session.isNativePiPStarting || (session.nativePiPActive && session.nativePiPIsPlaying) {
             session.stopPiPAndPause()
+            return
+        }
+        // V22.2: native PiP staat gepauzeerd → gewoon verder spelen in de webvideo (PiP sluit vanzelf terug).
+        if session.nativePiPActive {
+            session.stopPiPAndPause()
+            if TabAudioIconPrefs.switchOnPlay { choose(select) }
+            // Na de PiP-terugkeer (die pauzeert) pas starten.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { session.remoteToggleIfPaused() }
             return
         }
         if session.isPlaying || session.isInPictureInPicture {

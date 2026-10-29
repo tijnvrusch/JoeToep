@@ -1222,7 +1222,7 @@ private struct SyncSettings: View {
             }
             if !sync.log.isEmpty {
                 AdvancedSection("Activity") {
-                    ForEach(Array(sync.log.prefix(12).enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(sync.log.prefix(30).enumerated()), id: \.offset) { _, line in
                         Text(line).font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
                 }

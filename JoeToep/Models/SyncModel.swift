@@ -16,10 +16,13 @@ struct SyncTab: Codable, Equatable, Identifiable, Sendable {
     var time: Double?
     /// V22: lengte van de video (voor voortgang in widgets / Watch).
     var duration: Double?
+    /// V22.2: laatst actief (s sinds 1970) — "nieuwste wint" tegen een grafsteen (heropende tab).
+    var active: Double?
 
-    init(id: UUID, url: URL?, title: String? = nil, pinned: Bool = false, time: Double? = nil, duration: Double? = nil) {
+    init(id: UUID, url: URL?, title: String? = nil, pinned: Bool = false, time: Double? = nil, duration: Double? = nil,
+         active: Double? = nil) {
         self.id = id; self.url = url.map(SyncTab.canonical); self.title = title; self.pinned = pinned; self.time = time
-        self.duration = duration
+        self.duration = duration; self.active = active
     }
 
     /// Mac gebruikt www.youtube.com, iPhone m.youtube.com: in de sync altijd dezelfde vorm,
@@ -48,6 +51,13 @@ struct SyncSnapshot: Codable, Equatable, Sendable {
     /// Het volgende apparaat dat je pakt, speelt hem verder op precies `handoffTime`.
     var handoffID: UUID?
     var handoffTime: Double?
+    /// V22.2: recent gesloten tab-id's → sluitmoment (s sinds 1970), max. 7 dagen / 200 stuks.
+    /// nil = oude app-versie (die kent geen grafstenen).
+    var closed: [String: Double]?
+    /// V22.2: klokwaarde (ms) waarop `playingID` op de afzender begon te spelen.
+    var playStamp: UInt64?
+    /// V22.2: uniek per overdracht (prepareDeviceSwitch); dubbel versturen telt als één overdracht.
+    var handoffNonce: String?
 
     /// Inhoud zonder versie/afzender/tijd: om te zien of er echt iets veranderde.
     var content: SyncContent { SyncContent(tabs: tabs, selectedID: selectedID, playingID: playingID, handoffID: handoffID) }
@@ -68,14 +78,20 @@ struct SyncContent: Equatable, Sendable {
 
     /// Gelijk genoeg om niets te versturen: afspeeltijden die < 2 s verschillen tellen niet
     /// (die lopen tijdens het afspelen vanzelf; elke seconde versturen is zinloos).
-    func matches(_ other: SyncContent?) -> Bool {
+    /// `elapsed`: seconden sinds `other` verstuurd werd. V22.2: voor de spelende tab wordt de vorige
+    /// tijd doorgerekend — zo gaat er tijdens gewoon afspelen niet elke 5 s een volledige snapshot
+    /// over de lijn (scheelt radio/energie op alle apparaten), wel bij spoelen en hooguit elke 60 s.
+    func matches(_ other: SyncContent?, elapsed: Double = 0) -> Bool {
         guard let other, selectedID == other.selectedID, playingID == other.playingID, handoffID == other.handoffID,
               tabs.count == other.tabs.count else { return false }
         for (a, b) in zip(tabs, other.tabs) {
             guard a.id == b.id, a.url == b.url, a.pinned == b.pinned, a.title == b.title else { return false }
-            // V22: de spelende tab telt al vanaf 1 s verschil (live positie), de rest vanaf 2 s.
-            let limit = a.id == playingID ? 1.0 : 2.0
-            if abs((a.time ?? 0) - (b.time ?? 0)) >= limit { return false }
+            // V22.2: de spelende tab pas vanaf 5 s (minder volledige snapshots; overdracht gebruikt
+            // de exacte handoffTime / pauseAndReportTime en rekent de verstreken tijd zelf door), de rest vanaf 2 s.
+            if a.id == playingID {
+                if elapsed >= 60 { return false }
+                if abs((a.time ?? 0) - ((b.time ?? 0) + max(0, elapsed))) >= 5 { return false }
+            } else if abs((a.time ?? 0) - (b.time ?? 0)) >= 2 { return false }
         }
         return true
     }
@@ -91,6 +107,10 @@ struct SyncCommand: Codable, Equatable, Sendable {
         case handoffTime
         /// V21: "speel dit verder bij jou" — url + exacte tijd (value); de afzender pauzeert.
         case continueThere
+        /// V22.2: "pauzeer hier en speel verder op `to`" (Watch › verplaats) — via continuePlayback(on:).
+        case continueOn
+        /// V22.2: "pauzeer wat hier speelt" (nooit starten — veiliger dan toggle bij verouderde info).
+        case pause
     }
     var kind: Kind
     var target: String            // apparaat-id dat de opdracht moet uitvoeren
@@ -98,6 +118,8 @@ struct SyncCommand: Codable, Equatable, Sendable {
     var value: Double?
     /// V19.1: afzender (voor het antwoord op een overdracht). Oude berichten hebben hem niet.
     var from: String? = nil
+    /// V22.2: bestemming bij `.continueOn` (oude berichten hebben hem niet).
+    var to: String? = nil
 }
 
 /// Wat er over de lijn gaat: één envelop, JSON.
@@ -128,18 +150,23 @@ struct SyncLedger: Sendable {
 
     /// Maakt een nieuwe lokale snapshot, of nil als de inhoud gelijk is aan wat al gedeeld is.
     mutating func makeLocal(name: String, tabs: [SyncTab], selectedID: UUID, playingID: UUID?, handoff: (id: UUID, time: Double)? = nil,
+                            closed: [String: Double]? = nil, playStamp: UInt64? = nil, handoffNonce: String? = nil,
                             force: Bool = false, now: Date = Date()) -> SyncSnapshot? {
         let content = SyncContent(tabs: tabs, selectedID: selectedID, playingID: playingID, handoffID: handoff?.id)
-        if !force, content.matches(current?.content) { return nil }
+        if !force, content.matches(current?.content, elapsed: current.map { now.timeIntervalSince($0.sentAt) } ?? 0) { return nil }
         // Hybride klok: minstens "nu" in milliseconden, en altijd hoger dan alles wat we zagen.
         // Zo wint na een herstart de écht nieuwste wijziging, en blijft de volgorde kloppen.
         clock = max(clock + 1, UInt64(max(0, now.timeIntervalSince1970 * 1000)))
         let snapshot = SyncSnapshot(version: clock, origin: deviceID, originName: name, tabs: tabs,
                                     selectedID: selectedID, playingID: playingID, sentAt: now,
-                                    handoffID: handoff?.id, handoffTime: handoff?.time)
+                                    handoffID: handoff?.id, handoffTime: handoff?.time,
+                                    closed: closed, playStamp: playStamp, handoffNonce: handoff == nil ? nil : handoffNonce)
         current = snapshot
         return snapshot
     }
+
+    /// V22.2: klokwaarde voor "nu begon hier iets te spelen" (altijd hoger dan alles wat we zagen).
+    func stamp(now: Date = Date()) -> UInt64 { max(clock + 1, UInt64(max(0, now.timeIntervalSince1970 * 1000))) }
 
     /// Verwerkt een ontvangen snapshot. Geeft hem terug als hij toegepast moet worden.
     mutating func receive(_ snapshot: SyncSnapshot) -> SyncSnapshot? {
@@ -147,6 +174,43 @@ struct SyncLedger: Sendable {
         guard snapshot.origin != deviceID, snapshot.supersedes(current) else { return nil }
         current = snapshot
         return snapshot
+    }
+}
+
+/// V22.2: pure sync-regels (grafstenen, afspeel-voorrang, overdrachtsleutel) — los testbaar.
+enum SyncRules {
+    /// Grafstenen voor in een snapshot: jonger dan `maxAge`, hooguit de `limit` nieuwste.
+    static func recentTombstones(_ all: [String: Double], now: Date = Date(), maxAge: Double = 7 * 86_400,
+                                 limit: Int = 200) -> [String: Double] {
+        let cutoff = now.timeIntervalSince1970 - maxAge
+        let fresh = all.filter { $0.value > cutoff }
+        guard fresh.count > limit else { return fresh }
+        return Dictionary(uniqueKeysWithValues: fresh.sorted { $0.value > $1.value }.prefix(limit).map { ($0.key, $0.value) })
+    }
+
+    /// Mag deze tab van een ander apparaat hier NIET (terug)komen? Ja als hij hier of daar gesloten is
+    /// en daarna niet meer actief was (heropend/gebruikt na de sluiting = nieuwer → wél toevoegen).
+    static func blocks(_ tab: SyncTab, local: [String: Double], remote: [String: Double]?) -> Bool {
+        let key = tab.id.uuidString
+        guard let stone = [local[key], remote?[key]].compactMap({ $0 }).max() else { return false }
+        return (tab.active ?? 0) <= stone
+    }
+
+    /// Moet een tab hier dicht omdat de afzender hem sloot? Alleen als hij hier daarna niet meer actief was.
+    static func shouldClose(_ id: UUID, lastActive: Date, remote: [String: Double]?) -> Bool {
+        guard let stone = remote?[id.uuidString] else { return false }
+        return lastActive.timeIntervalSince1970 < stone
+    }
+
+    /// Wint het afspelen op het andere apparaat van wat hier speelt? Oude versies (zonder stempel): ja.
+    static func remotePlayWins(remote: UInt64?, local: UInt64) -> Bool {
+        guard let remote else { return true }
+        return remote > local
+    }
+
+    /// Sleutel van één overdracht: origin:tab:nonce (oude versies zonder nonce: origin:tab).
+    static func handoffKey(origin: String, tab: UUID, nonce: String?) -> String {
+        nonce.map { "\(origin):\(tab):\($0)" } ?? "\(origin):\(tab)"
     }
 }
 

@@ -204,8 +204,14 @@ final class WatchBridge: NSObject {
             if from == sync.deviceID { workspace?.continuePlayback(on: to) }
             else if to == sync.deviceID { workspace?.takeOverFrom(device: from) }
             else if let snap = sync.latestByDevice[from], let tab = snap.playingID.flatMap({ id in snap.tabs.first { $0.id == id } }), let url = tab.url {
-                sync.send(SyncCommand(kind: .toggle, target: from, url: nil, value: nil))
-                sync.send(SyncCommand(kind: .continueThere, target: to, url: url, value: tab.time ?? 0, from: from))
+                if snap.closed != nil {
+                    // V22.2: bron pauzeert zelf en stuurt zijn EXACTE tijd naar `to` (continuePlayback) — geen blinde toggle.
+                    sync.send(SyncCommand(kind: .continueOn, target: from, url: url, value: nil, to: to))
+                } else {
+                    // Oudere app-versie op de bron (kent .continueOn niet): oude manier.
+                    sync.send(SyncCommand(kind: .toggle, target: from, url: nil, value: nil))
+                    sync.send(SyncCommand(kind: .continueThere, target: to, url: url, value: tab.time ?? 0, from: from))
+                }
             }
             try? await Task.sleep(for: .milliseconds(400)); push(force: true)
             return status()
@@ -215,7 +221,7 @@ final class WatchBridge: NSObject {
             try? await Task.sleep(for: .milliseconds(350)); push(force: true)
             return status()
         case "state":
-            push(force: true)
+            // V22.2: een poll krijgt de toestand in het antwoord; niet óók nog een geforceerde push.
             return ["state": makeState().encoded() ?? Data()]
         default:
             return status(for: target(message))

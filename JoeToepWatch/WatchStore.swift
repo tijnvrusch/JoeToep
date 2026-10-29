@@ -92,13 +92,14 @@ final class WatchStore: NSObject, ObservableObject {
         WCSession.default.activate()
     }
 
-    /// Zolang de app voorin staat: elke 2 s verse toestand (naast de pushes van de iPhone).
+    /// Zolang de app voorin staat: elke 5 s verse toestand (naast de pushes van de iPhone).
+    /// V22.2: was 2 s; de iPhone pusht wijzigingen al zelf, posities worden doorgerekend.
     func beginLive() {
         ticker?.cancel()
         ticker = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 await self?.refreshState()
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(5))
             }
         }
     }
@@ -224,13 +225,13 @@ final class WatchStore: NSObject, ObservableObject {
             if let r = t.rate { rate = r }
         }
         if devices.isEmpty { devices = new.devices.map { WatchDevice(id: $0.id, name: $0.name) } }
-        new.saveToGroup()
         // Complicaties alleen herladen als er iets zichtbaars veranderde (budget sparen).
         let n = new.nowPlaying
         let key = [n?.id ?? "", n?.title ?? "", String(n?.playing ?? false), String(Int((n?.time ?? 0) / 30)),
                    new.spotify?.track ?? "", String(new.spotify?.playing ?? false), String(new.devices.count)].joined(separator: "|")
         if key != lastWidgetKey {
             lastWidgetKey = key
+            new.saveToGroup()   // V22.2: App Group-bestand alleen bij een widget-relevante wijziging
             #if canImport(WidgetKit)
             WidgetCenter.shared.reloadAllTimelines()
             #endif

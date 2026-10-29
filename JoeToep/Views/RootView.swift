@@ -1,6 +1,9 @@
 // Dit is het "startpunt" van de zichtbare app: hij beslist of je het
 // welkomstscherm (OnboardingView) of het echte hoofdscherm (PlayerShellView) ziet.
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct RootView: View {
     // @StateObject maakt hier het settings-object aan en "bezit" het: SwiftUI
@@ -62,5 +65,28 @@ struct RootView: View {
         // .task voert asynchrone code uit zodra deze view verschijnt; hier
         // wordt het app-icoon hersteld naar de laatst gekozen variant.
         }.task { AppIconController.shared.restore() }
+        #if os(macOS)
+        .background(WindowRestorationGuard())
+        #endif
     }
 }
+
+#if os(macOS)
+/// V22.3 — macOS herstelde bij elke start álle vensters van de vorige keer; omdat het eerste venster
+/// alle tabs overneemt, bleven de andere als lege "Home"-vensters staan (die zich ophoopten) en kwam
+/// een venster soms in fullscreen op een eigen Space terug. Nu opent JoeToep altijd met één venster
+/// met al je tabs; positie en grootte van het hoofdvenster worden wel onthouden.
+struct WindowRestorationGuard: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ view: NSView, context: Context) {}
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            window.isRestorable = false
+            // Alleen één venster kan deze naam hebben; de rest krijgt gewoon de standaardplek.
+            if window.frameAutosaveName.isEmpty { _ = window.setFrameAutosaveName("JoeToepMainWindow") }
+        }
+    }
+}
+#endif

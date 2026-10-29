@@ -35,6 +35,8 @@ final class NetworkMonitor: ObservableObject {
     }
 
     @Published private(set) var state: State = .checking
+    /// V22.2: gedeeld door alle tabs (voorheen startte elke WebSession een eigen NWPathMonitor).
+    static let shared = NetworkMonitor()
 
     private let monitor: NWPathMonitor
     private let queue = DispatchQueue(label: "nl.tijn.joetoep.network", qos: .utility)

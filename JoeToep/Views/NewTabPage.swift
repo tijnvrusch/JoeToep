@@ -300,7 +300,7 @@ struct NewTabPage: View {
         case .nowPlaying: NowPlayingSection(limit: limit).frame(maxWidth: layout.contentWidth)
         case .shortcuts: shortcutGrid
         case .continueWatching:
-            let items = Array(library.history.filter { NavigationPolicy.isPlaybackPage($0.url) }.prefix(limit))
+            let items = library.recentVideos(limit)
             if !items.isEmpty || editing { list("Continue watching", items: items, symbol: "play.circle") }
         case .favourites:
             if !library.bookmarks.isEmpty || editing { list("Favourites", items: Array(library.bookmarks.prefix(limit)), symbol: "bookmark") }
@@ -645,8 +645,8 @@ struct SpotifyWidget: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.green.opacity(0.08)))
-        .onAppear { spotify.beginObserving() }
-        .onDisappear { spotify.endObserving() }
+        // V22.2: alleen waarnemen als deze tab zichtbaar is en de app actief (verborgen tabs blijven gemount).
+        .modifier(ObserveWhileVisible(begin: { spotify.beginObserving() }, end: { spotify.endObserving() }))
     }
 
     private var spotifyHint: String {
@@ -692,8 +692,44 @@ struct NowPlayingSection: View {
             if list.isEmpty { Text("No tabs with video or audio").font(.caption).foregroundStyle(theme.secondary) }
             ForEach(Array(list)) { MediaSourceRow(source: $0) }
         }
-        .onAppear { hub.beginObserving() }
-        .onDisappear { hub.endObserving() }
+        .modifier(ObserveWhileVisible(begin: { hub.beginObserving() }, end: { hub.endObserving() }))   // V22.2
+    }
+}
+
+/// V22.2: is de tab waarin deze view staat de zichtbare tab? (standaard true: menubalk, instellingen.)
+private struct TabIsVisibleKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    var tabIsVisible: Bool {
+        get { self[TabIsVisibleKey.self] }
+        set { self[TabIsVisibleKey.self] = newValue }
+    }
+}
+
+/// V22.2: start waarnemen (timers/scans) alleen als de tab zichtbaar is en de app actief; stopt
+/// anders — en reageert op wisselen van tab of naar de achtergrond gaan.
+struct ObserveWhileVisible: ViewModifier {
+    let begin: () -> Void
+    let end: () -> Void
+    @Environment(\.tabIsVisible) private var tabIsVisible
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var observing = false
+    private var wanted: Bool {
+        #if os(macOS)
+        tabIsVisible && scenePhase != .background   // Mac: ook zichtbaar terwijl een andere app voorop staat
+        #else
+        tabIsVisible && scenePhase == .active
+        #endif
+    }
+    func body(content: Content) -> some View {
+        content
+            .onAppear { setObserving(wanted) }
+            .onDisappear { setObserving(false) }
+            .onChange(of: wanted) { _, on in setObserving(on) }
+    }
+    private func setObserving(_ on: Bool) {
+        guard on != observing else { return }
+        observing = on
+        if on { begin() } else { end() }
     }
 }
 

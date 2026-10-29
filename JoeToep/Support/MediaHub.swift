@@ -4,6 +4,9 @@
 import Foundation
 import SwiftUI
 import WebKit
+#if os(iOS)
+import UIKit
+#endif
 
 struct MediaSourceState: Identifiable, Equatable {
     enum Kind: Equatable { case tab(UUID), spotify }
@@ -41,11 +44,15 @@ final class MediaHub: ObservableObject {
         observing += 1
         SpotifyController.shared.beginObserving()
         guard ticker == nil else { return }
-        scan()
+        scan(full: true)   // V22.2: bij het openen één keer álle tabs, daarna alleen de relevante
         ticker = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(1500))
                 guard let self, self.observing > 0 else { return }
+                #if os(iOS)
+                // V22.2: op de achtergrond niet scannen (niemand kijkt; scheelt JS-aanroepen per tab).
+                if UIApplication.shared.applicationState == .background { continue }
+                #endif
                 self.scan()
             }
         }
@@ -61,11 +68,16 @@ final class MediaHub: ObservableObject {
     }
 
     /// Vraagt elke geladen tab naar zijn media (één korte JS-aanroep per tab, parallel).
-    func scan() {
+    /// V22.2: standaard alleen tabs die spelen, in PiP zijn, geselecteerd zijn of bij de vorige scan
+    /// media hadden — niet elke geladen tab elke 1,5 s. `full` vraagt alle geladen tabs.
+    func scan(full: Bool = false) {
         let tabs = allTabs
         let ids = Set(tabs.map(\.tab.id))
         tabStates = tabStates.filter { ids.contains($0.key) }
-        let loaded = tabs.filter { $0.tab.session.currentURL != nil }
+        let loaded = tabs.filter {
+            $0.tab.session.currentURL != nil && (full || $0.selected || $0.tab.session.isPlaying ||
+                $0.tab.session.isInPictureInPicture || tabStates[$0.tab.id] != nil)
+        }
         for (tab, _) in tabs where tab.session.currentURL == nil { tabStates[tab.id] = nil }
         pending = loaded.count
         isScanning = pending > 0

@@ -32,7 +32,11 @@ final class WidgetBridge {
     func startOnce() { guard !started else { processQueuedCommands(); return }; started = true; start() }
     /// Eén keer bij het starten.
     func start() {
-        WidgetIntentRouter.handler = { command in Task { @MainActor in WidgetBridge.shared.perform(command) } }
+        // V22.2: nog geen venster (koude start via widget)? In de wachtrij; het venster pakt hem op.
+        WidgetIntentRouter.handler = { command in Task { @MainActor in
+            if BrowserWorkspace.registry.allObjects.isEmpty { WidgetShared.enqueue(command) }
+            else { WidgetBridge.shared.perform(command) }
+        } }
         BrowserLibrary.shared.objectWillChange
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.setNeedsUpdate() }
@@ -65,12 +69,40 @@ final class WidgetBridge {
         #if os(iOS)
         WatchBridge.shared.setNeedsPush()                   // V22: Watch + complicaties live
         #endif
-        var comparable = snapshot; comparable.updated = .distantPast
-        var previous = lastWritten; previous?.updated = .distantPast
-        guard comparable != previous else { return }
+        // V22.2: `updated`/`time`/`position` veranderen bij elk bericht; de widgets rekenen de positie
+        // zelf door (livePosition). Alleen schrijven + herladen bij een echte wijziging (titel, url,
+        // spelen, apparaten, Spotify-nummer), een sprong in de positie (> 5 s), of hooguit elke 60 s
+        // terwijl er iets speelt (live voortgang bijstellen).
+        if let previous = lastWritten {
+            let changed = Self.normalized(snapshot) != Self.normalized(previous) || Self.positionJumped(snapshot, from: previous)
+            let periodic = snapshot.devices.contains(where: \.playing) && Date().timeIntervalSince(previous.updated) >= 60
+            guard changed || periodic else { return }
+        }
         lastWriteOK = WidgetShared.save(snapshot)
         lastWritten = snapshot
         reloadWidgets()
+    }
+
+    /// V22.2: kopie zonder de velden die elke tik veranderen.
+    private static func normalized(_ snapshot: WidgetSnapshot) -> WidgetSnapshot {
+        var s = snapshot; s.updated = .distantPast
+        s.devices = s.devices.map { var d = $0; d.updated = nil; d.time = d.time == nil ? nil : 0; return d }
+        if var sp = s.spotify { sp.position = 0; sp.updated = .distantPast; s.spotify = sp }
+        return s
+    }
+    /// V22.2: wijkt de nieuwe positie > 5 s af van wat de widget zelf zou doorrekenen (spoelen)?
+    private static func positionJumped(_ new: WidgetSnapshot, from old: WidgetSnapshot) -> Bool {
+        func expected(_ time: Double, playing: Bool, from: Date?, to: Date?) -> Double {
+            guard playing, let from, let to else { return time }
+            return time + to.timeIntervalSince(from)
+        }
+        for d in new.devices {
+            guard let t = d.time, let o = old.devices.first(where: { $0.id == d.id }), let ot = o.time else { continue }
+            if abs(t - expected(ot, playing: o.playing, from: o.updated, to: d.updated)) > 5 { return true }
+        }
+        if let sp = new.spotify, let os = old.spotify,
+           abs(sp.position - expected(os.position, playing: os.playing, from: os.updated, to: sp.updated)) > 5 { return true }
+        return false
     }
 
     private func reloadWidgets() {
@@ -154,7 +186,7 @@ final class WidgetBridge {
         let lib = BrowserLibrary.shared
         s.favourites = lib.bookmarks.prefix(12).map { WidgetLink(title: $0.title, url: $0.url) }
         s.history = lib.history.prefix(12).map { WidgetLink(title: $0.title, url: $0.url) }
-        s.continueWatching = lib.history.filter { NavigationPolicy.isPlaybackPage($0.url) }.prefix(8).map { WidgetLink(title: $0.title, url: $0.url) }
+        s.continueWatching = lib.recentVideos(8).map { WidgetLink(title: $0.title, url: $0.url) }
         return s
     }
 
@@ -186,7 +218,7 @@ final class WidgetBridge {
         case .pauseAll:
             MediaHub.shared.scan(); MediaHub.shared.pauseAll()
             for id in sync.devices.keys where sync.latestByDevice[id]?.playingID != nil {
-                sync.send(SyncCommand(kind: .toggle, target: id, url: nil, value: nil))
+                sync.send(SyncCommand(kind: .pause, target: id, url: nil, value: nil))   // V22.2: nooit per ongeluk starten
             }
         case .skipForward30, .skipBack30:
             let delta: Double = command.action == .skipForward30 ? 30 : -30
@@ -207,6 +239,7 @@ final class WidgetBridge {
                 switch command.action {
                 case .skipForward: sync.send(SyncCommand(kind: .seek, target: target, url: nil, value: 10))
                 case .skipBack: sync.send(SyncCommand(kind: .seek, target: target, url: nil, value: -10))
+                case .pause: sync.send(SyncCommand(kind: .pause, target: target, url: nil, value: nil))   // V22.2
                 default: sync.send(SyncCommand(kind: .toggle, target: target, url: nil, value: nil))
                 }
             }

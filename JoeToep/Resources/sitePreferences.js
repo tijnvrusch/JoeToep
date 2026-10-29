@@ -149,8 +149,13 @@
   window.addEventListener('pause', e => {
     const v = video();
     if (e.target !== v || v.ended) return;
-    wasPausedInline = !(document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen);
+    const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen);
+    wasPausedInline = !inFullscreen;
+    pausedInFullscreenAt = inFullscreen ? Date.now() : 0;
   }, true);
+  // V22.2: moment van een échte pauze in fullscreen (een pauze die WebKit zelf doet bij het
+  // verlaten, bijv. bij terugdraaien naar portret, telt niet).
+  let pausedInFullscreenAt = 0;
   // V22.2: fullscreen verlaten terwijl de video gepauzeerd is → telt ook als "inline gepauzeerd",
   // anders werkt "fullscreen bij afspelen" daarna niet.
   const notePausedInline = e => {
@@ -158,6 +163,7 @@
     if (!v || !v.paused || v.ended) return;
     if (e && e.type === 'webkitpresentationmodechanged' && e.target === v && v.webkitPresentationMode !== 'inline') return;
     if (document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen) return;
+    if (!pausedInFullscreenAt || Date.now() - pausedInFullscreenAt < 300) return;
     wasPausedInline = true;
   };
   document.addEventListener('fullscreenchange', notePausedInline);

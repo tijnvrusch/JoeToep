@@ -62,8 +62,23 @@ final class TabSessionStore {
             SavedBrowserTab(id: $0.id, url: Self.restorable($0.url), time: $0.time, playing: $0.playing, lastActive: $0.lastActive,
                             pinned: $0.pinned, title: $0.title)
         }
-        guard !all.isEmpty, let data = try? JSONEncoder().encode(SavedTabSession(tabs: all, selectedID: session.selectedID)) else { return }
+        // V22.3: de selectie van het EERSTE (hoofd)venster bewaren, niet van het venster dat toevallig als
+        // laatste opsloeg (een extra venster zette anders na een herstart zijn eigen "Home"-tab voorop).
+        let selection = windowOrder.first.flatMap { windows[$0]?.selectedID } ?? session.selectedID
+        guard !all.isEmpty, let data = try? JSONEncoder().encode(SavedTabSession(tabs: all, selectedID: selection)) else { return }
         defaults.set(data, forKey: key)
     }
+    /// V22.3: een (extra) venster is gesloten → zijn tabs niet meer bewaren (ze kwamen anders bij elke
+    /// herstart terug als stapel "Home"-tabs). Het laatste venster wordt nooit vergeten: sluit je dat,
+    /// dan blijven je tabs gewoon voor de volgende start bewaard.
+    func forget(window: UUID) {
+        guard windows[window] != nil, windows.count > 1 else { return }
+        windows[window] = nil; windowOrder.removeAll { $0 == window }
+        guard let first = windowOrder.first, let main = windows[first] else { return }
+        save(main, window: first)
+    }
+    /// V22.3: alle vensters dicht (app blijft open op de Mac): bewaarde tabs blijven staan, en een nieuw
+    /// venster mag ze weer ophalen (anders begon dat met één lege tab — en deelde dat via de sync).
+    func releaseWindows() { windows = [:]; windowOrder = []; claimed = false }
     func clear() { defaults.removeObject(forKey: key); claimed = false; windows = [:]; windowOrder = [] }
 }
