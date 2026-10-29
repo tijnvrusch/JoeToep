@@ -46,8 +46,23 @@ enum MediaPlatform: String, CaseIterable, Identifiable, Sendable {
         case .soundcloud: return URL(string: "https://soundcloud.com/search?q=\(e)")
         case .dailymotion: return URL(string: "https://www.dailymotion.com/search/\(e)")
         case .spotify: return URL(string: "https://open.spotify.com/search/\(e)")
-        case .web: return webEngine.url(for: q)
+        case .web: return (webEngine == .youtube ? SearchEngine.google : webEngine).url(for: q)   // V26: "Web" is nooit YouTube
         }
+    }
+    /// V26: één bron voor "waar zoekt de zoekbalk standaard". "auto" (standaard) = hetzelfde als de
+    /// adresbalk (Instellingen › Browsing › Address bar searches with): staat die op Google, dan zoekt de
+    /// zoekbalk ook op Google. Een expliciet gekozen platform (YouTube, Vimeo, Web …) blijft gelden.
+    static let preferenceKey = "newTabPlatformV26"
+    static func resolved(_ raw: String, engine: SearchEngine) -> MediaPlatform {
+        if raw == "auto" || raw.isEmpty { return engine == .youtube ? .youtube : .web }
+        return MediaPlatform(rawValue: raw) ?? (engine == .youtube ? .youtube : .web)
+    }
+    /// Eenmalig: een oude keuze (behalve het oude standaard "youtube") overnemen.
+    static func migrateLegacyPreference() {
+        let d = UserDefaults.standard
+        guard d.string(forKey: preferenceKey) == nil else { return }
+        let old = d.string(forKey: "newTabPlatformV192") ?? ""
+        d.set(old.isEmpty || old == MediaPlatform.youtube.rawValue ? "auto" : old, forKey: preferenceKey)
     }
     /// Ziet de invoer eruit als een webadres? Dan geen zoekopdracht maar direct openen.
     static func directURL(_ text: String) -> URL? {
@@ -203,7 +218,7 @@ struct NewTabPage: View {
     @ObservedObject private var store = NewTabStore.shared
     @ObservedObject private var spotify = SpotifyController.shared
     @ObservedObject private var sync = TabSyncService.shared
-    @AppStorage("newTabPlatformV192") private var platformRaw = MediaPlatform.youtube.rawValue
+    @AppStorage(MediaPlatform.preferenceKey) private var platformRaw = "auto"
     @State private var query = ""
     @FocusState private var focused: Bool
     @State private var showingDownloads = false
@@ -213,7 +228,7 @@ struct NewTabPage: View {
     @Environment(\.joeToepTheme) private var theme
 
     private var layout: NewTabLayout { store.layout }
-    private var platform: MediaPlatform { MediaPlatform(rawValue: platformRaw) ?? .youtube }
+    private var platform: MediaPlatform { MediaPlatform.resolved(platformRaw, engine: settings.searchEngine) }
     private var limit: Int { layout.itemsPerSection }
 
     var body: some View {

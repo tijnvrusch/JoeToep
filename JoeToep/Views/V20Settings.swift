@@ -297,7 +297,7 @@ struct SidebarAndCommandBarSettings: View {
     @AppStorage("commandBarShowTabsV21") private var showTabs = true
     @AppStorage("commandBarShowHistoryV21") private var showHistory = true
     @AppStorage("commandBarTabToSearchV21") private var tabToSearch = true
-    @AppStorage("newTabPlatformV192") private var defaultPlatform = MediaPlatform.youtube.rawValue
+    @AppStorage(MediaPlatform.preferenceKey) private var defaultPlatform = "auto"
     @AppStorage("liquidGlassV21") private var glass = true
     /// V22.2: waarneembaar, zodat "Dashboard in the new tab overlay" niet blijft hangen.
     @ObservedObject private var overlayStore = OverlayLayoutStore.shared
@@ -341,7 +341,8 @@ struct SidebarAndCommandBarSettings: View {
                 Toggle("New tab opens a floating search bar", isOn: $overlayNewTab)
                 Toggle("Clicking the address opens it too", isOn: $overlayAddress)
                 Picker("Search on", selection: $defaultPlatform) {
-                    ForEach(MediaPlatform.allCases) { Text($0.title).tag($0.rawValue) }
+                    Text("Same as address bar (\(SearchEngine(rawValue: UserDefaults.standard.string(forKey: "searchEngineV15") ?? "")?.title ?? "YouTube"))").tag("auto")
+                    ForEach(MediaPlatform.allCases) { Text($0 == .web ? "Web (Google or your engine)" : $0.title).tag($0.rawValue) }
                 }
                 Toggle("Platform name + Tab searches there", isOn: $tabToSearch)
                 // V22.2: via @ObservedObject → de schakelaar ververst meteen.

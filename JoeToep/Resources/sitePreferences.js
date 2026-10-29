@@ -13,7 +13,7 @@
   // telkens opnieuw proberen te doen (en de gebruiker de knop niet kan uitzetten).
   let theaterKey = '';
   // V19: volgorde theater → fullscreen, en geen theater-klik vlak rond een fullscreen-verzoek.
-  let theaterRequestedAt = 0, waitingForTheater = false;
+  let theaterRequestedAt = 0, waitingForTheater = false, theaterBlockedUntil = 0;
   const observedWatch = new WeakSet();
   // Luistert (zonder timers) naar YouTube's theater/fullscreen-attributen op de kijkpagina.
   function watchAttributes(el) {
@@ -79,7 +79,14 @@
     // (Apple's eigen speler ligt over de pagina heen; daar stoort de theaterknop niet.)
     const anyFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement || watch?.hasAttribute('fullscreen'));
     if (watch) watchAttributes(watch);
-    if (configured && config.theater && !anyFullscreen && !pendingFullscreenKey && watchPage() && theaterKey !== key()) {
+    // V26: de theaterknop wordt nooit meer ingedrukt vlak vóór of tijdens automatische fullscreen. Kwam die
+    // klik midden in de fullscreen-overgang aan, dan bleef het VENSTER fullscreen terwijl YouTube terugviel
+    // naar theatermodus (brede inline-video in een fullscreen-browser). Gaat deze video zo automatisch
+    // fullscreen, dan zet JoeToep theater pas aan ná het verlaten van fullscreen (zie V19.3 hieronder).
+    const autoFullscreenSoon = config.automaticFullscreen && startedKey !== key() && lastFullscreenKey !== key() &&
+      Date.now() > (window.__jtSkipFSUntil || 0) && !window.JOETOEP_MOBILE;
+    if (configured && config.theater && !anyFullscreen && !pendingFullscreenKey && watchPage() && theaterKey !== key() &&
+        !autoFullscreenSoon && Date.now() > theaterBlockedUntil) {
       if (watch) {
         theaterKey = key();
         if (!watch.hasAttribute('theater')) { theaterRequestedAt = Date.now(); document.querySelector('.ytp-size-button')?.click(); }
@@ -87,7 +94,7 @@
     }
     // V19: eerst theatermodus (brede video → soepelere overgang, en na fullscreen blijf je in
     // theater), pas daarna fullscreen. Wacht op YouTube's 'theater'-attribuut, hooguit 0,45 s (V23.1: was 1,5 s).
-    if (configured && config.theater && watch && !watch.hasAttribute('theater') && !anyFullscreen &&
+    if (configured && config.theater && watch && !watch.hasAttribute('theater') && !anyFullscreen && !autoFullscreenSoon &&
         Date.now() - theaterRequestedAt < 450) { waitingForTheater = true; return; }
     waitingForTheater = false;
     // Een hele reeks voorwaarden die allemaal waar moeten zijn voordat we automatisch
@@ -117,6 +124,7 @@
   // event hierboven, om te bevestigen dat fullscreen nu echt mag/kan gebeuren.
   function fulfillFullscreenRequest(nativeKeyboard = false) {
     const pending = pendingFullscreenKey; pendingFullscreenKey = '';
+    theaterBlockedUntil = Date.now() + 2500;   // V26: geen theaterklik tijdens de fullscreen-overgang
     const v = video();
     // Nog steeds dezelfde checks als bij het oorspronkelijke verzoek — intussen kan er
     // van alles veranderd zijn (video gepauzeerd, andere video geopend, enzovoort).
@@ -218,6 +226,7 @@
   // YouTube zet theater soms uit bij het verlaten van fullscreen; dan zie je een kleine speler.
   document.addEventListener('fullscreenchange', () => {
     if (document.fullscreenElement || !configured || !config.theater || !watchPage()) return;
+    theaterKey = key();   // V26: theater na fullscreen telt als "gedaan" voor deze video
     queueMicrotask(() => requestAnimationFrame(() => {
       const w = document.querySelector('ytd-watch-flexy');
       if (w && !w.hasAttribute('theater') && !w.hasAttribute('fullscreen') && !document.fullscreenElement) {
@@ -225,6 +234,31 @@
       }
     }));
   });
+  // V26 (Mac): staat de pagina in fullscreen maar denkt YouTube dat hij inline/theater is (brede video in
+  // een fullscreen-venster)? Dan YouTube opnieuw laten kijken; klopt het daarna nog niet, fullscreen netjes
+  // verlaten — nooit een fullscreen-browser met een inline-video laten staan.
+  let mismatchTimer = 0, resyncing = false;
+  const youtubeThinksFullscreen = () => Boolean(document.querySelector('ytd-watch-flexy[fullscreen]') ||
+    document.getElementById('movie_player')?.classList.contains('ytp-fullscreen'));
+  const checkMismatch = (pass = 0) => {
+    clearTimeout(mismatchTimer);
+    if (window.JOETOEP_MOBILE || !watchPage()) return;
+    mismatchTimer = setTimeout(() => {
+      const fs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fs || youtubeThinksFullscreen()) return;
+      const player = document.getElementById('movie_player');
+      if (pass === 0 && player && (fs === player || fs.contains(player))) {
+        resyncing = true;
+        try { document.dispatchEvent(new Event('fullscreenchange')); } catch (_) {}
+        resyncing = false;
+        checkMismatch(1); return;
+      }
+      try { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {}); } catch (_) {}
+    }, 700);
+  };
+  document.addEventListener('fullscreenchange', () => { if (document.fullscreenElement && !resyncing) checkMismatch(0); });
+  new MutationObserver(() => { if (document.fullscreenElement && !resyncing) checkMismatch(0); })
+    .observe(document.documentElement, {attributes: true, subtree: true, attributeFilter: ['theater', 'fullscreen']});
   // Vangnet als het theater-attribuut nooit komt: bij de eerstvolgende tijd-update opnieuw kijken.
   window.addEventListener('timeupdate', () => { if (waitingForTheater) schedule(); }, true);
   document.addEventListener('yt-navigate-finish', schedule);

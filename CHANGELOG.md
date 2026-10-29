@@ -1,3 +1,22 @@
+# 25.1.0 (38)
+
+## iPhone: omlaag vegen uit fullscreen = inline blijven
+- **Oorzaak 1:** "Fullscreen bij liggend houden" reageerde op elke oriëntatiemelding. Veegde je liggend omlaag uit fullscreen, dan bleef de telefoon "landscape" en zette de eerstvolgende melding de video meteen weer fullscreen. Nu opent alleen een échte draai van rechtop naar liggend fullscreen, en na het zelf verlaten pas weer nadat de telefoon één keer rechtop is geweest.
+- **Oorzaak 2:** na het verlaten speelt JoeToep de video door (WebKit pauzeert hem zelf); dat "play" telde voor "fullscreen bij afspelen" als nieuwe start. Nu 3 s na het verlaten geen automatische fullscreen.
+- **Pauze en dan snel omlaag vegen:** jouw pauze in fullscreen (meer dan 250 ms vóór het verlaten) blijft staan; de video gaat gepauzeerd inline, zonder terug te springen.
+
+## Mac: de zoekbalk (⌘T) zoekt waar jij wilt
+- De zoekbalk had een eigen instelling ("Search on", standaard YouTube), los van "Address bar searches with". Nu volgt hij standaard de adresbalk ("Same as address bar"); een expliciet gekozen platform blijft gelden. "Web" zoekt nooit meer op YouTube (dan Google).
+- Enter voert altijd eerst het adres of de zoekopdracht uit, nooit een toevallig passende opdracht uit de lijst.
+
+## Mac: theatermodus breekt automatische fullscreen niet meer
+- De theaterknop werd soms ingedrukt midden in de overgang naar fullscreen; dan bleef het venster fullscreen terwijl YouTube terugviel naar theatermodus (brede inline-video in een fullscreen-browser). Gaat een video automatisch fullscreen, dan zet JoeToep theater pas aan ná het verlaten. Klopt fullscreen toch niet (pagina fullscreen, YouTube inline), dan laat JoeToep YouTube opnieuw kijken en verlaat hij anders netjes fullscreen.
+- Een fullscreen-venster zonder fullscreen-pagina, of een "Click to Exit Full Screen"-plaatshouder zonder fullscreen-venster, wordt na 1,5 s vanzelf gesloten.
+
+## Tests
+- Nieuw: `Scripts/test_v26_scripts.cjs` (8 scenario's, o.a. 500× fullscreen → omlaag vegen); 3 daarvan falen op 25.0. De V19-test "eerst theater, dan fullscreen" is aangepast naar de nieuwe volgorde. `V25FeatureTests`: zoekbalk volgt de adresbalk.
+- Op de Mac getest: ⌘T "openai sora" → Google; theatermodus aan + video uit de feed/eindscherm en 3× Shift+N → telkens echte fullscreen; Esc → inline.
+
 # 25.0.0 (37)
 
 ## iPhone: play/pauze werkt altijd precies één keer

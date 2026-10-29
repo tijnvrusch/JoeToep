@@ -14,7 +14,7 @@ struct CommandBarOverlay: View {
     @ObservedObject var workspace: BrowserWorkspace
     @ObservedObject var settings: AppSettings
     @ObservedObject private var library = BrowserLibrary.shared
-    @AppStorage("newTabPlatformV192") private var defaultPlatformRaw = MediaPlatform.youtube.rawValue
+    @AppStorage(MediaPlatform.preferenceKey) private var defaultPlatformRaw = "auto"
     @AppStorage("commandBarTintV21") private var tint = 0.12
     @State private var text = ""
     @State private var token: MediaPlatform?
@@ -25,7 +25,7 @@ struct CommandBarOverlay: View {
     @Environment(\.joeToepTheme) private var theme
 
     private var editsCurrent: Bool { workspace.commandBarEditsCurrent }
-    private var platform: MediaPlatform { token ?? MediaPlatform(rawValue: defaultPlatformRaw) ?? .youtube }
+    private var platform: MediaPlatform { token ?? MediaPlatform.resolved(defaultPlatformRaw, engine: settings.searchEngine) }
 
     enum Suggestion: Identifiable {
         case open(URL), search(MediaPlatform, String), tab(BrowserTab), item(LibraryItem, String), command(PaletteCommand)
@@ -43,6 +43,7 @@ struct CommandBarOverlay: View {
     private var suggestions: [Suggestion] {
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var list: [Suggestion] = []
+        var commandMatches: [PaletteCommand] = []
         if q.isEmpty {
             if CommandBarPrefs.showTabs {
                 list += workspace.tabs.filter { $0.id != workspace.selectedID }.sorted { $0.lastActive > $1.lastActive }.prefix(4).map(Suggestion.tab)
@@ -58,10 +59,13 @@ struct CommandBarOverlay: View {
                 needle.isEmpty ? isCommand : (c.title.lowercased().contains(needle) || c.keywords.contains { $0.hasPrefix(needle) })
             }
             if isCommand { return Array(matches.prefix(CommandBarPrefs.maxSuggestions)).map(Suggestion.command) }
-            if needle.count >= 3 { list += matches.prefix(2).map(Suggestion.command) }
+            commandMatches = Array(matches.prefix(needle.count >= 3 ? 2 : 0))
         }
+        // V26: Enter = altijd eerst het adres (als je een webadres typte) of de zoekopdracht — nooit een
+        // toevallig passende opdracht ("clear", "audio" …). Opdrachten staan daarna in de lijst.
         if token == nil, let url = MediaPlatform.directURL(q) { list.append(.open(url)) }
         list.append(.search(platform, q))
+        list += commandMatches.map(Suggestion.command)
         let lower = q.lowercased()
         if CommandBarPrefs.showTabs {
             list += workspace.tabs.filter { $0.fullTitle.lowercased().contains(lower) || ($0.currentURL?.absoluteString.lowercased().contains(lower) ?? false) }

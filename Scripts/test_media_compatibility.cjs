@@ -573,20 +573,22 @@ test('V19.2 F and double-click leave a fullscreen that YouTube does not own', ()
   assert.equal(h.w.JoeToepControls.exitFullscreen(),true);assert.equal(exits,1);
   h.close();
 });
-test('V19 theater mode comes first, automatic fullscreen only after YouTube applied it', async () => {
+test('V26 (was V19) automatic fullscreen first, theater only after leaving fullscreen — never a theater click mid-transition', async () => {
   const h=harness({mobile:false});h.w.JOETOEP_NATIVE_HOST=true;
   const watch=h.d.createElement('ytd-watch-flexy');h.d.body.append(watch);
   const button=h.d.createElement('button');button.className='ytp-size-button';watch.append(button);
-  const order=[];let applyTheater=false;
-  button.addEventListener('click',()=>{order.push('theater');if(applyTheater)watch.setAttribute('theater','');});
+  const order=[];
+  button.addEventListener('click',()=>{order.push('theater');watch.setAttribute('theater','');});
   h.d.addEventListener('joetoep-automatic-fullscreen',()=>order.push('fullscreen'));
   h.w.eval(preferencesSource);
   h.w.JoeToepPreferences.configure({automaticFullscreen:true,theater:true});await Promise.resolve();
-  assert.deepEqual(order,['theater'],'fullscreen waits while theater is being applied');
-  watch.setAttribute('theater','');await new Promise(r=>setTimeout(r,0));await Promise.resolve();
-  assert.deepEqual(order,['theater','fullscreen'],'then fullscreen follows exactly once');
-  watch.setAttribute('fullscreen','');watch.removeAttribute('theater');await new Promise(r=>setTimeout(r,0));
-  assert.equal(order.filter(x=>x==='theater').length,1,'never toggles theater while fullscreen');
+  assert.deepEqual(order,['fullscreen'],'no theater click while automatic fullscreen is about to start');
+  h.w.JoeToepPreferences.fulfillFullscreenRequest();
+  watch.setAttribute('fullscreen','');await new Promise(r=>setTimeout(r,0));
+  assert.deepEqual(order,['fullscreen'],'never toggles theater while fullscreen');
+  watch.removeAttribute('fullscreen');h.d.dispatchEvent(new h.w.Event('fullscreenchange'));
+  await new Promise(r=>setTimeout(r,40));
+  assert.deepEqual(order,['fullscreen','theater'],'theater exactly once, after fullscreen');
   h.close();
 });
 test('V10 native automatic fullscreen waits for preferences and consumes exactly one request', async () => {

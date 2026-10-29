@@ -6,7 +6,7 @@ import XCTest
 final class V25FeatureTests: XCTestCase {
 
     func testVersionIs25() {
-        XCTAssertEqual(AppConstants.version, "25.0.0")
+        XCTAssertTrue(AppConstants.version.hasPrefix("25."), "25.x")
     }
 
     /// De klokwaarde van het moment dat het andere apparaat begon te spelen reist mee, zodat het alleen
@@ -32,5 +32,16 @@ final class V25FeatureTests: XCTestCase {
         XCTAssertTrue(mediaText.contains("nativeUserPlay"), "▶ in Apple's fullscreen player counts as your tap")
         XCTAssertTrue(mediaText.contains("allowedPlay"), "a started video is judged once, not again on every 'playing'")
         XCTAssertTrue(prefsText.contains("userPlayIntent"), "restore step never pauses your own start")
+    }
+
+    /// V25.1: de zoekbalk (⌘T) volgt standaard de zoekmachine van de adresbalk; "Web" is nooit YouTube.
+    func testSearchBarFollowsAddressBarEngine() {
+        XCTAssertEqual(MediaPlatform.resolved("auto", engine: .google), .web)
+        XCTAssertEqual(MediaPlatform.resolved("auto", engine: .youtube), .youtube)
+        XCTAssertEqual(MediaPlatform.resolved("vimeo", engine: .google), .vimeo, "an explicit platform choice wins")
+        XCTAssertEqual(MediaPlatform.web.url(for: "kat filmpjes", webEngine: .google)?.host, "www.google.com")
+        XCTAssertEqual(MediaPlatform.web.url(for: "kat filmpjes", webEngine: .youtube)?.host, "www.google.com", "Web never searches YouTube")
+        XCTAssertEqual(MediaPlatform.resolved("auto", engine: .google).url(for: "openai.com", webEngine: .google)?.host, "openai.com",
+                       "a web address still opens directly")
     }
 }

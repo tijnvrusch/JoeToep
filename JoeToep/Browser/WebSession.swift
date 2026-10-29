@@ -83,6 +83,13 @@ final class WebSession: NSObject, ObservableObject {
     private var positionTask: Task<Void, Never>?
     private var reconcileTask: Task<Void, Never>?
     private var sawLandscapeWhileFullscreen = false
+    #if os(iOS)
+    /// V26: "landscape = fullscreen" mag pas weer nadat de telefoon na een fullscreen-sessie één keer
+    /// rechtop is geweest. Veeg je liggend omlaag uit fullscreen, dan bleef de telefoon "landscape" en
+    /// zette de eerstvolgende oriëntatiemelding de video meteen weer fullscreen.
+    private var landscapeFullscreenArmed = true
+    private var lastDeviceOrientation: UIDeviceOrientation = .unknown
+    #endif
     private var returnFromPiPTask: Task<Void, Never>?
     private var usesElementFullscreen: Bool {
         #if os(iOS)
@@ -558,6 +565,9 @@ final class WebSession: NSObject, ObservableObject {
     func deviceOrientationChanged() {
         let orientation = UIDevice.current.orientation
         guard UIDevice.current.userInterfaceIdiom == .phone, applicationActive else { return }
+        let previous = lastDeviceOrientation
+        if orientation.isPortrait || orientation.isLandscape { lastDeviceOrientation = orientation }
+        if orientation.isPortrait { landscapeFullscreenArmed = true }
         // V23.1: zelf naar landscape gekanteld → de automatische landscape-klem is niet meer nodig.
         if orientation.isLandscape && isVisibleTab { OrientationCoordinator.releaseFullscreenLandscapeClamp() }
         if isFullscreen && orientation.isLandscape { sawLandscapeWhileFullscreen = true }
@@ -570,6 +580,9 @@ final class WebSession: NSObject, ObservableObject {
             webView.evaluateJavaScript("window.JoeToepMedia?.exitFullscreenKeepPlaying()", completionHandler: nil)
             return
         }
+        // V26: alleen een échte draai van rechtop naar liggend opent fullscreen — niet een herhaalde
+        // landscape-melding nadat je zelf uit fullscreen ging.
+        guard landscapeFullscreenArmed, !previous.isLandscape || previous == .unknown else { return }
         guard settings.fullscreenOnLandscape,
               orientation.isLandscape, isPlaying, !isFullscreen,
               !pip.isActive, !pip.isRequesting, !nativePiPActive,
@@ -2688,6 +2701,17 @@ final class WebSession: NSObject, ObservableObject {
         // Pas ingrijpen als hij twee controles achter elkaar (2 s en 3,5 s na het verlaten) nog los hangt —
         // WebKit's eigen terugweg kan ruim een seconde duren en mag nooit onderbroken worden.
         if wasFullscreen && !event.fullscreen {
+            // V26: de pagina is uit fullscreen, maar staat WebKit's fullscreen-venster er na 1,5 s nog
+            // (fullscreen browser met een inline/theater-video)? Dan dat venster netjes sluiten.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, !self.isFullscreen, self.webView.fullscreenState == .inFullscreen else { return }
+                self.webView.evaluateJavaScript("!!(document.fullscreenElement||document.webkitFullscreenElement)") { [weak self] value, _ in
+                    guard let self, (value as? Bool) == false, !self.isFullscreen,
+                          self.webView.fullscreenState == .inFullscreen else { return }
+                    self.recordLifecycle("fullscreen window without page fullscreen → close")
+                    self.webView.closeAllMediaPresentations { }
+                }
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 guard let self, !self.isFullscreen, self.webView.superview == nil || self.webView.window == nil else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -2704,6 +2728,8 @@ final class WebSession: NSObject, ObservableObject {
         if wasFullscreen && !event.fullscreen && !wasNativePiP {
             orientationTask?.cancel()
             #if os(iOS)
+            // V26: uit fullscreen terwijl de telefoon liggend is (omlaag vegen) → niet meteen weer fullscreen.
+            if UIDevice.current.orientation.isLandscape { landscapeFullscreenArmed = false }
             // V23.1: op de achtergrond nooit "vast" in landscape blijven.
             if !applicationActive && OrientationCoordinator.fullscreenLandscape {
                 OrientationCoordinator.endFullscreenLandscape(returnToPortrait: false)

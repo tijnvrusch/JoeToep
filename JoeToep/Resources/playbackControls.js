@@ -539,9 +539,10 @@
   // V20 — Na het verlaten van fullscreen gewoon doorspelen (iPhone/iPad pauzeren dan vanzelf).
   // Alleen als de video vlak vóór het verlaten nog speelde; zelf gepauzeerd = gepauzeerd blijven,
   // en niet als JoeToep zelf fullscreen sloot omdat je pauzeerde.
-  let lastPlayingAt = 0, lastUserPauseAt = 0, resumeUntil = 0;
+  let lastPlayingAt = 0, lastUserPauseAt = 0, resumeUntil = 0, lastPlayAt = 0, fsPauseAt = 0;
   const markPlaying = v => { if (v instanceof HTMLVideoElement && !v.paused) lastPlayingAt = Date.now(); };
   window.addEventListener('playing', e => markPlaying(e.target), true);
+  window.addEventListener('play', e => { if (e.target === pick()) lastPlayAt = Date.now(); }, true);
   window.addEventListener('timeupdate', e => markPlaying(e.target), true);
   window.addEventListener('pause', e => {
     const v = e.target;
@@ -551,10 +552,19 @@
       setTimeout(() => { if (v.paused && !v.ended) v.play()?.catch(() => {}); }, 60);
     } else if (!fsElement() && !v.webkitDisplayingFullscreen) {
       lastUserPauseAt = Date.now();
+    } else {
+      fsPauseAt = Date.now();   // V26: pauze ín fullscreen (❚❚ in de speler)
     }
   }, true);
   const fullscreenLeft = () => {
+    // V26 (iPhone/iPad): fullscreen verlaten (omlaag vegen, ✕, rechtop draaien) = inline blijven.
+    // Daarna 3 s geen automatische fullscreen ("bij afspelen" / "bij laden") — anders sprong de video
+    // na het omlaag vegen meteen weer fullscreen, omdat het hervatten hieronder als "play" telde.
+    if (window.JOETOEP_MOBILE) window.__jtSkipFSUntil = Math.max(window.__jtSkipFSUntil || 0, Date.now() + 3000);
     if (cfg.resumeAfterFullscreenExit === false || window.__joetoepExitedByPause) return;
+    // V26: jij pauzeerde in fullscreen (meer dan 250 ms vóór het verlaten, niet WebKit's eigen
+    // pauze bij het sluiten) → gepauzeerd blijven, ook als je daarna snel omlaag veegt.
+    if (fsPauseAt > lastPlayAt && Date.now() - fsPauseAt > 250) return;
     if (Date.now() - (window.__joetoepPiPClosedAt || 0) < 5000) return; // V22: PiP met ✕ gesloten
     if (window.__joetoepDblClickKeepPaused && Date.now() - (window.__joetoepDblClickExitAt || 0) < 2500) return; // V23.1
     const v = pick();

@@ -394,6 +394,7 @@ final class AppSettings: ObservableObject {
         openNewTabsNextToCurrent = flag("openNewTabsNextToCurrentV15", true)
         openWebLinksInApp = flag("openWebLinksInAppV15", true)
         searchEngine = SearchEngine(rawValue: defaults.string(forKey: "searchEngineV15") ?? "") ?? .youtube
+        MediaPlatform.migrateLegacyPreference()   // V26: zoekbalk volgt standaard de adresbalk-zoekmachine
         recordHistory = flag("recordHistoryV15", true)
         pipReturnTarget = PiPReturnTarget(rawValue: defaults.string(forKey: "pipReturnTargetV15") ?? "") ?? .fullscreen
         pipReturnKeepsPlaying = flag("pipReturnKeepsPlayingV15", true)
