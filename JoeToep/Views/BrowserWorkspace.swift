@@ -352,6 +352,8 @@ final class BrowserWorkspace: ObservableObject {
     }
     private var forceNextPublish = false
     func prepareDeviceSwitch() {
+        // V23: automatisch wisselen uit → niets vanzelf doorgeven (alleen via de knoppen).
+        guard HandoffPrefs.autoResume else { return }
         guard let tab = tabs.first(where: { !$0.isPrivate && ($0.session.isPlaying || $0.session.isInPictureInPicture) }) else { return }
         let fallback = tab.session.resumePoint?.time ?? 0
         localHandoff = (tab.id, fallback); localHandoffNonce = UUID().uuidString

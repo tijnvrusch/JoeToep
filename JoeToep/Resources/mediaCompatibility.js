@@ -136,8 +136,24 @@
   const signal = () => document.dispatchEvent(new Event("joetoep-media-state"));
   // Is dit een pagina waar echt een video wordt afgespeeld (kijkpagina, shorts, livestream
   // of embed)? .some() geeft true zodra minstens één van de voorvoegsels klopt.
+  // V23: ook als je de kijkpagina verlaat terwijl de video doorspeelt (YouTube's miniplayer, of
+  // terug naar de startpagina met de video nog aan): dan blijft het "de" video, zodat PiP op de
+  // achtergrond en de bescherming tegen ongewenste pauzes gewoon blijven werken. Alleen een
+  // hoorbare hoofdvideo die zojuist speelde telt (geen stille voorbeeldfilmpjes op de startpagina).
+  let audibleAt = 0;
+  document.addEventListener("timeupdate", e => {
+    const v = e.target;
+    if (v instanceof HTMLVideoElement && !v.paused && !v.ended && !v.muted && v.volume > 0 &&
+        (v.classList.contains("html5-main-video") || v === main)) audibleAt = Date.now();
+  }, true);
+  const leftWithPlayingVideo = () => {
+    if (Date.now() - audibleAt > 2500) return false;
+    const v = main?.isConnected ? main : document.querySelector("video.html5-main-video");
+    return Boolean(v && !v.ended && !v.muted && (!v.paused || Date.now() - lastPauseAt < 2500));
+  };
   const isMediaPage = () => location.pathname === "/watch" ||
     ["/shorts/", "/live/", "/embed/"].some(prefix => location.pathname.startsWith(prefix)) ||
+    leftWithPlayingVideo() ||
     (location.protocol === "file:" && window.JOETOEP_TEST);
   // Mag deze video door JoeToep "beschermd" worden tegen ongewenste pauzes? Alleen als
   // bescherming aanstaat, er geen onderbreking bezig is, het de gekozen hoofdvideo is,

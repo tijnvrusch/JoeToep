@@ -229,7 +229,64 @@ final class TabSyncService: NSObject, ObservableObject {
     /// Stuurt een opdracht naar één apparaat (of voert hem zelf uit als dat dit apparaat is).
     func send(_ command: SyncCommand) {
         if command.target == deviceID { onCommand?(command); return }
+        // V23: doelapparaat (nog) niet verbonden (iPhone kwam net uit de achtergrond, verbinding weg)?
+        // Dan de opdracht even bewaren en meteen opnieuw verbinden; bij verbinden gaat hij alsnog weg.
+        // Max. 10 s houdbaar — een pauze/play die veel later aankomt zou je verrassen.
+        if !isConnected(command.target) {
+            outbox.removeAll { Date().timeIntervalSince($0.at) > 10 }
+            outbox.append((command, Date()))
+            note("queued \(command.kind.rawValue) for \(devices[command.target] ?? "device") — reconnecting")
+            resume()
+            return
+        }
         broadcast(.command(command))
+    }
+
+    /// V23: wanneer viel de verbinding met elk apparaat weg.
+    private var disconnectedAt: [String: Date] = [:]
+    /// V23: verbonden, of pas kort weg (iOS verbreekt de verbinding op de achtergrond; bij terugkomst
+    /// duurt herverbinden een paar tellen). Voor de Live Activity/widgets, zodat die niet "op pauze"
+    /// springen tijdens het herverbinden. Bediening werkt dan ook: opdrachten wachten in de outbox.
+    func isReachable(_ device: String, grace: TimeInterval = 120) -> Bool {
+        if devices[device] != nil { return true }
+        guard let since = disconnectedAt[device] else { return false }
+        return Date().timeIntervalSince(since) < grace
+    }
+
+    /// V23: opdrachten die wachten tot hun apparaat (weer) verbonden is.
+    private var outbox: [(command: SyncCommand, at: Date)] = []
+    private func flushOutbox() {
+        outbox.removeAll { Date().timeIntervalSince($0.at) > 10 }
+        let ready = outbox.filter { isConnected($0.command.target) }
+        guard !ready.isEmpty else { return }
+        outbox.removeAll { item in isConnected(item.command.target) }
+        for item in ready {
+            broadcast(.command(item.command))
+            note("delivered queued \(item.command.kind.rawValue) after \(String(format: "%.1f", Date().timeIntervalSince(item.at))) s")
+        }
+    }
+    /// V23: is er nog een opdracht onderweg naar dit apparaat?
+    func hasQueuedCommand(for device: String) -> Bool { outbox.contains { $0.command.target == device } }
+
+    /// V23: wacht (max. `timeout` s) tot dit apparaat verbonden is; start zo nodig de sync opnieuw.
+    func waitForConnection(to device: String, timeout: Double) async -> Bool {
+        if isConnected(device) { return true }
+        resume()
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(120))
+            if isConnected(device) { return true }
+        }
+        return isConnected(device)
+    }
+    /// V23: wacht (max. `timeout` s) op een snapshot van dit apparaat ná `since`.
+    func waitForSnapshot(from device: String, since: Date, timeout: Double) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if (lastHeard[device] ?? .distantPast) > since { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return false
     }
 
     private func broadcast(_ message: SyncMessage) {
@@ -246,6 +303,7 @@ final class TabSyncService: NSObject, ObservableObject {
         case .hello(let id, let name):
             peerDevice[peer] = id; devices[id] = name
             refreshPeers()
+            flushOutbox()   // V23
         case .snapshot(let snapshot):
             // V22.3: onze EIGEN (oude) toestand, teruggestuurd door een ander apparaat (dat houdt de laatst
             // bekende snapshot bij en stuurt die bij verbinden). Alleen de klok bijwerken — nooit als
@@ -354,6 +412,8 @@ final class TabSyncService: NSObject, ObservableObject {
         // V22.2: apparaat pas "weg" als geen andere verbonden peer meer bij die id hoort.
         let wasKnown = peerDevice[peer] != nil
         if let id = peerDevice.removeValue(forKey: peer), !isConnected(id) {
+            disconnectedAt[id] = Date()   // V23
+            Task { @MainActor in try? await Task.sleep(for: .seconds(121)); WidgetBridge.shared.setNeedsUpdate() }
             devices[id] = nil; peerStates[id] = nil; SpotifyController.shared.forget(deviceID: id)
             mergedOrigins.remove(id)          // V22.2: volgende snapshot na herverbinden weer samenvoegen
             onPeerDisconnected?(id)

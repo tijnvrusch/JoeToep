@@ -57,6 +57,8 @@ final class WebSession: NSObject, ObservableObject {
     #if os(macOS)
     /// V18: volgt app-wissels op andere schermen (alleen actief terwijl JoeToep op de achtergrond speelt).
     private let screenFocus = ScreenFocusMonitor()
+    /// V23: houdt fullscreen altijd op 100 % (zie MacFullscreenFitGuard).
+    private var fullscreenFit: MacFullscreenFitGuard?
     #endif
     let networkMonitor = NetworkMonitor.shared   // V22.2: één NWPathMonitor voor alle tabs
     private let playbackSession: PlaybackSessionController
@@ -279,6 +281,11 @@ final class WebSession: NSObject, ObservableObject {
         #else
         webView.appearance = NSAppearance(named: .darkAqua)
         floating.onClose = { [weak self] in self?.pip.exitFloating() }
+        let fit = MacFullscreenFitGuard(webView: webView)
+        fit.isFullscreen = { [weak self] in self?.isFullscreen ?? false }
+        fit.log = { [weak self] line in self?.recordLifecycle(line) }
+        fit.reenterFullscreen = { [weak self] in self?.reenterFullscreenForFit() }
+        fullscreenFit = fit
         #endif
         webView.isInspectable = true
         webView.allowsLinkPreview = true
@@ -784,8 +791,9 @@ final class WebSession: NSObject, ObservableObject {
             return
         }
         #endif
+        // V23: ook als je de kijkpagina verliet terwijl de video doorspeelt (miniplayer/startpagina).
         guard settings.automaticPiP,
-              isFullscreen || isTestMode || NavigationPolicy.isPlaybackPage(currentURL), !pip.isActive else { return }
+              isFullscreen || isTestMode || NavigationPolicy.isPlaybackPage(currentURL) || leftPlayerWhilePlaying, !pip.isActive else { return }
         #if os(macOS)
         // V18: met meerdere schermen eerst kijken WAAR de nieuwe app staat. Een tel wachten zodat
         // macOS de nieuwe app en haar venster al vooraan heeft gezet.
@@ -845,7 +853,7 @@ final class WebSession: NSObject, ObservableObject {
         if nativeOwnsAutomaticPiP() || nativePiPActive { return }
         #endif
         guard settings.automaticPiP, !attemptedAutomaticInEpisode, !pip.isActive, !pip.isRequesting,
-              isTestMode || NavigationPolicy.isPlaybackPage(currentURL) else { return }
+              isTestMode || NavigationPolicy.isPlaybackPage(currentURL) || leftPlayerWhilePlaying else { return }   // V23
         attemptedAutomaticInEpisode = true
         requestPictureInPicture(reason: .appSwitch)
     }
@@ -1649,6 +1657,9 @@ final class WebSession: NSObject, ObservableObject {
         contentController.removeScriptMessageHandler(forName: AppConstants.scriptMessageName, contentWorld: Self.bridgeWorld)
         contentController.removeScriptMessageHandler(forName: AppConstants.linkMessageName, contentWorld: Self.bridgeWorld)
         sponsorTask?.cancel(); historyTask?.cancel(); fullscreenVerifyTask?.cancel()
+        #if os(macOS)
+        fullscreenFit?.stop()
+        #endif
         titleObservation = nil
     }
     func resetVideoZoom() { bridge("window.JoeToepBridge?.resetZoom()") }
@@ -1763,6 +1774,27 @@ final class WebSession: NSObject, ObservableObject {
         #endif
     }
 
+    /// V23: de kijkpagina is verlaten terwijl de video doorspeelt (YouTube's miniplayer/startpagina).
+    /// Alleen een VERRUIMING van de paginacontrole — nooit een voorwaarde: de pagina beslist zelf
+    /// (beginAutomaticHandoff) of er echt iets speelt.
+    private var leftPlayerWhilePlaying: Bool { isPlaying && videoID != 0 }
+
+    #if os(macOS)
+    /// V23: laatste redmiddel van de fullscreen-bewaker — het fullscreen-vlak bleef te klein (oude
+    /// schermmaat). Eén keer netjes uit en weer in fullscreen; de video blijft gewoon doorspelen.
+    private func reenterFullscreenForFit() {
+        guard isFullscreen, !pip.isActive, !pip.isRequesting else { return }
+        let serial = navigationSerial
+        webView.evaluateJavaScript("(()=>{try{const d=document;if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d);return 1}}catch(_){}return 0})()", completionHandler: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
+            guard let self, self.navigationSerial == serial, self.isVisibleTab, self.applicationActive,
+                  !self.isFullscreen, !self.pip.isActive else { return }
+            if let w = self.webView.window, w.styleMask.contains(.fullScreen) { return }
+            self.enterFullscreenForHandOverIgnoringPlayState()
+        }
+    }
+    #endif
+
     func openFullscreenFallback() {
         guard !pip.isActive && !pip.isRequesting else { return }
         webView.evaluateJavaScript("window.JoeToepMedia?.fullscreen()", completionHandler: nil)
@@ -1780,7 +1812,7 @@ final class WebSession: NSObject, ObservableObject {
         return
         #else
         let enabled = settings.backgroundProtection && !applicationActive &&
-            (NavigationPolicy.isPlaybackPage(currentURL) || isTestMode || pip.isActive || isFullscreen) &&
+            (NavigationPolicy.isPlaybackPage(currentURL) || isTestMode || pip.isActive || isFullscreen || leftPlayerWhilePlaying) &&   // V23
             (isPlaying || pip.isActive || pip.isRequesting || systemFullscreenHandoff)
         guard enabled != visibilityProtectionApplied else { return }
         visibilityProtectionApplied = enabled
@@ -2354,6 +2386,9 @@ final class WebSession: NSObject, ObservableObject {
         updatePositionTracking()
         playbackSession.notePlayback(event.playing)
         isFullscreen = event.fullscreen
+        #if os(macOS)
+        if wasFullscreen != event.fullscreen || (event.fullscreen && event.stage != isVideoStage) { fullscreenFit?.fullscreenChanged(event.fullscreen) }
+        #endif
         let wasStage = isVideoStage
         isVideoStage = event.stage
         #if os(macOS)

@@ -10,8 +10,13 @@ import WidgetKit
 enum WidgetIntentRouter {
     /// De app zet dit bij het starten; in de widget-extensie blijft het nil.
     nonisolated(unsafe) static var handler: ((WidgetCommand) -> Void)?
-    static func run(_ command: WidgetCommand) {
-        if let handler { DispatchQueue.main.async { handler(command) } }
+    /// V23: de app voert de opdracht uit en WACHT tot hij echt is afgeleverd (verbinding met het andere
+    /// apparaat herstellen, versturen, nieuwe stand ontvangen). Zo werkt de bediening in de Live Activity
+    /// en de widgets ook als de app op de achtergrond sliep en de verbinding weg was.
+    nonisolated(unsafe) static var asyncHandler: ((WidgetCommand) async -> Void)?
+    static func run(_ command: WidgetCommand) async {
+        if let asyncHandler { await asyncHandler(command) }
+        else if let handler { DispatchQueue.main.async { handler(command) } }
         else { WidgetShared.enqueue(command) }
         #if canImport(WidgetKit)
         // Na een halve seconde opnieuw tekenen (dan heeft de app de nieuwe toestand geschreven).
@@ -36,7 +41,7 @@ struct MediaCommandIntent: AudioPlaybackIntent {
 
     func perform() async throws -> some IntentResult {
         guard let a = WidgetCommand.Action(rawValue: action) else { return .result() }
-        WidgetIntentRouter.run(WidgetCommand(action: a, deviceID: deviceID.isEmpty ? nil : deviceID))
+        await WidgetIntentRouter.run(WidgetCommand(action: a, deviceID: deviceID.isEmpty ? nil : deviceID))
         return .result()
     }
 }
@@ -49,7 +54,7 @@ struct OpenLinkIntent: AppIntent {
     init() {}
     init(url: URL) { self.url = url }
     func perform() async throws -> some IntentResult {
-        WidgetIntentRouter.run(WidgetCommand(action: .open, deviceID: nil, url: url))
+        await WidgetIntentRouter.run(WidgetCommand(action: .open, deviceID: nil, url: url))
         return .result()
     }
 }

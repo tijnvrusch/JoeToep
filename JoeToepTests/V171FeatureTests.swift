@@ -33,9 +33,10 @@ final class V171FeatureTests: XCTestCase {
         }
     }
     func testAll153AppIconsExistWithPreviews() {
-        XCTAssertEqual(AppIconController.names.count, 153, "43 classic + 110 new icons")
-        XCTAssertEqual(Set(AppIconController.names).count, 153, "names are unique")
-        XCTAssertEqual(AppIconController.series.map(\.names.count), [20, 20, 20, 20, 30])
+        // V23: inmiddels 43 klassieke + 150 nieuwe iconen (zeven series).
+        XCTAssertEqual(AppIconController.names.count, 193, "43 classic + 150 new icons")
+        XCTAssertEqual(Set(AppIconController.names).count, AppIconController.names.count, "names are unique")
+        XCTAssertEqual(AppIconController.series.map(\.names.count), [20, 20, 20, 20, 20, 20, 30])
         for name in AppIconController.names {
             #if os(macOS)
             XCTAssertNotNil(NSImage(named: "IconPreview" + name), "preview for \(name)")

@@ -230,6 +230,7 @@ enum LayoutPrefs {
 enum HandoffPrefs {
     private static var d: UserDefaults { .standard }
     /// Wissel je naar dit apparaat terwijl het andere speelt: hier automatisch verder spelen.
+    /// V23: ook de hoofdschakelaar "Switch devices automatically" — uit = alleen via de knoppen.
     static var autoResume: Bool { d.object(forKey: "handoffAutoResumeV21") as? Bool ?? true }
     /// Hoe lang (s) een "speelt nu"-melding bruikbaar blijft.
     static var maxAge: Double { d.object(forKey: "handoffMaxAgeV21") as? Double ?? 900 }
@@ -250,7 +251,9 @@ struct HandoffSettingsSection: View {
     var body: some View {
         Section {
             Toggle("Keep playing when JoeToep reopens", isOn: $resumeOnLaunch)
-            Toggle("Continue playing when you switch devices", isOn: $autoResume)
+            // V23: hoofdschakelaar. Uit = alleen overnemen met "Continue here" / "Play here".
+            Toggle("Switch devices automatically", isOn: $autoResume)
+                .accessibilityIdentifier("settings.autoDeviceSwitch")
             #if os(iOS)
             Toggle("Live Activity on the Lock Screen", isOn: $liveActivity)
             #endif
@@ -268,7 +271,11 @@ struct HandoffSettingsSection: View {
                 }
             }
         } header: { Text("Switching devices") } footer: {
-            Text("Open JoeToep on your iPhone while the Mac plays (or the other way round): the video continues here right away at the same moment, and the other device pauses and sends its exact time so both line up to a fraction of a second.")
+            if autoResume {
+                Text("Open JoeToep on your iPhone while the Mac plays (or the other way round): the video continues here right away at the same moment, and the other device pauses and sends its exact time so both line up to a fraction of a second.")
+            } else {
+                Text("Off: this device never takes over by itself and doesn't hand its video over when you put it away. Use Continue here / Play here (widget, Live Activity, overlay, Watch or ⌘K) to move a video to this device. Set this on each device.")
+            }
         }
     }
 }

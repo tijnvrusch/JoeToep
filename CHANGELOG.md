@@ -1,3 +1,23 @@
+# 23.0.0 (34)
+
+## Fullscreen, apparaatwissel, volume, Live Activity en PiP
+- **Fullscreen op de Mac altijd 100 %**: de video bleef soms op ±75 % staan met zwarte balken (BenQ 1440p én HP 1920x1200), tot een herstart. Oorzaak: na een monitorwissel, slaapstand of andere schaal hield de webview of WebKit's fullscreen-venster de maat van het vorige scherm vast (2560 ↔ 1920 = precies 75 %), of YouTube rekende de videogrootte uit vóór de fullscreen-animatie klaar was. Een nieuwe fullscreen-bewaker controleert na het ingaan van fullscreen en na elke scherm-/schaalwissel (0,15 / 0,6 / 1,4 / 3 s, geen doorlopende polling) of de video het scherm vult, en herstelt in stappen: trackpad-vergroting terug naar 1, webview-frame gelijk aan zijn venster, YouTube opnieuw laten meten, en zo nodig een regel die de video het hele vlak laat vullen (beeldverhouding blijft kloppen). Klopt het fullscreen-venster zelf niet, dan zet JoeToep het op het scherm; als laatste redmiddel gaat fullscreen één keer uit en weer aan. Alles komt in het lifecycle-logboek.
+- **Nieuwe instelling "Switch devices automatically"** (Instellingen › Sync & devices): uit = dit apparaat neemt nooit vanzelf over en geeft zijn video ook niet vanzelf door als je het wegstopt; overnemen gaat dan alleen met *Continue here* / *Play here* (widget, Live Activity, overlay, Watch, ⌘K). Per apparaat instelbaar; standaard aan (zoals voorheen).
+- **Volume in beeld**: bij een verticale veeg (trackpad/muis) en bij de pijltjestoetsen verschijnt het volumepercentage met luidsprekericoon bovenin de video, zoals YouTube dat doet — ook in fullscreen. YouTube's eigen bezel blijft weg, dus nooit twee plaatjes.
+- **Live Activity blijft gesynchroniseerd en bedienbaar**:
+  - knoppen (play/pauze, ±10 s, ±30 s) wachten nu tot de opdracht echt is afgeleverd: de app herstelt zo nodig eerst de verbinding met het andere apparaat (iOS verbreekt die op de achtergrond), verstuurt, en zet de Live Activity daarna gelijk met de nieuwe stand van dat apparaat;
+  - je tik is meteen zichtbaar (play/pauze en spoelen worden direct getoond, de echte stand volgt binnen een paar tellen);
+  - opdrachten voor een apparaat dat nog aan het herverbinden is, wachten max. 10 s in een outbox en gaan weg zodra het verbonden is (ook voor de Watch);
+  - een video op een ander apparaat springt tijdens kort herverbinden (≤ 2 min) niet meer op "pauze";
+  - de activiteit blijft vers tot het einde van de video (was 15 min), wordt bij terugkomst in de app altijd ververst, en een door iOS beëindigde activiteit wordt netjes vervangen;
+  - na het wegleggen van de iPhone blijft de verbinding nog zo lang als iOS toestaat open, zodat bediening direct na vergrendelen zonder herverbinden werkt.
+- **Picture in Picture ook na het verlaten van de kijkpagina**: speelde de video door in YouTube's miniplayer of op de startpagina, dan startte PiP op de achtergrond niet en kon de video pauzeren. Een hoorbare hoofdvideo die net speelde telt nu als "de" video (stille voorbeeldfilmpjes niet), zowel in de pagina als in de app (automatische PiP, bescherming op de achtergrond, Apple-presenter).
+
+## Overig
+- Versie 23.0.0 (34), ook in Instellingen (stond nog op 22.3.0 in de app).
+- Twee verouderde unit tests bijgewerkt (aantal app-iconen is 193; Mac/iPad hebben sinds V19.2 de desktop-menubalk). Nieuwe tests: V23FeatureTests (instelling, outbox, fullscreen-script, Live Activity-houdbaarheid) en V23DeviceTests (instelling + 8× PiP-wissel).
+- Getest: zie Docs/BUILD_REPORT.md.
+
 # 22.3.0 (33)
 
 ## Stabiliteit, sync en zuinigheid (getest op Mac, iPhone en iPad)

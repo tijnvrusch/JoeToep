@@ -37,6 +37,24 @@ final class WidgetBridge {
             if BrowserWorkspace.registry.allObjects.isEmpty { WidgetShared.enqueue(command) }
             else { WidgetBridge.shared.perform(command) }
         } }
+        // V23: knoppen in de Live Activity/widgets wachten tot de opdracht echt is afgeleverd.
+        WidgetIntentRouter.asyncHandler = { command in await WidgetBridge.shared.performFromIntent(command) }
+        #if os(iOS)
+        // V23: naar de achtergrond terwijl de Live Activity iets toont → de verbinding nog zo lang als iOS
+        // toestaat openhouden (bediening direct na het vergrendelen werkt dan zonder herverbinden).
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { WidgetBridge.shared.keepAliveInBackground() }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                WidgetBridge.shared.endKeepAlive()
+                #if canImport(ActivityKit)
+                LiveActivityManager.shared.forceNextUpdate()
+                #endif
+                WidgetBridge.shared.setNeedsUpdate()
+            }
+        }
+        #endif
         BrowserLibrary.shared.objectWillChange
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.setNeedsUpdate() }
@@ -170,7 +188,8 @@ final class WidgetBridge {
                 ?? snap.tabs.first { $0.id == snap.selectedID }
             if let tab, let url = tab.url {
                 d.title = tab.title; d.url = url; d.time = tab.time; d.duration = tab.duration
-                d.playing = snap.playingID == tab.id && sync.devices[id] != nil
+                // V23: ook tijdens kort herverbinden (≤ 2 min) blijft hij "spelend" (Live Activity springt niet op pauze).
+                d.playing = snap.playingID == tab.id && sync.isReachable(id)
                 d.updated = snap.sentAt
             }
             d.tabCount = snap.tabs.count
@@ -191,6 +210,63 @@ final class WidgetBridge {
     }
 
     // MARK: Opdrachten uit widgets
+
+    #if os(iOS)
+    private var keepAliveTask: UIBackgroundTaskIdentifier = .invalid
+    /// V23: houdt de app (en de sync-verbinding) na het wegleggen nog even wakker als er iets te bedienen is.
+    func keepAliveInBackground() {
+        guard keepAliveTask == .invalid else { return }
+        let snapshot = makeSnapshot()
+        guard snapshot.devices.contains(where: { $0.playing && !$0.isThisDevice }) else { return }
+        keepAliveTask = UIApplication.shared.beginBackgroundTask(withName: "JoeToep Live Activity") {
+            MainActor.assumeIsolated { WidgetBridge.shared.endKeepAlive() }
+        }
+        write()
+    }
+    func endKeepAlive() {
+        guard keepAliveTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(keepAliveTask); keepAliveTask = .invalid
+    }
+    #endif
+
+    /// V23: opdracht uit een widget/Live Activity (de app kan op de achtergrond gewekt zijn).
+    /// 1. Live Activity meteen bijwerken (je ziet je tik direct), 2. zo nodig de verbinding met het
+    /// andere apparaat herstellen, 3. uitvoeren/versturen, 4. op de nieuwe stand van dat apparaat wachten
+    /// en de Live Activity daarmee gelijkzetten.
+    func performFromIntent(_ command: WidgetCommand) async {
+        #if os(iOS)
+        let task = UIApplication.shared.beginBackgroundTask(withName: "JoeToep remote control") {}
+        defer { UIApplication.shared.endBackgroundTask(task) }
+        #endif
+        let sync = TabSyncService.shared
+        let remote = command.deviceID.flatMap { $0 == sync.deviceID ? nil : $0 }
+        #if os(iOS) && canImport(ActivityKit)
+        LiveActivityManager.shared.applyOptimistic(command)
+        #endif
+        let remoteActions: Set<WidgetCommand.Action> = [.playPause, .play, .pause, .skipForward, .skipBack, .skipForward30, .skipBack30]
+        let started = Date()
+        if let remote, remoteActions.contains(command.action) {
+            let connected = await sync.waitForConnection(to: remote, timeout: 6)
+            if !connected { sync.note("widget: \(sync.devices[remote] ?? "device") not reachable — command queued") }
+        }
+        // Zonder venster kunnen alleen opdrachten voor een ANDER apparaat meteen; de rest wacht op het venster.
+        let needsWindow = remote == nil || [.open, .takeOver, .continueOn].contains(command.action)
+        if needsWindow && BrowserWorkspace.registry.allObjects.isEmpty && ![.spotifyPlayPause, .spotifyNext, .spotifyPrevious, .spotifyVolumeUp, .spotifyVolumeDown, .pauseAll].contains(command.action) {
+            WidgetShared.enqueue(command)
+        } else {
+            perform(command)
+        }
+        if remoteActions.contains(command.action) {
+            // Nieuwe stand afwachten (ander apparaat: zijn snapshot, max. 2,5 s; hier: de pagina, 0,8 s),
+            // dan widgets + Live Activity gelijkzetten.
+            if let remote { _ = await sync.waitForSnapshot(from: remote, since: started, timeout: 2.5) }
+            else { try? await Task.sleep(for: .milliseconds(800)) }
+            #if os(iOS) && canImport(ActivityKit)
+            LiveActivityManager.shared.forceNextUpdate()
+            #endif
+            write()
+        }
+    }
 
     func processQueuedCommands() {
         // V22.2: zonder venster (achtergrondstart) laten staan; startOnce() vanuit het venster pakt ze op.

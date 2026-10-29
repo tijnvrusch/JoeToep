@@ -130,6 +130,43 @@
     const v=pick(), range=v && bounds(v);if (!range) return false;
     v.currentTime=Math.max(range[0],Math.min(range[1],v.currentTime+delta));return true;
   }
+  // V23: volumepercentage in beeld (zoals YouTube bij de pijltjestoetsen) — bij vegen én pijltjes.
+  // Eigen element in de speler (dus ook zichtbaar in fullscreen); YouTube's eigen bezel blijft
+  // tijdens onze bediening verborgen, zodat je nooit twee plaatjes ziet.
+  function volumeHud(percent, muted) {
+    try {
+      const fs = document.fullscreenElement || document.webkitFullscreenElement;
+      const player = document.getElementById('movie_player');
+      const host = (player && player.getBoundingClientRect().width > 0) ? player : (fs || document.body);
+      if (!host) return;
+      let hud = document.getElementById('joetoep-volume-hud');
+      if (!hud) {
+        hud = document.createElement('div'); hud.id = 'joetoep-volume-hud';
+        hud.setAttribute('role', 'status'); hud.setAttribute('aria-live', 'polite');
+        hud.style.cssText = 'position:absolute;top:10%;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;' +
+          'padding:9px 18px 9px 14px;border-radius:999px;background:rgba(0,0,0,.62);color:#fff;font:500 19px/1.1 "YouTube Sans",Roboto,Arial,system-ui,sans-serif;' +
+          'font-variant-numeric:tabular-nums;z-index:2147483646;pointer-events:none;opacity:0;transition:opacity .12s ease-out;visibility:visible!important';
+      }
+      if (hud.parentNode !== host) host.appendChild(hud);
+      hud.style.position = host === document.body ? 'fixed' : 'absolute';
+      // Geen innerHTML: YouTube dwingt Trusted Types af (een tekst-HTML-toewijzing wordt geweigerd).
+      const level = muted || percent === 0 ? 0 : percent < 34 ? 1 : percent < 67 ? 2 : 3;
+      const NS = 'http://www.w3.org/2000/svg';
+      const path = (d, fill) => { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); if (fill) { p.setAttribute('fill', '#fff'); p.setAttribute('stroke', 'none'); } return p; };
+      const svg = document.createElementNS(NS, 'svg');
+      for (const [k, v] of [['width','24'],['height','24'],['viewBox','0 0 24 24'],['fill','none'],['stroke','#fff'],['stroke-width','2'],['stroke-linecap','round'],['aria-hidden','true']]) svg.setAttribute(k, v);
+      svg.appendChild(path('M4 9.5h3.5L12 5.5v13l-4.5-4H4z', true));
+      const waves = ['M15.5 9.2a3.5 3.5 0 0 1 0 5.6', 'M17.8 6.8a7 7 0 0 1 0 10.4', 'M20 4.6a10 10 0 0 1 0 14.8'];
+      for (let i = 0; i < level; i++) svg.appendChild(path(waves[i]));
+      if (level === 0) svg.appendChild(path('M16 9.5l5 5M21 9.5l-5 5'));
+      const label = document.createElement('span'); label.textContent = percent + '%';
+      hud.replaceChildren(svg, label);
+      hud.setAttribute('aria-label', 'Volume ' + percent + '%');
+      hud.style.opacity = '1';
+      clearTimeout(volumeHud.t);
+      volumeHud.t = setTimeout(() => { hud.style.opacity = '0'; }, 900);
+    } catch (_) {}
+  }
   // Verandert het volume met "delta" (bijvoorbeeld 0.05 = 5%), afgerond op hele procenten
   // en geknepen tussen 0 en 1. Als het volume boven 0 komt, zetten we mute automatisch uit.
   function volume(delta, reveal=false) {
@@ -138,11 +175,14 @@
       const next=Math.round(Math.max(0,Math.min(100,Number(p.getVolume())+delta*100)));
       p.setVolume(next); if(next>0) p.unMute?.(); else p.mute?.();
       if (reveal) revealAt(p, Number(p.getCurrentTime?.())||0, NaN); else hideOverlay();
+      volumeHud(next, next === 0);
       return true;
     } catch(_){} }
     const v=pick();if(!v)return false;
     v.volume=Math.round(Math.max(0,Math.min(1,v.volume+delta))*100)/100;
-    if(v.volume>0)v.muted=false;return true;
+    if(v.volume>0)v.muted=false;
+    volumeHud(Math.round(v.volume*100), v.muted);
+    return true;
   }
   // V18: afspeelsnelheid met één klik (0.25–4×), via YouTube's speler als die er is.
   const RATES=[0.25,0.5,0.75,1,1.25,1.5,1.75,2,2.5,3,4];

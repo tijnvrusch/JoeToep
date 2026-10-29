@@ -54,10 +54,21 @@ final class LiveActivityManager {
             thumbnail: WidgetShared.thumbnail(for: device.url),
             spotifyTrack: snapshot.spotify?.track, spotifyArtist: snapshot.spotify?.artist, spotifyPlaying: snapshot.spotify?.playing)
         // V22.2: de "bijna gelijk"-snelweg alleen als er echt een lopende activiteit is.
+        // V23: een activiteit die iOS al beëindigde/wegveegde (ended/dismissed) niet meer gebruiken → nieuwe starten.
+        if let current = activity, current.activityState == .ended || current.activityState == .dismissed {
+            activity = nil; lastState = nil
+        }
+        if activity == nil, let adopted = Activity<NowPlayingActivityAttributes>.activities.first(where: { $0.activityState == .active || $0.activityState == .stale }) {
+            activity = adopted
+        }
         let live = activity.map { $0.activityState == .active || $0.activityState == .stale } ?? false
-        if live, let lastState, Self.similar(lastState, state) { return }
-        // V22.2: niets meer aan het spelen → na 10 min verouderd (sluit aan op het automatisch beëindigen).
-        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(!anyPlaying ? 600 : (state.playing ? 900 : 3600)))
+        let forced = forceNext; forceNext = false
+        // V23: net een knop ingedrukt → oude (nog niet bijgewerkte) info mag die tik niet terugdraaien.
+        if !forced, Date() < optimisticUntil { return }
+        // V23: een verouderde (stale) activiteit altijd verversen, ook als de inhoud gelijk is.
+        let stale = activity?.activityState == .stale
+        if live, !forced, !stale, let lastState, Self.similar(lastState, state) { return }
+        let content = ActivityContent(state: state, staleDate: Self.staleDate(for: state, anyPlaying: anyPlaying))
         if live, let activity {
             lastState = state
             Task { await activity.update(content) }
@@ -70,6 +81,47 @@ final class LiveActivityManager {
                 activity = nil; lastState = nil
             }
         }
+    }
+
+    /// V23: volgende update altijd doorvoeren (na terugkomst, na een knop, na een nieuwe stand).
+    private var forceNext = false
+    private var optimisticUntil = Date.distantPast
+    func forceNextUpdate() { forceNext = true }
+
+    /// V23: tot wanneer is de getoonde stand betrouwbaar? Speelt er iets met bekende lengte, dan tot
+    /// (ruim) het einde van de video — de voortgang loopt vanzelf door; anders 1 uur. Niets aan het
+    /// spelen: 10 min (sluit aan op het automatisch beëindigen).
+    static func staleDate(for state: NowPlayingActivityAttributes.ContentState, anyPlaying: Bool, now: Date = Date()) -> Date {
+        guard anyPlaying else { return now.addingTimeInterval(600) }
+        guard state.playing, state.duration > 0 else { return now.addingTimeInterval(3600) }
+        let remaining = max(0, state.duration - state.time)
+        return now.addingTimeInterval(min(4 * 3600, max(180, remaining + 120)))
+    }
+
+    /// V23: je tik in de Live Activity meteen laten zien (play/pauze, spoelen), nog vóór het andere
+    /// apparaat antwoordt. De echte stand volgt binnen een paar tellen en corrigeert zo nodig.
+    func applyOptimistic(_ command: WidgetCommand) {
+        guard let activity, activity.activityState == .active || activity.activityState == .stale, var state = lastState else { return }
+        let target = command.deviceID ?? TabSyncService.shared.deviceID
+        guard target == state.deviceID || (command.deviceID == nil && state.isThisDevice) else { return }
+        let now = Date()
+        var position = state.playing ? state.time + now.timeIntervalSince(state.updated) : state.time
+        switch command.action {
+        case .playPause: state.playing.toggle()
+        case .play: state.playing = true
+        case .pause: state.playing = false
+        case .skipForward: position += 10
+        case .skipBack: position -= 10
+        case .skipForward30: position += 30
+        case .skipBack30: position -= 30
+        default: return
+        }
+        position = max(0, state.duration > 0 ? min(state.duration, position) : position)
+        state.time = position; state.updated = now
+        lastState = state
+        optimisticUntil = now.addingTimeInterval(3)
+        let content = ActivityContent(state: state, staleDate: Self.staleDate(for: state, anyPlaying: state.playing))
+        Task { await activity.update(content) }
     }
 
     func endIfNeeded() {

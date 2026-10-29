@@ -210,7 +210,8 @@ final class V18FeatureTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
         XCTAssertTrue(defaults.bool(forKey: "redesignAppliedV19"), "minimal redesign applied once")
-        XCTAssertFalse(settings.showLibraryButton); XCTAssertTrue(settings.showPiPButton); XCTAssertTrue(settings.showSpeedControl)
+        // V23: Mac/iPad krijgen sinds V19.2 de desktop-indeling (bibliotheek zichtbaar); iPhone de minimale.
+        XCTAssertEqual(settings.showLibraryButton, AppSettings.isDesktopClass); XCTAssertTrue(settings.showPiPButton); XCTAssertTrue(settings.showSpeedControl)
         ToolbarPreset.everything.apply(to: settings)
         XCTAssertTrue(settings.showLibraryButton); XCTAssertTrue(settings.showHistoryButton); XCTAssertTrue(settings.showCreatorTools)
         XCTAssertTrue(AppSettings(defaults: defaults).showHistoryButton, "a chosen layout is not overwritten on the next launch")

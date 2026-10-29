@@ -147,7 +147,7 @@ extension SettingHelp {
         "Icons in the app": "Outline and clean, minimal icon styles for the buttons in the app.",
         "App icon": "Forty new app icons: line-art Outline and extra-clean Minimal series.",
         // V21
-        "Continue playing when you switch devices": "Open JoeToep on your iPhone while the Mac plays (or the other way round) and the video continues there at the same moment. Sync handoff.",
+        "Switch devices automatically": "On: open JoeToep on your iPhone while the Mac plays (or the other way round) and the video continues there at the same moment. Off: only Continue here / Play here moves a video to this device. Sync handoff takeover.",
         "Timing compensation": "A small head start so both devices line up exactly after switching.",
         "Keep playing when JoeToep reopens": "After restarting the app the last video continues by itself (off by default).",
         "Sync & devices": "Live tab sync, nearby devices, switching devices and the sync log.",
@@ -164,7 +164,7 @@ extension SettingHelp {
         "Show when the pointer reaches the top edge": "Top bar auto-hide",
         "Sections — drag to reorder": "New tab page", "My shortcuts": "New tab page", "Background": "New tab page",
         "Icons in the app": "Appearance", "App icon": "Appearance",
-        "Continue playing when you switch devices": "Sync & devices", "Timing compensation": "Sync & devices",
+        "Switch devices automatically": "Sync & devices", "Timing compensation": "Sync & devices",
         "Keep playing when JoeToep reopens": "Sync & devices", "Sync & devices": "Sync & devices",
         "Vertical sidebar (like Arc)": "Tabs, sidebar & search bar", "Search bar (⌘T / ⌘L)": "Tabs, sidebar & search bar",
         "Liquid Glass (tabs, sidebar, panels)": "Tabs, sidebar & search bar", "One bar: tabs and buttons together": "Menu bar & buttons",
