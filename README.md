@@ -4,7 +4,7 @@ Open-source persoonlijke YouTube-browser en -speler voor **Mac**, **iPhone** en 
 
 - **Wat er nieuw is:** [`CHANGELOG.md`](CHANGELOG.md) · **alle versies:** [`Docs/VERSIEGESCHIEDENIS.md`](Docs/VERSIEGESCHIEDENIS.md) (elke versie staat in een eigen branch `versie/vX.Y`)
 - **Bijdragen:** [`CONTRIBUTING.md`](CONTRIBUTING.md) · **licentie:** MIT ([`LICENSE`](LICENSE))
-- **Voor Claude/AI-sessies:** [`CLAUDE.md`](CLAUDE.md), nieuwste overdracht [`Docs/HANDOFF-V27.md`](Docs/HANDOFF-V27.md), chatgeschiedenis in [`Docs/chatgeschiedenis/`](Docs/chatgeschiedenis/)
+- **Voor Claude/AI-sessies:** startprompt [`Docs/PROMPT-NIEUWE-CHAT-V27.md`](Docs/PROMPT-NIEUWE-CHAT-V27.md), [`CLAUDE.md`](CLAUDE.md), nieuwste overdracht [`Docs/HANDOFF-V27.md`](Docs/HANDOFF-V27.md), chatgeschiedenis in [`Docs/chatgeschiedenis/`](Docs/chatgeschiedenis/)
 
 ## Bouwen
 
