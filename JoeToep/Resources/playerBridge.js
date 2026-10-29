@@ -160,11 +160,15 @@
       video.addEventListener(event, () => { gesture = null; }, { passive: true });
     }
   }
+  // V23.1: goedkoop — tekst-knopen en lege elementen meteen overslaan; getElementsByTagName i.p.v.
+  // querySelectorAll (YouTube voegt bij het laden duizenden elementen toe).
   const scan = root => {
-    const isVideo = root?.tagName === "VIDEO";
+    if (!root || root.nodeType === 3 || root.nodeType === 8) return false;   // tekst / commentaar
+    const isVideo = root.tagName === "VIDEO";
     if (isVideo) attach(root);
-    const descendants = root?.querySelectorAll?.("video") || [];
-    descendants.forEach(attach);
+    if (root.nodeType === 1 && root.firstElementChild === null) return isVideo;   // blad-element
+    const descendants = root.getElementsByTagName ? root.getElementsByTagName("video") : (root.querySelectorAll?.("video") || []);
+    for (let i = 0; i < descendants.length; i++) attach(descendants[i]);
     return isVideo || descendants.length > 0;
   };
   const fail = (token, error) => {

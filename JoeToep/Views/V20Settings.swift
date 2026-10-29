@@ -378,3 +378,23 @@ enum GlassPrefs {
     /// Glas-effect voor tabs, zijbalk en zwevende panelen (standaard aan).
     static var enabled: Bool { UserDefaults.standard.object(forKey: "liquidGlassV21") as? Bool ?? true }
 }
+
+// MARK: - V23.1 automatisch draaien bij fullscreen (iPhone)
+
+#if os(iOS)
+/// "Auto-rotate fullscreen": een video die fullscreen opent draait meteen naar landscape — ook met
+/// rotatievergrendeling aan — en bij het sluiten meteen terug naar portrait. Standaard aan.
+struct AutoRotateFullscreenSection: View {
+    @AppStorage(OrientationCoordinator.autoRotateKey) private var autoRotate = true
+    var body: some View {
+        Section {
+            Toggle(isOn: $autoRotate) { SettingLabel(title: "Auto-rotate fullscreen (even with rotation lock)") }
+                .accessibilityIdentifier("settings.autoRotateFullscreen")
+        } header: { Text("Fullscreen rotation") } footer: {
+            Text(autoRotate
+                 ? "A video that opens fullscreen turns to landscape straight away, also when Portrait Orientation Lock is on, and turns back to portrait the moment fullscreen closes. Turn your iPhone sideways yourself and normal rotation takes over again."
+                 : "Off: fullscreen follows how you hold your iPhone (and the rotation lock).")
+        }
+    }
+}
+#endif

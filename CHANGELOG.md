@@ -1,3 +1,32 @@
+# 23.1.0 (35)
+
+## Mac: klikken in fullscreen werkt altijd
+- **Oorzaak gevonden (gemeten in de app):** staat een video in fullscreen op **pauze**, dan legt macOS (VisionKit/Live Text, `VKCImageAnalysisOverlayView`) een onzichtbare tekstherkenningslaag over het beeld. Die slikte elke klik in: klik = verder spelen en dubbelklik = fullscreen uit deden niets; toetsen (F, Esc, spatie) gingen er langs en werkten wel.
+- JoeToep ziet nu wanneer een klik in WebKit's fullscreen-venster op zo'n systeemlaag valt en geeft hem zelf door aan de pagina. Eén regel voor elke klik op het beeld in fullscreen:
+  - **klik** = meteen pauze/afspelen (geen wachttijd), met een klein ▶/❚❚-plaatje in het midden;
+  - **dubbelklik** = fullscreen uit; de afspeelstand van vóór de dubbelklik blijft (stond hij op pauze, dan blijft hij op pauze — geen "doorspelen" na het verlaten);
+  - klikken op knoppen, tijdbalk, menu's, kaarten, eindschermen en advertenties gaan gewoon naar YouTube; staat een YouTube-menu open, dan sluit de klik eerst dat menu.
+- (WebKit's eigen schakelaar voor Live Text in video's uitzetten is getest en bewust níet gebruikt: het webproces liep dan vast bij fullscreen.)
+
+## Geen zwarte tab meer na fullscreen (Mac)
+- Na het verlaten van fullscreen kon de tab zwart blijven, zelfs na herladen. JoeToep schakelde in sommige gevallen WebKit's eigen fullscreen-venster om terwijl WebKit dat zelf al aan het sluiten was (macOS 27 noemt dat venster `WebCoreFullScreenWindow`; de oude controle herkende het niet). Dat gebeurt nu nooit meer.
+- Vangnet: hangt de webview na het verlaten van fullscreen 2 en 3,5 s later nog steeds nergens, dan zet de tab hem stil terug.
+
+## Sneller
+- Automatisch fullscreen bij het starten van een video: wacht 0,1 s i.p.v. 0,35 s (met "snelste overgangen" 0,04 s, animaties uit 0 s); de theatermodus-stap ervoor wacht hooguit 0,45 s i.p.v. 1,5 s.
+- Fullscreen verlaten: de vervolgstappen (venster terug, portrait op iPhone) na 0,09/0,12/0,18 s i.p.v. 0,26/0,3/0,35 s.
+- Pagina's laden lichter: de drie "waakhonden" die bij elke DOM-wijziging van YouTube keken of er een video bij kwam (speler-bridge, voorkeuren, adblock-melding) slaan tekst- en lege elementen meteen over en gebruiken `getElementsByTagName` i.p.v. `querySelectorAll` op elke toevoeging — YouTube voegt bij het laden duizenden elementen toe.
+
+## iPhone: startpagina vanaf het eerste frame in één kolom
+- In desktopweergave toonde de YouTube-startpagina eerst twee video's naast elkaar en sprong binnen een seconde naar één kolom. Nieuw script `phoneLayout.js` draait op **documentStart** (vóór YouTube's eigen scripts en vóór de eerste opmaak): viewport = schermbreedte en één video per rij (Shorts 2 naast elkaar, zoals de mobiele site). Alleen iPhone + desktop-YouTube; niet op iPad, Mac, m.youtube.com of andere sites. Ook de kijkpagina-kolom (V22.1) staat nu vanaf het eerste frame goed.
+
+## iPhone: automatisch draaien bij fullscreen (extra wens)
+- Nieuwe instelling **"Auto-rotate fullscreen (even with rotation lock)"** (Instellingen › Playback & Picture in Picture, iPhone, standaard aan): een video die fullscreen opent draait meteen naar landscape — óók met rotatievergrendeling aan — en bij het sluiten meteen terug naar portrait. Kantel je de telefoon zelf, dan neemt de normale rotatie het over (rechtop = fullscreen uit blijft werken). iOS weigert een draai soms tijdens de animatie van de speler; JoeToep controleert na 0,25 en 0,7 s en vraagt het zo nodig nog eens. Uit = het oude gedrag (fullscreen volgt hoe je de telefoon houdt).
+
+## Overig
+- Versie 23.1.0 (35).
+- Nieuwe JS-tests `Scripts/test_v231_scripts.cjs` (11 scenario's, o.a. 2.000 klikken stresstest, dubbelklik vanuit pauze/spelen, iPhone-opmaak alleen waar hij hoort). Alle bestaande JS-suites groen.
+
 # 23.0.0 (34)
 
 ## Fullscreen, apparaatwissel, volume, Live Activity en PiP

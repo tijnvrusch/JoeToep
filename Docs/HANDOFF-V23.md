@@ -48,3 +48,9 @@
 6. **Versie:** 23.0.0 (34). Werk de CHANGELOG bij.
 7. **Testen:** alles uitgebreid testen, ook onder belasting, op Mac, iPhone (eerst bouwen) en iPad. Doorwerken tot er een stabiele release is.
 8. **Oplevering:** complete zip `~/Documents/Claude/<YYMMDD>-JoeToep-V23-Xcode.zip`, inclusief PNG's.
+
+## EXTRA WENS VAN TIJN (13-10, ná de start van 23.1) — meenemen in 23.1
+**iPhone: automatisch draaien bij fullscreen** — nieuwe instelling (iPhone, STANDAARD AAN), uit te zetten:
+- Opent een video fullscreen → telefoon draait automatisch naar landscape, óók als rotatievergrendeling aan staat (app forceert de oriëntatie via UIWindowScene.requestGeometryUpdate / supportedInterfaceOrientations).
+- Sluit de video fullscreen → automatisch terug naar portrait.
+- Beide overgangen zeer snel en vloeiend. Testen op eiFoon (met rotatievergrendeling aan én uit).

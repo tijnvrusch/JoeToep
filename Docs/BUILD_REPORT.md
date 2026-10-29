@@ -1,3 +1,15 @@
+# Build report V23.1 — 23.1.0 (35), 13-10-2026
+
+| Platform | Gebouwd/geïnstalleerd | Getest |
+|---|---|---|
+| Mac (M1 Max, macOS 27.2) | ja (Debug, Run vanuit Xcode, "Build succeeded") | fullscreen-klikken uitvoerig: pauze → klik speelt, klik pauzeert (4×), dubbelklik vanuit spelen én vanuit pauze verlaat fullscreen en houdt de stand, reeks van 6× F/dubbelklik in- en uitgaan → tab nooit meer zwart; oorzaak gemeten met een tijdelijk diagnosepaneel (VisionKit-laag `VKCImageAnalysisOverlayView` in `WebCoreFullScreenWindow`) |
+| iPhone 13 Pro "eiFoon" (iOS 27.2) | ja (draadloos, "Running JoeToep on eiFoon") | scherm niet te bekijken: Device Hub meldde "Screen unavailable (microfoon/camera actief)" |
+| iPad Pro 2e gen. (iPadOS 17.7) | ja ("Running JoeToep on Tijn's iPad") | geen schermweergave mogelijk (A10X) |
+
+JS (jsdom): nieuw `test_v231_scripts.cjs` 11/11 (o.a. 2.000-kliks stresstest), bridge 17, mediaCompatibility 134, V15 12, V17 13 — alles groen.
+
+Niet getest: iPhone-startpagina en automatisch draaien op het toestel zelf (scherm niet beschikbaar), Watch.
+
 # Build report V23 — 23.0.0 (34), 12-10-2026
 
 | Platform | Gebouwd/geïnstalleerd | Getest |

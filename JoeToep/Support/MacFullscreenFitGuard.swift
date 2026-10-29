@@ -110,8 +110,8 @@ final class MacFullscreenFitGuard {
             webView.magnification = 1
         }
         // 2. Webview vult zijn eigen houder (onze host-view; nooit WebKit's eigen fullscreen-views).
-        if let host = webView.superview, !String(describing: type(of: host)).hasPrefix("WK"),
-           !String(describing: type(of: host)).hasPrefix("_WK"), webView.translatesAutoresizingMaskIntoConstraints,
+        if let host = webView.superview, host is WebHostNSView,          // V23.1: alleen onze eigen houder
+           webView.translatesAutoresizingMaskIntoConstraints,
            Self.differs(webView.frame.size, host.bounds.size) {
             log("fullscreen fit: web view frame \(Int(webView.frame.width))x\(Int(webView.frame.height)) → \(Int(host.bounds.width))x\(Int(host.bounds.height))")
             webView.frame = host.bounds

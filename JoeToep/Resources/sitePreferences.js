@@ -83,9 +83,9 @@
       }
     }
     // V19: eerst theatermodus (brede video → soepelere overgang, en na fullscreen blijf je in
-    // theater), pas daarna fullscreen. Wacht op YouTube's 'theater'-attribuut, hooguit 1,5 s.
+    // theater), pas daarna fullscreen. Wacht op YouTube's 'theater'-attribuut, hooguit 0,45 s (V23.1: was 1,5 s).
     if (configured && config.theater && watch && !watch.hasAttribute('theater') && !anyFullscreen &&
-        Date.now() - theaterRequestedAt < 1500) { waitingForTheater = true; return; }
+        Date.now() - theaterRequestedAt < 450) { waitingForTheater = true; return; }
     waitingForTheater = false;
     // Een hele reeks voorwaarden die allemaal waar moeten zijn voordat we automatisch
     // fullscreen mogen gaan: de pagina moet zichtbaar zijn, de instelling moet aanstaan,
@@ -189,9 +189,19 @@
   // pagina, childList/subtree = ook diep genest). Zodra er een nieuwe <video> of
   // watch-pagina-element bijkomt, plannen we opnieuw apply(), want YouTube bouwt de
   // pagina dynamisch op zonder hem helemaal te herladen.
+  // V23.1: zuinig — YouTube voegt bij het laden duizenden elementen toe. Eerst de goedkope checks
+  // (al ingepland? tagnaam?), en pas dan zoeken in de nieuwe deelboom (getElementsByTagName is
+  // veel goedkoper dan querySelector op elke toevoeging).
+  const relevantNode = n => {
+    if (n.nodeType !== 1) return false;
+    const tag = n.localName;
+    if (tag === 'video' || tag === 'ytd-watch-flexy' || n.classList?.contains('ytp-caption-window-container')) return true;
+    if (!n.firstElementChild) return false;
+    return n.getElementsByTagName('video').length > 0 || n.getElementsByTagName('ytd-watch-flexy').length > 0;
+  };
   new MutationObserver(mutations => {
-    if (mutations.some(m => Array.from(m.addedNodes).some(n => n.nodeType === 1 &&
-      (n.matches?.('video, ytd-watch-flexy, .ytp-caption-window-container') || n.querySelector?.('video, ytd-watch-flexy'))))) schedule();
+    if (queued) return;
+    for (const m of mutations) for (const n of m.addedNodes) if (relevantNode(n)) { schedule(); return; }
   }).observe(document.documentElement, {childList: true, subtree: true});
   // V11: type immediately in a new tab; '/' focuses search (YouTube's own shortcut) on every site layout.
   const editable = t => t?.closest?.('input,textarea,select,[contenteditable="true"],[role="textbox"]');

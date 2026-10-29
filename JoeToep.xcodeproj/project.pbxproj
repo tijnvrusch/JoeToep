@@ -608,7 +608,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToep/JoeToep.iOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToep/JoeToep.macOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_APP_SANDBOX = YES;
@@ -622,7 +622,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(JOETOEP_BUNDLE_ID)";
 				PRODUCT_MODULE_NAME = JoeToep;
 				PRODUCT_NAME = JoeToep;
@@ -647,7 +647,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToep/JoeToep.iOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToep/JoeToep.macOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -660,7 +660,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(JOETOEP_BUNDLE_ID)";
 				PRODUCT_MODULE_NAME = JoeToep;
 				PRODUCT_NAME = JoeToep;
@@ -760,7 +760,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = JoeToepWatch/JoeToepWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -769,7 +769,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.watchkitapp;
 				PRODUCT_NAME = JoeToepWatch;
 				SDKROOT = watchos;
@@ -790,7 +790,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = JoeToepWatch/JoeToepWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -799,7 +799,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.watchkitapp;
 				PRODUCT_NAME = JoeToepWatch;
 				SDKROOT = watchos;
@@ -819,7 +819,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToepWidgets/JoeToepWidgets.iOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToepWidgets/JoeToepWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -836,7 +836,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.widgets;
 				PRODUCT_NAME = JoeToepWidgets;
 				SDKROOT = auto;
@@ -856,7 +856,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = JoeToepWidgets/JoeToepWidgets.iOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = JoeToepWidgets/JoeToepWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -873,7 +873,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.widgets;
 				PRODUCT_NAME = JoeToepWidgets;
 				SDKROOT = auto;
@@ -892,7 +892,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = JoeToepWatchWidgets/JoeToepWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = JoeToepWatchWidgets/Info.plist;
@@ -901,7 +901,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.watchkitapp.widgets;
 				PRODUCT_NAME = JoeToepWatchWidgets;
 				SDKROOT = watchos;
@@ -920,7 +920,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = JoeToepWatchWidgets/JoeToepWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 37WRZNSADT;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = JoeToepWatchWidgets/Info.plist;
@@ -929,7 +929,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 23.0.0;
+				MARKETING_VERSION = 23.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = nl.tijn.JoeToep.watchkitapp.widgets;
 				PRODUCT_NAME = JoeToepWatchWidgets;
 				SDKROOT = watchos;

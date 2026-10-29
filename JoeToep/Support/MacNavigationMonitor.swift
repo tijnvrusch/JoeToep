@@ -99,6 +99,34 @@ final class MacNavigationMonitor {
             MainActor.assumeIsolated { MacNavigationMonitor.exitWindowFullscreenIfPageIsInline(window) }
             return event
         }) { monitors.append(m) }
+        // V23.1: klikken op het beeld in fullscreen komen ALTIJD aan. Op een GEPAUZEERDE video legt WebKit
+        // in fullscreen een VisionKit-laag (Live Text: VKCImageAnalysisOverlayView) over het beeld; die
+        // slikte elke klik in: klik = afspelen en dubbelklik = fullscreen uit deden niets (toetsen wel).
+        // (Die functie uitzetten via WebKit's TextRecognitionInVideosEnabled liet het webproces vastlopen.)
+        // Dan geeft JoeToep de klik zelf door aan de pagina (zelfde regels als een gewone klik).
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown], handler: { event in
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard flags.isEmpty, let window = event.window, window.styleMask.contains(.fullScreen) else { return event }
+            let handled: Bool = MainActor.assumeIsolated {
+                // Alleen in WebKit's eigen fullscreen-venster (daar staat niets van JoeToep zelf boven de video).
+                guard let session = BrowserWorkspace.active?.selected.session, session.isFullscreen,
+                      session.webView.window === window, window.isWebKitFullScreenWindow,
+                      let content = window.contentView else { return false }
+                let point = content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+                guard let hit = content.hitTest(point) else { return false }
+                // Valt de klik gewoon op WebKit (de webview of een WebKit-subview)? Dan regelt de pagina het.
+                let name = String(describing: type(of: hit))
+                if hit === session.webView || MacNavigationMonitor.isWebKitView(hit) || name.hasPrefix("NS") || name.hasPrefix("_NS") { return false }
+                let local = session.webView.convert(event.locationInWindow, from: nil)
+                guard session.webView.bounds.contains(local) else { return false }
+                #if DEBUG
+                NSLog("V231 fullscreen click via %@ (count %ld)", String(describing: type(of: hit)), event.clickCount)
+                #endif
+                session.webView.evaluateJavaScript("window.JoeToepControls?.surfaceClick?.(\(event.clickCount))", completionHandler: nil)
+                return true
+            }
+            return handled ? nil : event
+        }) { monitors.append(m) }
         // Ctrl losgelaten → de keuze is definitief (volgende Ctrl+Tab begint weer bij de meest recente).
         if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in
             if !event.modifierFlags.contains(.control) { MainActor.assumeIsolated { BrowserWorkspace.active?.endRecentCycle() } }
@@ -116,15 +144,24 @@ final class MacNavigationMonitor {
         }) { monitors.append(m) }
     }
 
+    /// V23.1: hoort deze view bij WebKit zelf (dan krijgt de pagina de klik gewoon)?
+    static func isWebKitView(_ view: NSView) -> Bool {
+        let name = String(describing: type(of: view))
+        return name.hasPrefix("WK") || name.hasPrefix("_WK") || name.hasPrefix("Web") || view is WKWebView
+    }
+
     /// Is de pagina NIET (meer) fullscreen maar het venster wel? Dan het venster uit macOS-fullscreen halen.
     /// Kleine vertraging: eerst mag de pagina zelf reageren (YouTube's eigen F/dubbelklik).
     static func exitWindowFullscreenIfPageIsInline(_ window: NSWindow) {
+        // V23.1: WebKit's eigen fullscreen-venster sluit zichzelf; het hier omschakelen brak die
+        // overgang halverwege (webview bleef los → zwarte tab).
+        guard !window.isWebKitFullScreenWindow else { return }
         guard let session = BrowserWorkspace.active?.selected.session,
               NavigationPolicy.isPlaybackPage(session.currentURL) else { return }   // alleen op videopagina's
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {   // V23.1: was 0,35 s
             let probe = "!!(document.fullscreenElement||document.webkitFullscreenElement||document.querySelector('ytd-watch-flexy')?.hasAttribute('fullscreen'))"
             session.webView.evaluateJavaScript(probe) { value, _ in
-                guard (value as? Bool) == false, window.styleMask.contains(.fullScreen) else { return }
+                guard (value as? Bool) == false, window.styleMask.contains(.fullScreen), !window.isWebKitFullScreenWindow else { return }
                 window.toggleFullScreen(nil)
             }
         }
@@ -179,6 +216,15 @@ final class MacNavigationMonitor {
             swipeHandled = true
             workspace.closeFromBack(workspace.selected)
         }
+    }
+}
+
+extension NSWindow {
+    /// V23.1: WebKit's eigen fullscreen-venster (element-fullscreen), niet een venster van JoeToep zelf.
+    var isWebKitFullScreenWindow: Bool {
+        let name = String(describing: type(of: self))
+        // macOS 27: "WebCoreFullScreenWindow" (eerder "WKFullScreenWindow").
+        return name.contains("FullScreenWindow")
     }
 }
 #endif

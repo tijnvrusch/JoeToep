@@ -357,6 +357,144 @@
     if (!e.isTrusted || !foreignFullscreen() || !e.target?.closest?.('.ytp-fullscreen-button, .fullscreen-icon, button[aria-label*="ullscreen" i]')) return;
     if (exitAnyFullscreen()) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
+  // ── V23.1: Mac-fullscreen — klik = pauze/afspelen, dubbelklik = fullscreen uit. ALTIJD. ──────────
+  // In fullscreen deed een klik op het beeld niets (F, Esc en spatie werkten wel; de knoppen in de
+  // balk ook). YouTube's eigen klik-op-de-video werkt in WebKit's fullscreen-venster niet
+  // betrouwbaar. Daarom neemt JoeToep in fullscreen de klik op het BEELD zelf over (capture, vóór
+  // YouTube, dus nooit dubbel): 1e klik schakelt meteen (geen wachttijd), 2e klik van een
+  // dubbelklik zet de stand terug (dus netto geen pauze-flits) en verlaat fullscreen. Klikken op
+  // knoppen, menu's, de tijdbalk, kaarten, eindschermen en advertenties gaan gewoon naar YouTube.
+  // Alleen in Debug-builds met de vlag aan: kleine logregel in beeld (ook in fullscreen).
+  const dbg = msg => {
+    if (!window.JOETOEP_DEBUG) return;
+    try {
+      let o = document.getElementById('jt-dbg');
+      if (!o) { o = document.createElement('div'); o.id = 'jt-dbg'; o.style.cssText = 'position:fixed;left:8px;top:40px;max-width:70vw;z-index:2147483647;background:rgba(0,0,0,.8);color:#0f0;font:12px monospace;padding:6px;pointer-events:none;white-space:pre-wrap'; }
+      (document.fullscreenElement || document.body).appendChild(o);
+      o.textContent = ((o.textContent || '').split('\n').slice(-7).join('\n') + '\n' + (Date.now() % 100000) + ' ' + msg).trim();
+    } catch (_) {}
+  };
+  let nativeSurfaceClick = () => 'unavailable';
+  if (!window.JOETOEP_MOBILE) {
+    const nonSurface = '.ytp-chrome-bottom, .ytp-chrome-top, .ytp-chrome-controls, .ytp-popup, .ytp-settings-menu, .ytp-panel, ' +
+      '.ytp-contextmenu, .ytp-ce-element, .ytp-cards-teaser, .ytp-cards-button, .ytp-endscreen-content, .ytp-videowall-still, ' +
+      '.ytp-autonav-endscreen, .ytp-autonav-endscreen-countdown-overlay, .ytp-suggestion-set, .ytp-paid-content-overlay, ' +
+      '.ytp-ad-module, .ytp-ad-player-overlay, .ytp-ad-player-overlay-layout, .ytp-skip-ad, .ytp-ad-skip-button-container, ' +
+      '.video-ads, .iv-click-target, .ytp-iv-video-content a, .ytp-fullerscreen-edu-button, .ytp-miniplayer-ui, ' +
+      '.ytp-overflow-panel, .ytp-share-panel, .ytp-search-panel, .ytp-error, .ytp-sponsorship-overlay, ' +
+      '.joetoep-sb-layer *, #joetoep-stage-controls, button, a[href], input, select, textarea, [role="button"], [role="menuitem"], ' +
+      '[role="slider"], [role="dialog"]';
+    const inFullscreenNow = () => Boolean(fsElement() || document.documentElement.hasAttribute('data-joetoep-stage') ||
+      document.querySelector('ytd-watch-flexy[fullscreen]'));
+    const surface = t => {
+      if (!t?.closest || !(t.closest('#movie_player, .html5-video-player') || t.matches?.('video[data-joetoep-video]'))) return false;
+      return !t.closest(nonSurface);
+    };
+    // Staat er een YouTube-menu (instellingen, delen …) open, dan sluit een klik op het beeld eerst dát.
+    const popupOpen = () => Array.from(document.querySelectorAll('#movie_player .ytp-popup, #movie_player .ytp-settings-menu'))
+      .some(p => p.offsetWidth > 0 && p.offsetHeight > 0 && getComputedStyle(p).display !== 'none');
+    // Het video-element zelf is de waarheid (YouTube's status kan "buffering" zeggen terwijl hij stilstaat).
+    const isPlayingNow = () => {
+      const v = pick();
+      if (v) return !v.paused && !v.ended;
+      const s = ytPlayer()?.getPlayerState?.();
+      return s === 1 || s === 3;
+    };
+    const setPlaying = on => {
+      const p = ytPlayer(), v = pick();
+      window.JoeToepMedia?.noteIntent?.(on ? 'play' : 'pause');
+      try {
+        if (p && typeof p.playVideo === 'function' && typeof p.pauseVideo === 'function') { on ? p.playVideo() : p.pauseVideo(); }
+        else if (v) { on ? v.play()?.catch(() => {}) : v.pause(); }
+      } catch (_) {}
+    };
+    // Klein middenplaatje (▶ / ❚❚) zoals YouTube het toont — geen innerHTML (Trusted Types).
+    function playBezel(playing) {
+      try {
+        const mp = document.getElementById('movie_player');
+        const host = (mp && mp.getBoundingClientRect().width > 0) ? mp : (fsElement() || document.body);
+        if (!host) return;
+        let b = document.getElementById('joetoep-click-bezel');
+        if (!b) {
+          b = document.createElement('div'); b.id = 'joetoep-click-bezel'; b.setAttribute('aria-hidden', 'true');
+          b.style.cssText = 'position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;' +
+            'background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2147483646;' +
+            'opacity:0;transform:scale(1);visibility:visible!important';
+        }
+        if (b.parentNode !== host) host.appendChild(b);
+        b.style.position = host === document.body ? 'fixed' : 'absolute';
+        const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'), path = document.createElementNS(NS, 'path');
+        svg.setAttribute('width', '30'); svg.setAttribute('height', '30'); svg.setAttribute('viewBox', '0 0 24 24');
+        path.setAttribute('fill', '#fff');
+        path.setAttribute('d', playing ? 'M8 5.5v13l10.5-6.5z' : 'M7 5.5h3.6v13H7zM13.4 5.5H17v13h-3.6z');
+        svg.appendChild(path); b.replaceChildren(svg);
+        b.getAnimations?.().forEach(a => a.cancel());
+        if (typeof b.animate === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          b.animate([{opacity: 0.95, transform: 'scale(1)'}, {opacity: 0, transform: 'scale(1.6)'}], {duration: 480, easing: 'ease-out'});
+        } else { b.style.opacity = '0.9'; clearTimeout(playBezel.t); playBezel.t = setTimeout(() => { b.style.opacity = '0'; }, 350); }
+      } catch (_) {}
+    }
+    let firstClick = null;          // {at, wasPlaying} — voor de terugzet bij een dubbelklik
+    // Eén plek voor de klik-logica: de pagina zelf (click) én de app (als macOS de klik niet aan
+    // de pagina gaf, zie MacNavigationMonitor) gebruiken dezelfde regels.
+    function surfaceClick(detail) {
+      const now = Date.now();
+      dbg('surfaceClick ' + detail + ' playing=' + isPlayingNow() + ' fs=' + inFullscreenNow());
+      if (detail >= 2) {
+        // Tweede klik van een dubbelklik: stand van vóór de eerste klik terug en fullscreen uit.
+        const keepPaused = firstClick ? !firstClick.wasPlaying : !isPlayingNow();
+        if (firstClick && now - firstClick.at < 700 && isPlayingNow() !== firstClick.wasPlaying) setPlaying(firstClick.wasPlaying);
+        firstClick = null;
+        if (detail === 2) {
+          window.__joetoepDblClickExitAt = now;
+          // Stond hij stil vóór de dubbelklik, dan blijft hij na het verlaten ook stil (niet "doorspelen").
+          // YouTube kan een net gestarte play() nog afmaken ná onze pauze; daarom kort nakijken.
+          window.__joetoepDblClickKeepPaused = keepPaused;
+          if (keepPaused) for (const ms of [120, 380, 800, 1400]) setTimeout(() => {
+            const v = pick();
+            if (v && !v.paused && Date.now() - (window.__joetoepDblClickExitAt || 0) < 1600) { dbg('keep paused after dblclick'); setPlaying(false); }
+          }, ms);
+          if (!exitAnyFullscreen()) document.dispatchEvent(new Event('joetoep-exit-window-fullscreen'));
+        }
+        return 'exit';
+      }
+      const wasPlaying = isPlayingNow();
+      firstClick = {at: now, wasPlaying};
+      setPlaying(!wasPlaying);
+      playBezel(!wasPlaying);
+      document.dispatchEvent(new Event('joetoep-controls-used'));
+      return wasPlaying ? 'paused' : 'playing';
+    }
+    nativeSurfaceClick = detail => {
+      dbg('native click ' + detail);
+      if (!inFullscreenNow() || popupOpen()) return 'ignored';
+      // De klik kwam via de app (de pagina zag hem niet): telt als echte aanraking van de speler,
+      // dus ook een "stil te houden" herstelde video mag nu spelen.
+      try { window.JoeToepMedia?.quiet?.(0); } catch (_) {}
+      return surfaceClick(Number(detail) || 1);
+    };
+    window.addEventListener('click', e => {
+      if (!e.isTrusted || e.button !== 0 || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      dbg('page click ' + e.detail + ' ' + (e.target?.localName || '?') + ' surface=' + surface(e.target));
+      if (!inFullscreenNow() || !surface(e.target)) return;
+      if (popupOpen()) return;                                   // YouTube sluit zijn menu
+      e.preventDefault(); e.stopImmediatePropagation();
+      surfaceClick(e.detail);
+    }, true);
+    // De tweede klik van een dubbelklik gaat in fullscreen helemaal niet naar YouTube's speler
+    // (die startte anders na het verlaten soms nog even de video).
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) window.addEventListener(type, e => {
+      if (!e.isTrusted || e.button !== 0 || !firstClick || Date.now() - firstClick.at > 450) return;
+      if (inFullscreenNow() && surface(e.target)) e.stopImmediatePropagation();
+    }, true);
+    // YouTube's eigen dubbelklik (fullscreen aan/uit) mag niet nóg eens schakelen.
+    window.addEventListener('dblclick', e => {
+      if (!e.isTrusted) return;
+      if (Date.now() - (window.__joetoepDblClickExitAt || 0) < 800 && (surface(e.target) || e.target === document.documentElement)) {
+        e.preventDefault(); e.stopImmediatePropagation();
+      }
+    }, true);
+  }
   // Gepauzeerd → uit fullscreen (instelbaar). Pas na 350 ms, zodat buffering, kwaliteitswissels
   // en spoelen (korte pauzes) niet meteen fullscreen sluiten; en nooit tijdens Picture in Picture.
   let pauseTimer = 0;
@@ -393,6 +531,7 @@
   const fullscreenLeft = () => {
     if (cfg.resumeAfterFullscreenExit === false || window.__joetoepExitedByPause) return;
     if (Date.now() - (window.__joetoepPiPClosedAt || 0) < 5000) return; // V22: PiP met ✕ gesloten
+    if (window.__joetoepDblClickKeepPaused && Date.now() - (window.__joetoepDblClickExitAt || 0) < 2500) return; // V23.1
     const v = pick();
     if (!v || v.ended || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
     const wasPlaying = Date.now() - lastPlayingAt < 700 && lastPlayingAt > lastUserPauseAt;
@@ -420,5 +559,5 @@
   }
   window.JoeToepControls=Object.freeze({seek,volume,toggle,bounds,rate,setRate,
     configure(next){ Object.assign(cfg, next||{}); return {...cfg}; },
-    exitFullscreen: exitAnyFullscreen,rateNow:()=>Number(ytPlayer()?.getPlaybackRate?.() ?? pick()?.playbackRate ?? 1)});
+    exitFullscreen: exitAnyFullscreen,surfaceClick: d => nativeSurfaceClick(d),rateNow:()=>Number(ytPlayer()?.getPlaybackRate?.() ?? pick()?.playbackRate ?? 1)});
 })();

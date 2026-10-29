@@ -170,6 +170,8 @@ BOOL JTConfigureMedia(WKWebViewConfiguration *configuration) {
     // A hidden page (lock button, Home, other app) must not interrupt or re-route video.
     JTSetFeature(preferences, @"InterruptVideoOnPageVisibilityChangeEnabled", NO);
     JTSetFeature(preferences, @"RequiresPageVisibilityForVideoToBeNowPlaying", NO);
+    // V23.1: NIET "TextRecognitionInVideosEnabled" uitzetten — getest: het webproces liep dan vast bij
+    // fullscreen (zwarte tab). De klik-blokkade van die laag lost MacNavigationMonitor op.
     // The user already interacted with the page; presentation changes requested by the app
     // (fullscreen return, PiP toggle, AirPlay picker) may inherit that document gesture.
     JTSetCPreference(preferences, "WKPreferencesSetMediaUserGestureInheritsFromDocument", true);

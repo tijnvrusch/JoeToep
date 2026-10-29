@@ -558,6 +558,8 @@ final class WebSession: NSObject, ObservableObject {
     func deviceOrientationChanged() {
         let orientation = UIDevice.current.orientation
         guard UIDevice.current.userInterfaceIdiom == .phone, applicationActive else { return }
+        // V23.1: zelf naar landscape gekanteld → de automatische landscape-klem is niet meer nodig.
+        if orientation.isLandscape && isVisibleTab { OrientationCoordinator.releaseFullscreenLandscapeClamp() }
         if isFullscreen && orientation.isLandscape { sawLandscapeWhileFullscreen = true }
         // V12: back to portrait after watching fullscreen in landscape: continue inline.
         if orientation == .portrait && isFullscreen && sawLandscapeWhileFullscreen && settings.exitFullscreenOnPortrait &&
@@ -1345,16 +1347,31 @@ final class WebSession: NSObject, ObservableObject {
     private func scheduleFullscreenExit() {
         guard !systemFullscreenHandoff && applicationActive else { return }
         exitTask?.cancel()
-        let delay = settings.animationsOff ? 60 : (settings.instantTransitions ? 140 : 260)
+        // V23.1: sneller terug (was 60/140/260 ms) — alleen nog net genoeg om een korte
+        // fullscreen-"flap" (YouTube die van video wisselt) niet als afsluiten te zien.
+        let delay = settings.animationsOff ? 20 : (settings.instantTransitions ? 50 : 90)
         exitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(delay))
             guard !Task.isCancelled, let self, !self.isFullscreen,
                   !self.pip.isActive, !self.pip.isRequesting else { return }
+            #if os(iOS)
+            let autoRotate = OrientationCoordinator.autoRotateEnabled && UIDevice.current.userInterfaceIdiom == .phone
+            #else
+            let autoRotate = false
+            #endif
             if self.settings.pipOnFullscreenExit && !self.suppressExitPiP && self.isPlaying {
-                self.requestPictureInPicture(reason: .fullscreenExit)
-            } else if self.applicationActive && self.settings.returnToPortrait {
                 #if os(iOS)
-                OrientationCoordinator.requestPortrait()
+                if autoRotate { OrientationCoordinator.endFullscreenLandscape(returnToPortrait: true) }
+                #endif
+                self.requestPictureInPicture(reason: .fullscreenExit)
+            } else if self.applicationActive && (autoRotate || self.settings.returnToPortrait) {
+                #if os(iOS)
+                if autoRotate {
+                    self.recordLifecycle("fullscreen closed: back to portrait")
+                    OrientationCoordinator.endFullscreenLandscape(returnToPortrait: true)
+                } else {
+                    OrientationCoordinator.requestPortrait()
+                }
                 #endif
             }
             self.suppressExitPiP = false
@@ -1671,7 +1688,9 @@ final class WebSession: NSObject, ObservableObject {
         let keyboard = settings.macFullscreenMode == .youtube
         let serial = navigationSerial
         // V17: met animaties uit wacht automatisch-fullscreen 0.2 s in plaats van 0.5 s.
-        let firstWait = settings.animationsOff ? 0.08 : (settings.instantTransitions ? 0.2 : 0.35)
+        // V23.1: zo snel mogelijk fullscreen (was 0,08/0,2/0,35 s); de pagina controleert zelf of de
+        // video al speelt en genoeg geladen is.
+        let firstWait = settings.animationsOff ? 0.0 : (settings.instantTransitions ? 0.04 : 0.1)
         DispatchQueue.main.asyncAfter(deadline: .now() + (extraChecks == 0 ? firstWait : 0.15)) { [weak self] in
             guard let self, self.navigationSerial == serial, self.applicationActive,
                   self.settings.automaticFullscreen || self.settings.fullscreenOnPlay, !self.pip.isActive, !self.pip.isRequesting else { return }
@@ -1708,7 +1727,7 @@ final class WebSession: NSObject, ObservableObject {
                         // V19.3: het VENSTER is wel macOS-fullscreen maar de video niet (je zag dan
                         // de theater-weergave in een fullscreen venster). Eerst het venster terug,
                         // dan pas F — zodat de video écht in YouTube's fullscreen eindigt.
-                        if window.styleMask.contains(.fullScreen) {
+                        if window.styleMask.contains(.fullScreen) && !window.isWebKitFullScreenWindow {
                             self.recordLifecycle("auto-fullscreen: window was fullscreen without video → reset")
                             window.toggleFullScreen(nil)
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
@@ -1962,6 +1981,8 @@ final class WebSession: NSObject, ObservableObject {
             "dismissWarnings:\(enabled && level.dismissesWarnings),cosmetic:\(enabled && settings.hideAdCards && level.blocksMeasurement)};\n"
         installScript("adShield", world: .page, time: .atDocumentStart, prefix: flags + shield)
         installScript("mediaCompatibility", world: .page, time: .atDocumentStart, prefix: flags + "window.JOETOEP_QUIET_VIDEO = \"\(quietVideo)\";\n")
+        // V23.1 (iPhone): desktop-YouTube vanaf het eerste frame in één kolom — vóór elke opmaak.
+        if mobile == "true" && !tablet { installScript("phoneLayout", world: .page, time: .atDocumentStart, prefix: flags) }
         installScript("linkBridge", world: Self.bridgeWorld, time: .atDocumentStart, prefix: flags)
         installScript("playerBridge", world: Self.bridgeWorld)
         installScript("qualityBridge", world: .page)
@@ -2330,7 +2351,7 @@ final class WebSession: NSObject, ObservableObject {
         }
         if event.name == .exitWindowFullscreen {
             #if os(macOS)
-            if let window = webView.window, window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
+            if let window = webView.window, window.styleMask.contains(.fullScreen), !window.isWebKitFullScreenWindow { window.toggleFullScreen(nil) }
             #endif
             return
         }
@@ -2352,10 +2373,13 @@ final class WebSession: NSObject, ObservableObject {
         // V19.3: video verlaat fullscreen terwijl het venster nog in macOS-fullscreen staat (YouTube-
         // modus, geen JoeToep-"stage") → venster ook terug, zodat je de theater-weergave in je
         // gewone venster ziet en niet "vast" zit in een leeg fullscreen-venster.
+        // V23.1: NOOIT WebKit's eigen fullscreen-venster omschakelen — dat brak WebKit's eigen
+        // terugweg halverwege de animatie en liet de webview los achter (zwarte tab).
         if wasFullscreen && !event.fullscreen && settings.macFullscreenMode == .youtube && !isVideoStage,
-           let window = webView.window, window.styleMask.contains(.fullScreen) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self, !self.isFullscreen, let w = self.webView.window, w.styleMask.contains(.fullScreen) else { return }
+           let window = webView.window, window.styleMask.contains(.fullScreen), !window.isWebKitFullScreenWindow {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in   // V23.1: was 0,3 s
+                guard let self, !self.isFullscreen, let w = self.webView.window, w.styleMask.contains(.fullScreen),
+                      !w.isWebKitFullScreenWindow else { return }
                 self.recordLifecycle("fullscreen ended → leave window fullscreen")
                 w.toggleFullScreen(nil)
             }
@@ -2377,8 +2401,9 @@ final class WebSession: NSObject, ObservableObject {
                 self.recordLifecycle("paused in fullscreen → leave fullscreen (native)")
                 self.webView.evaluateJavaScript("(()=>{window.__joetoepExitedByPause=true;try{if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document);return 1}}catch(_){}const v=document.querySelector('video');try{if(v&&v.webkitDisplayingFullscreen){v.webkitExitFullscreen();return 2}}catch(_){}window.JoeToepStage&&window.JoeToepStage.exit&&window.JoeToepStage.exit();return 0})()", completionHandler: nil)
                 #if os(macOS)
-                if let w = self.webView.window, w.styleMask.contains(.fullScreen), self.settings.macFullscreenMode == .youtube || self.isVideoStage {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if w.styleMask.contains(.fullScreen), !self.isPlaying { w.toggleFullScreen(nil) } }
+                if let w = self.webView.window, w.styleMask.contains(.fullScreen), !w.isWebKitFullScreenWindow,
+                   self.settings.macFullscreenMode == .youtube || self.isVideoStage {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if w.styleMask.contains(.fullScreen), !w.isWebKitFullScreenWindow, !self.isPlaying { w.toggleFullScreen(nil) } }
                 }
                 #endif
             }
@@ -2438,7 +2463,17 @@ final class WebSession: NSObject, ObservableObject {
             #endif
             exitTask?.cancel()
             #if os(iOS)
-            if settings.rotateOnFullscreen && !pip.isActive && !pip.isRequesting {
+            // V23.1: "Auto-rotate fullscreen" (iPhone, standaard aan) — meteen naar landscape, ook met
+            // rotatievergrendeling aan; de interface blijft landscape tot fullscreen dicht gaat of je de
+            // telefoon zelf kantelt.
+            if OrientationCoordinator.autoRotateEnabled && UIDevice.current.userInterfaceIdiom == .phone {
+                orientationTask?.cancel()
+                if !pip.isActive && !pip.isRequesting && applicationActive && isVisibleTab && !UIDevice.current.orientation.isLandscape {
+                    OrientationCoordinator.log = { [weak self] line in self?.recordLifecycle(line) }
+                    recordLifecycle("fullscreen: auto-rotate to landscape")
+                    OrientationCoordinator.beginFullscreenLandscape(appWindow: event.stage)
+                }
+            } else if settings.rotateOnFullscreen && !pip.isActive && !pip.isRequesting {
                 orientationTask?.cancel()
                 let rotateDelay = settings.animationsOff ? 0 : (settings.instantTransitions ? 60 : 200)
                 orientationTask = Task { @MainActor [weak self] in
@@ -2450,8 +2485,35 @@ final class WebSession: NSObject, ObservableObject {
             }
             #endif
         }
+        #if os(macOS)
+        // V23.1: na elke fullscreen-wissel controleren of de webview weer in zijn tab hangt (WebKit liet hem
+        // na een onderbroken terugkeer soms los → zwarte tab die zelfs herladen niet oploste).
+        // Alleen na het VERLATEN, pas als WebKit's overgang klaar is, en alleen als de pagina zelf ook
+        // zegt dat hij niet meer fullscreen is (nooit tijdens een fullscreen-overgang ingrijpen).
+        // Pas ingrijpen als hij twee controles achter elkaar (2 s en 3,5 s na het verlaten) nog los hangt —
+        // WebKit's eigen terugweg kan ruim een seconde duren en mag nooit onderbroken worden.
+        if wasFullscreen && !event.fullscreen {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self, !self.isFullscreen, self.webView.superview == nil || self.webView.window == nil else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self, !self.isFullscreen,
+                          self.webView.superview == nil || self.webView.window == nil else { return }
+                    self.webView.evaluateJavaScript("!!(document.fullscreenElement||document.webkitFullscreenElement)") { [weak self] value, _ in
+                        guard let self, (value as? Bool) == false, !self.isFullscreen, WebHostNSView.repair(self.webView) else { return }
+                        self.recordLifecycle("web view re-attached after fullscreen")
+                    }
+                }
+            }
+        }
+        #endif
         if wasFullscreen && !event.fullscreen && !wasNativePiP {
             orientationTask?.cancel()
+            #if os(iOS)
+            // V23.1: op de achtergrond nooit "vast" in landscape blijven.
+            if !applicationActive && OrientationCoordinator.fullscreenLandscape {
+                OrientationCoordinator.endFullscreenLandscape(returnToPortrait: false)
+            }
+            #endif
             #if os(macOS)
             if floatingAfterFullscreen {
                 floatingAfterFullscreen = false

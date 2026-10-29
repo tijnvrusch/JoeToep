@@ -523,6 +523,7 @@ private struct PlaybackSettings: View {
             // iPad): rotatie-naar-fullscreen is een iPhone-specifiek gedrag.
             #if os(iOS)
             if UIDevice.current.userInterfaceIdiom == .phone {
+                AutoRotateFullscreenSection()       // V23.1
                 AdvancedSection("Rotation (iPhone)") {
                     SettingToggle("Fullscreen when rotating to landscape", isOn: $settings.fullscreenOnLandscape)
                     SettingToggle("Leave fullscreen when rotating back to portrait", isOn: $settings.exitFullscreenOnPortrait)

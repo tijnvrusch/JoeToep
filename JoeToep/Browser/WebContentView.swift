@@ -59,10 +59,8 @@ final class WebHostView: UIView {
 struct WebContentView: NSViewRepresentable {
     let webView: WKWebView
     func makeNSView(context: Context) -> NSView {
-        let host = NSView()
-        webView.frame = host.bounds
-        webView.autoresizingMask = [.width, .height]
-        host.addSubview(webView)
+        let host = WebHostNSView()
+        host.adopt(webView)
         return host
     }
     func updateNSView(_ nsView: NSView, context: Context) {
@@ -70,10 +68,40 @@ struct WebContentView: NSViewRepresentable {
         if webView.superview === nsView { webView.frame = nsView.bounds; if webView.isHidden { webView.isHidden = false } }
         // V22.2: wees-webview (na mislukte fullscreen-terugkeer) → terugzetten.
         else if webView.superview == nil || webView.window == nil {
-            webView.frame = nsView.bounds
-            webView.autoresizingMask = [.width, .height]
-            nsView.addSubview(webView)
+            (nsView as? WebHostNSView)?.adopt(webView)
         }
     }
+}
+
+/// V23.1 (Mac): houder van de webview die zelf kan zien dat zijn webview "los" is geraakt. Na een
+/// mislukte terugkeer uit WebKit's fullscreen hing de webview soms nergens meer (superview en venster
+/// nil) en bleef de tab zwart tot een herstart — ook herladen hielp niet. WebSession vraagt na elke
+/// fullscreen-wissel om een controle; de houder zet een verweesde webview dan stil terug.
+final class WebHostNSView: NSView {
+    private weak var webView: WKWebView?
+    private static let hosts = NSHashTable<WebHostNSView>.weakObjects()
+    func adopt(_ view: WKWebView) {
+        webView = view
+        Self.hosts.add(self)
+        view.frame = bounds
+        view.autoresizingMask = [.width, .height]
+        if view.superview !== self { addSubview(view) }
+        if view.isHidden { view.isHidden = false }
+    }
+    /// Alleen echt verweesde webviews (los van elk venster) terugzetten — nooit afpakken van WebKit's
+    /// fullscreen-venster of het zwevende paneel.
+    @discardableResult
+    func repairIfOrphaned() -> Bool {
+        guard let webView, window != nil, webView.superview == nil || webView.window == nil else { return false }
+        adopt(webView)
+        return true
+    }
+    @discardableResult
+    static func repair(_ webView: WKWebView) -> Bool {
+        guard webView.superview == nil || webView.window == nil else { return false }
+        for host in hosts.allObjects where host.webView === webView { if host.repairIfOrphaned() { return true } }
+        return false
+    }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); repairIfOrphaned() }
 }
 #endif

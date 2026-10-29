@@ -212,7 +212,8 @@
   if (config.dismissWarnings) {
     new MutationObserver(records => {
       for (const record of records) for (const node of record.addedNodes) {
-        if (node.nodeType === 1 && (node.matches?.('ytd-enforcement-message-view-model, tp-yt-paper-dialog') || node.querySelector?.('ytd-enforcement-message-view-model'))) {
+        if (node.nodeType === 1 && (node.localName === 'ytd-enforcement-message-view-model' || node.localName === 'tp-yt-paper-dialog' ||
+            (node.firstElementChild && node.getElementsByTagName('ytd-enforcement-message-view-model').length))) {
           dismissWarnings(); return;
         }
       }
