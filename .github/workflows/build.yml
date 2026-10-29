@@ -20,12 +20,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: JS-scripttests
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Afhankelijkheden (jsdom, Pillow)
         run: |
-          set -e
-          for t in Scripts/test_*.cjs; do echo "== $t"; node "$t"; done
+          npm ci --ignore-scripts
+          pip install -r Scripts/requirements-dev.txt
+      - name: JS-scripttests (alle suites)
+        run: npm test
       - name: Projectvalidatie
         run: python3 Scripts/validate_project.py
+      - name: Overige Python-controles
+        run: |
+          python3 Scripts/test_content_filters.py
+          python3 Scripts/test_v20_mediahub.py
+          python3 Scripts/test_v21_media.py
+
+  # V26: pure Swift-logica + unit tests op Linux (zelfde script als in de cloudsessie).
+  linux-swift:
+    name: Swift-unit tests (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: WORK=$RUNNER_TEMP Scripts/linux_swift_tests.sh
 
   xcode:
     name: Xcode ${{ matrix.platform }}
@@ -54,12 +73,32 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             | tee build.log | grep -E "error:|warning: .*JoeToep/|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log
+      - name: Unit tests (JoeToepTests)
+        run: |
+          set -o pipefail
+          if [ "${{ matrix.platform }}" = "macOS" ]; then
+            DEST="platform=macOS"
+          else
+            UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(), reverse=True) if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+            DEST="platform=iOS Simulator,id=$UDID"
+          fi
+          echo "Bestemming: $DEST"
+          xcodebuild test \
+            -project JoeToep.xcodeproj -scheme JoeToep -destination "$DEST" \
+            -only-testing:JoeToepTests -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee test.log | grep -E "error:|Test Case .* failed|Executed [0-9]+ test|TEST (SUCCEEDED|FAILED)" || true
+          grep -q "TEST SUCCEEDED" test.log
       - name: Foutmeldingen samenvatten
         if: failure()
-        run: grep -E "error:" build.log | sort -u | head -100 || true
-      - name: Buildlog bewaren
+        run: |
+          grep -E "error:" build.log | sort -u | head -100 || true
+          grep -E "error:|failed" test.log | sort -u | head -100 || true
+      - name: Logs bewaren
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ matrix.platform }}
-          path: build.log
+          name: logs-${{ matrix.platform }}
+          path: |
+            build.log
+            test.log
