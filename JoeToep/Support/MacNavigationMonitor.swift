@@ -56,6 +56,39 @@ final class MacNavigationMonitor {
             MainActor.assumeIsolated { BrowserWorkspace.active?.cycleRecent(backwards: backwards) }
             return nil
         }) { monitors.append(m) }
+        // V19.1: snelheid met sneltoetsen (ook in fullscreen):
+        //   ⌥, / ⌥.  klein   ·   ⌥⇧, / ⌥⇧.  medium   ·   ⌃⌥, / ⌃⌥.  groot   ·   ⌥0  terug naar 1×
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { event in
+            let flags = event.modifierFlags.intersection([.control, .shift, .command, .option])
+            guard flags.contains(.option), !flags.contains(.command), [43, 47, 29].contains(event.keyCode),
+                  !(event.window?.firstResponder is NSTextView) else { return event }
+            MainActor.assumeIsolated {
+                guard let workspace = BrowserWorkspace.active else { return }
+                let session = workspace.mediaTab.session
+                let defaults = UserDefaults.standard
+                if event.keyCode == 29 { session.setPlaybackRate(1); return }
+                let step: Double
+                if flags.contains(.control) { step = defaults.object(forKey: "speedStepLargeV191") as? Double ?? 0.5 }
+                else if flags.contains(.shift) { step = defaults.object(forKey: "speedStepMediumV191") as? Double ?? 0.25 }
+                else { step = defaults.object(forKey: "speedStepSmallV191") as? Double ?? 0.05 }
+                session.adjustPlaybackRate(by: event.keyCode == 47 ? step : -step)
+            }
+            return nil
+        }) { monitors.append(m) }
+        // V19.2: "vast in fullscreen"-fix. Staat het VENSTER in macOS-fullscreen (eigen Space) terwijl
+        // de pagina zelf niet fullscreen is, dan deden F, dubbelklik en Esc niets zichtbaars. Nu verlaten
+        // ze dan het macOS-fullscreen van het venster.
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown], handler: { event in
+            guard let window = event.window, window.styleMask.contains(.fullScreen),
+                  !(window.firstResponder is NSTextView) else { return event }
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            let isF = event.type == .keyDown && event.keyCode == 3 && flags.isEmpty
+            let isEsc = event.type == .keyDown && event.keyCode == 53
+            let isDouble = event.type == .leftMouseDown && event.clickCount == 2
+            guard isF || isEsc || isDouble else { return event }
+            MainActor.assumeIsolated { MacNavigationMonitor.exitWindowFullscreenIfPageIsInline(window) }
+            return event
+        }) { monitors.append(m) }
         // Ctrl losgelaten → de keuze is definitief (volgende Ctrl+Tab begint weer bij de meest recente).
         if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in
             if !event.modifierFlags.contains(.control) { MainActor.assumeIsolated { BrowserWorkspace.active?.endRecentCycle() } }
@@ -63,9 +96,28 @@ final class MacNavigationMonitor {
         }) { monitors.append(m) }
         // Trackpad: horizontaal vegen met twee vingers (alleen als WebKit zelf niet terug kan).
         if let m = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { event in
-            MainActor.assumeIsolated { MacNavigationMonitor.shared.track(event) }
-            return event
+            MainActor.assumeIsolated {
+                // V19.1: in fullscreen gaat een veeg naar scrubben/volume (per apparaat instelbaar).
+                if GestureScrubber.shared.handle(event) { return }
+                MacNavigationMonitor.shared.trackPullToRefresh(event)
+                MacNavigationMonitor.shared.track(event)
+            }
+            return event   // de pagina krijgt hem ook (die blokkeert in fullscreen alleen het scrollen)
         }) { monitors.append(m) }
+    }
+
+    /// Is de pagina NIET (meer) fullscreen maar het venster wel? Dan het venster uit macOS-fullscreen halen.
+    /// Kleine vertraging: eerst mag de pagina zelf reageren (YouTube's eigen F/dubbelklik).
+    static func exitWindowFullscreenIfPageIsInline(_ window: NSWindow) {
+        guard let session = BrowserWorkspace.active?.selected.session,
+              NavigationPolicy.isPlaybackPage(session.currentURL) else { return }   // alleen op videopagina's
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            let probe = "!!(document.fullscreenElement||document.webkitFullscreenElement||document.querySelector('ytd-watch-flexy')?.hasAttribute('fullscreen'))"
+            session.webView.evaluateJavaScript(probe) { value, _ in
+                guard (value as? Bool) == false, window.styleMask.contains(.fullScreen) else { return }
+                window.toggleFullScreen(nil)
+            }
+        }
     }
 
     /// Vraagt de pagina of er een tekstveld actief is; zo niet: terug of vooruit.
@@ -75,6 +127,29 @@ final class MacNavigationMonitor {
         session.webView.evaluateJavaScript(script) { result, _ in
             if (result as? Bool) == true { return }          // aan het typen op de site
             if back { session.goBack() } else { session.goForward() }
+        }
+    }
+
+    // MARK: V19.1 — trekken om te verversen (trackpad, bovenaan de pagina)
+    private var pullDistance: CGFloat = 0
+    private var pullAtTop = false
+    private var pullChecked = false
+    /// Twee vingers omlaag terwijl de pagina al helemaal bovenaan staat → na ±120 pt en loslaten: verversen.
+    func trackPullToRefresh(_ event: NSEvent) {
+        guard event.hasPreciseScrollingDeltas, WebSession.pullAction != "off",
+              let session = BrowserWorkspace.active?.selected.session else { return }
+        if event.phase == .began {
+            pullDistance = 0; pullAtTop = false; pullChecked = false
+            session.webView.evaluateJavaScript("(window.scrollY||document.documentElement.scrollTop||0)<=0") { [weak self] value, _ in
+                MainActor.assumeIsolated { self?.pullAtTop = (value as? Bool) == true; self?.pullChecked = true }
+            }
+        }
+        // Vingers omlaag = inhoud naar beneden trekken (met natuurlijk scrollen: deltaY positief).
+        let fingersDown = event.isDirectionInvertedFromDevice ? event.scrollingDeltaY : -event.scrollingDeltaY
+        if event.phase == .changed, pullChecked, pullAtTop { pullDistance += max(0, fingersDown) - max(0, -fingersDown) }
+        if event.phase == .ended {
+            defer { pullDistance = 0; pullAtTop = false }
+            if pullAtTop && pullDistance > 120 && !session.isFullscreen { session.performPullAction() }
         }
     }
 
@@ -88,7 +163,8 @@ final class MacNavigationMonitor {
         }
         if event.phase == .ended || event.phase == .cancelled {
             defer { swipeDistance = 0 }
-            guard !swipeHandled, swipeDistance > 300,
+            guard UserDefaults.standard.object(forKey: "backSwipeV192") as? Bool ?? false,
+                  !swipeHandled, swipeDistance > 300,
                   let workspace = BrowserWorkspace.active, !workspace.selected.session.canGoBack else { return }
             swipeHandled = true
             workspace.closeFromBack(workspace.selected)

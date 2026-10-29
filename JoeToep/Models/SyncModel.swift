@@ -73,11 +73,19 @@ struct SyncContent: Equatable, Sendable {
 
 /// Opdrachten die niet in een snapshot passen (Apple Watch-afstandsbediening via de iPhone).
 struct SyncCommand: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case play, toggle, seek, rate, open }
+    enum Kind: String, Codable, Sendable {
+        case play, toggle, seek, rate, open
+        /// V19.1 overdracht: "ik ga deze video spelen — pauzeer jij, en vertel me je exacte tijd".
+        case handoffRequest
+        /// Antwoord: de exacte tijd (value) waarop de video bij de afzender stopte.
+        case handoffTime
+    }
     var kind: Kind
     var target: String            // apparaat-id dat de opdracht moet uitvoeren
     var url: URL?
     var value: Double?
+    /// V19.1: afzender (voor het antwoord op een overdracht). Oude berichten hebben hem niet.
+    var from: String? = nil
 }
 
 /// Wat er over de lijn gaat: één envelop, JSON.

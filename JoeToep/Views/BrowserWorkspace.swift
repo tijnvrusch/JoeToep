@@ -151,6 +151,22 @@ final class BrowserWorkspace: ObservableObject {
         sync.onCommand = { [weak self] command in self?.perform(command) }
     }
 
+    /// V19.1 — Apparaatwissel: begin je hier een video die op een ander apparaat nog speelt
+    /// (of daar net stopte), dan vragen we dat apparaat om te pauzeren en zijn EXACTE tijd te
+    /// sturen; die springen we dan in (±0,1 s, zoals AirPods-overdracht).
+    func requestDeviceHandoff(for tab: BrowserTab) {
+        guard let url = tab.currentURL, NavigationPolicy.isPlaybackPage(url) else { return }
+        let sync = TabSyncService.shared
+        for (device, snapshot) in sync.latestByDevice where device != sync.deviceID {
+            guard let remoteTab = snapshot.tabs.first(where: { SyncDiff.sameDestination($0.url, url) }) else { continue }
+            // Alleen als die video daar NU speelt, of daar in de laatste 30 s nog speelde/stopte.
+            // (Anders zou een oude pauze je terugzetten naar een tijd die je niet meer wilt.)
+            let playingThere = snapshot.playingID == remoteTab.id
+            guard playingThere || Date().timeIntervalSince(snapshot.sentAt) < 30 else { continue }
+            sync.send(SyncCommand(kind: .handoffRequest, target: device, url: url, value: nil, from: sync.deviceID))
+        }
+    }
+
     /// Tab die "de" video heeft: de spelende, anders de geselecteerde.
     var mediaTab: BrowserTab { tabs.first { $0.session.isPlaying || $0.session.isInPictureInPicture } ?? selected }
 
@@ -169,6 +185,22 @@ final class BrowserWorkspace: ObservableObject {
         case .toggle: mediaTab.session.remoteToggle()
         case .seek: mediaTab.session.remoteSeek(by: command.value ?? 10)
         case .rate: mediaTab.session.stepPlaybackRate(Int(command.value ?? 1))
+        case .handoffRequest:
+            // Een ander apparaat neemt het over: hier pauzeren en de exacte tijd terugsturen.
+            guard let from = command.from else { return }
+            let tab = tabs.first { SyncDiff.sameDestination($0.currentURL, command.url) && $0.session.isPlaying } ?? mediaTab
+            let url = command.url
+            tab.session.pauseAndReportTime { time in
+                guard let time else { return }
+                TabSyncService.shared.send(SyncCommand(kind: .handoffTime, target: from, url: url, value: time,
+                                                       from: TabSyncService.shared.deviceID))
+            }
+            if tab.session.isInPictureInPicture { tab.session.stopPiPAndPause() }
+        case .handoffTime:
+            // Antwoord: spring naar precies waar het andere apparaat stopte.
+            guard let time = command.value,
+                  let tab = tabs.first(where: { SyncDiff.sameDestination($0.currentURL, command.url) }) else { return }
+            tab.session.seekExact(time)
         }
     }
 
@@ -333,6 +365,7 @@ final class BrowserWorkspace: ObservableObject {
             if playing {                              // this tab's video just STARTED playing
                 tab.lastActive = Date()               // for "close inactive tabs" and Ctrl+Tab order
                 self.handOver(to: tab)                // pause / close PiP of every other tab
+                self.requestDeviceHandoff(for: tab)   // V19.1: ander apparaat speelt dezelfde video? → exacte tijd
             }
             // Keep the screen awake while any tab plays (iPhone/iPad setting). `async` runs it
             // a moment later, after all tabs have updated their state.
@@ -472,7 +505,14 @@ final class BrowserWorkspace: ObservableObject {
     func addTab(url: URL?, privateMode: Bool = false, activate: Bool = true, after anchor: BrowserTab? = nil) {
         Self.active = self
         let tab = BrowserTab(saved: SavedBrowserTab(url: url), privateMode: privateMode)
-        if url == nil { tab.session.focusSearchWhenReady = true }
+        if url == nil {
+            // V19.2: nieuwe-tab-pagina (standaard aan); anders zoals voorheen YouTube's zoekveld.
+            if (UserDefaults.standard.object(forKey: "newTabPageV192") as? Bool ?? true) && !privateMode {
+                tab.session.showsNewTabPage = true
+            } else {
+                tab.session.focusSearchWhenReady = true
+            }
+        }
         if activate { leaveCurrent() }
         var index = tabs.count
         if let anchor, insertsNextToCurrent, let position = tabs.firstIndex(where: { $0.id == anchor.id }) {
@@ -578,6 +618,27 @@ final class BrowserWorkspace: ObservableObject {
         let pinnedCount = tabs.filter(\.pinned).count
         tabs.insert(tab, at: min(pinnedCount, tabs.count))
         persist()
+    }
+    /// V19.1: sleep-herordenen. Zet tab `id` op de plek van `target` (pinned en gewone tabs
+    /// blijven elk in hun eigen groep). Geeft false terug als het niet kon.
+    @discardableResult
+    func moveTab(id: UUID, before target: UUID) -> Bool {
+        guard id != target, let from = tabs.firstIndex(where: { $0.id == id }),
+              let to = tabs.firstIndex(where: { $0.id == target }), tabs[from].pinned == tabs[to].pinned else { return false }
+        let tab = tabs.remove(at: from)
+        tabs.insert(tab, at: to)
+        persist()
+        return true
+    }
+    /// V19.2: tab achteraan zetten (achter de laatste tab van zijn groep: pinned of gewoon).
+    @discardableResult
+    func moveTabToEnd(id: UUID) -> Bool {
+        guard let from = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        let tab = tabs.remove(at: from)
+        let end = tab.pinned ? tabs.filter(\.pinned).count : tabs.count
+        tabs.insert(tab, at: end)
+        persist()
+        return from != end
     }
     func move(_ tab: BrowserTab, by offset: Int) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }

@@ -1,3 +1,44 @@
+# 20.0.0 (27)
+Bundelt alle 19.3-wijzigingen hieronder in één nieuwe hoofdversie (eigen map "JoeToep V20").
+
+# 19.3.0 (26) — ook: dubbelklik voor fullscreen start niet meer YouTube's 2×-spoelen (houd-timer geblokkeerd + vangnet).
+# 19.3.0 (26)
+- Menubalkknoppen (alle apparaten): één tik werkt direct (iPad-bug waarbij je moest vasthouden opgelost). Vasthouden = extra functie: Terug→Home, Vooruit→gesloten tab heropenen, Vernieuwen→geforceerd, Startpagina's→nieuwe tab, Favoriet→Bibliotheek, Download→downloadlijst, PiP→reset, Creator tools→snelheidspaneel, Instellingen→tabs zoeken, AirPlay→fullscreen, logo→nieuwe tab, −/+→1×.
+- iPad: alle menu's en sneltoetsen van de Mac werken nu ook met een toetsenbord (⌘T, ⌘W, ⌘R, ⌘[ ], ⌘1–9, ⌥Tab, zoom…).
+- Mac: dubbelklik op de lege balk bovenin maximaliseert het venster (volgt de macOS-instelling).
+- Theater → fullscreen: macOS-fullscreen-venster zonder videofullscreen wordt hersteld en opnieuw geprobeerd; verlaat de video fullscreen, dan verlaat ook het venster fullscreen.
+- Terug uit fullscreen (tijdens of na afspelen): theatermodus wordt altijd opnieuw toegepast als die instelling aan staat.
+- Sync: sneller herverbinden (elke 4 s i.p.v. 8 s, back-upuitnodiging na 1,5 s).
+
+# 19.2.0 (build 25) — 29-09-2026
+
+- **Scrubben ultra-responsief**: rode bolletje, rode balk en tijd bewegen per frame mee met je veeg; YouTube spoelt gedoseerd op de achtergrond (instelbaar "Seek rate limit", standaard 60 ms) + altijd een laatste seek als je stopt. Vegen stapelt vanaf het eigen doel, dus geen terugspringen.
+- **Vast in macOS-fullscreen opgelost**: stond het venster in macOS-fullscreen terwijl de video zelf al niet meer fullscreen was, dan deden F/dubbelklik/Esc niets. Nu verlaten ze dan ook het venster-fullscreen (alleen op videopagina's).
+- **Crash bij openen van Instellingen voorkomen**: dubbele uitleg-sleutel ("New tab page") hernoemd; nieuwe projectcontrole bewaakt dit.
+
+- **Crashfix macOS**: de apparaatzoeker (Bonjour) wordt nooit meer gestopt/vervangen; herverbinden door bekende apparaten opnieuw uit te nodigen (crashlog `_MonitorCancel`).
+- **Fullscreen ⇄ pauze**: pauze → na 0,35 s terug naar de pagina; verder spelen → weer fullscreen. Instelbaar ("Leave fullscreen when paused").
+- **Nooit meer vast in fullscreen**: dubbelklik, F en YouTube's fullscreenknop verlaten fullscreen ook als YouTube zelf niet de eigenaar is.
+- **Vegen**: horizontaal = altijd scrubben, ook op de gewone speler (Mac-trackpad/muis; iPhone/iPad met één vinger over de video). Terug-vegen standaard uit; Terug-knop altijd in de menubalk.
+- **Omlaag trekken = fullscreen** (op videopagina's), of verversen/uit.
+- **Gebaren**: voorinstellingen Precise/Balanced/Fast + alles terugzetten; aanraak-snelheid en -richting op iPhone/iPad.
+- **Nieuwe-tab-pagina**: meteen typen, standaard YouTube, of YouTube Music/Vimeo/Twitch/SoundCloud/Dailymotion/Spotify/Web; verder kijken, favorieten, recent gesloten, snelknoppen. Uit te zetten. PiP bij een nieuwe tab ongewijzigd.
+- **Tabs**: 1 tab ≈ halve breedte, 2 = volle breedte, 3+ kleiner; + direct achter de laatste tab; slepen tot helemaal achteraan.
+- **Mac/iPad**: desktop-indeling (meer knoppen) één keer toegepast; automatisch fullscreen aan.
+- **Browserfuncties**: zoom per website, leesweergave, bewaren als PDF, afdrukken (Mac), tabs doorzoeken.
+- **Zoeken in de instellingen** (naam + uitleg, springt naar de juiste pagina).
+- **Tests**: +5 unit-tests (o.a. 10.000 door elkaar binnenkomende berichten Mac↔iPhone, offline wijzigingen, dubbele/late berichten), +2 JS-tests (127 scenario's).
+
+# 19.1.0 (build 24) — 28-09-2026
+
+- **Theatermodus-bug (Mac) — oorzaak gevonden:** de controle "is het fullscreen?" keek naar de app i.p.v. de pagina; YouTube's eigen fullscreen werd dan gemist en er werd nog eens F gestuurd → fullscreen weer UIT (terug in theatermodus). Nu vraagt elke F-aanroep eerst de pagina en stuurt alleen F als hij écht niet fullscreen is (ook bij de tab-overdracht).
+- **Eén klik pauzeert op de Mac**, ook als het venster nog niet actief was.
+- **Tabs slepen om te herordenen** (Mac, iPad, iPhone).
+- **Trekken om te verversen**: iPhone/iPad (omlaag trekken), Mac (twee vingers omlaag bovenaan de pagina). Instelbaar.
+- **Snelheid**: − / + (kleine stap) in de menubalk; tik op de snelheid → paneel met klein/medium/groot omlaag en omhoog, schuif (0,25–4×, per 0,01) en vaste waarden. Mac-sneltoetsen ⌥, ⌥. (klein) · ⌥⇧ (medium) · ⌃⌥ (groot) · ⌥0 (1×). Stapgroottes instelbaar.
+- **Vegen op de Mac, native**: trackpad en muis (Mac Mouse Fix) herkend, elk met eigen richting (omdraaien per as) en gevoeligheid; vloeiend (continu) of in stappen; horizontaal = scrubben, verticaal = volume; as-vergrendeling, momentum negeren, diagnose "Last gesture" voor nerds.
+- **Apparaatwissel op de seconde**: begin je een video die op het andere apparaat speelt (of daar < 30 s geleden stopte), dan pauzeert dat apparaat en stuurt het zijn exacte tijd; hier wordt precies daar verder gespeeld. Positie wordt met verbonden apparaten elke seconde gedeeld.
+
 # 19.0.0 (build 23) — 28-09-2026
 
 - **Ctrl+Tab / Ctrl+Shift+Tab**: door je recent gebruikte tabs (houd Ctrl vast, tik Tab), ook vanuit fullscreen — de nieuwe video gaat dan fullscreen verder.

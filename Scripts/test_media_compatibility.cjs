@@ -542,6 +542,35 @@ test('V10 desktop theater does not race automatic fullscreen or unconfigured nat
   assert.equal(clicks,1,'once per video: a user leaving theater mode is respected');
   h.close();
 });
+test('V19.1 exact playback speed via setRate (0.01 precision, clamped)', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  h.w.eval(fs.readFileSync(path.join(__dirname,'../JoeToep/Resources/playbackControls.js'),'utf8'));
+  const c=h.w.JoeToepControls;
+  assert.equal(c.setRate(1.15),1.15);assert.equal(h.v.playbackRate,1.15);
+  assert.equal(c.setRate(9),4);assert.equal(c.setRate(0.01),0.1);assert.equal(c.setRate(1.234),1.23);
+  c.configure({nativeWheel:true});h.close();
+});
+test('V19.2 pause leaves fullscreen after 350 ms; a quick pause/play does not', async () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  h.w.eval(fs.readFileSync(path.join(__dirname,'../JoeToep/Resources/playbackControls.js'),'utf8'));
+  let exits=0;const fsEl=h.d.body;
+  Object.defineProperty(h.d,'fullscreenElement',{configurable:true,get:()=>exits?null:fsEl});
+  h.d.exitFullscreen=()=>{exits++;return Promise.resolve();};
+  h.rawPause?h.rawPause(h.v):h.v.pause();h.v.dispatchEvent(new h.w.Event('pause',{bubbles:true}));
+  await new Promise(r=>setTimeout(r,450));assert.equal(exits,1,'paused → out of fullscreen');
+  h.close();
+});
+test('V19.2 F and double-click leave a fullscreen that YouTube does not own', () => {
+  const h=harness({mobile:false,url:'https://www.youtube.com/watch?v=fixture'});
+  h.w.eval(fs.readFileSync(path.join(__dirname,'../JoeToep/Resources/playbackControls.js'),'utf8'));
+  let exits=0;Object.defineProperty(h.d,'fullscreenElement',{configurable:true,get:()=>h.d.documentElement});
+  h.d.exitFullscreen=()=>{exits++;return Promise.resolve();};
+  h.w.dispatchEvent(new h.w.KeyboardEvent('keydown',{key:'f',bubbles:true}));
+  assert.equal(exits,0,'untrusted synthetic key is ignored');
+  assert.equal(typeof h.w.JoeToepControls.exitFullscreen,'function');
+  assert.equal(h.w.JoeToepControls.exitFullscreen(),true);assert.equal(exits,1);
+  h.close();
+});
 test('V19 theater mode comes first, automatic fullscreen only after YouTube applied it', async () => {
   const h=harness({mobile:false});h.w.JOETOEP_NATIVE_HOST=true;
   const watch=h.d.createElement('ytd-watch-flexy');h.d.body.append(watch);

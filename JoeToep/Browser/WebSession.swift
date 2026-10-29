@@ -201,19 +201,33 @@ final class WebSession: NSObject, ObservableObject {
         }
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
+        // V19.2: horizontaal vegen is nu voor scrubben in de video. Terug-vegen (pagina terug /
+        // tab sluiten) staat daarom standaard UIT; de Terug-knop blijft altijd in de menubalk.
+        let backSwipe = UserDefaults.standard.object(forKey: "backSwipeV192") as? Bool ?? false
+        webView.allowsBackForwardNavigationGestures = backSwipe
         #if os(iOS)
-        // V17: vegen vanaf de linkerrand terwijl de tab GEEN vorige pagina heeft. WebKit doet dan
-        // zelf niets; met deze extra "rand-veeg-herkenner" sluiten we dan de tab (instelling).
-        let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwipe(_:)))
-        edge.edges = .left
-        edge.delegate = self              // zie extensie onderaan: werkt samen met WebKit's gebaren
-        webView.addGestureRecognizer(edge)
+        if backSwipe {
+            // V17: vegen vanaf de linkerrand terwijl de tab GEEN vorige pagina heeft → tab sluiten.
+            let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwipe(_:)))
+            edge.edges = .left
+            edge.delegate = self
+            webView.addGestureRecognizer(edge)
+        }
         #endif
         #if os(iOS)
         webView.scrollView.keyboardDismissMode = .interactive
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.alwaysBounceHorizontal = false
+        // V19.1: trekken om te verversen (iPhone/iPad), instelbaar.
+        // V19.2: "trekken" = fullscreen (standaard), verversen, of uit.
+        if Self.pullAction != "off" {
+            let refresh = UIRefreshControl()
+            refresh.addAction(UIAction { [weak self, weak refresh] _ in
+                self?.performPullAction()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { refresh?.endRefreshing() }
+            }, for: .valueChanged)
+            webView.scrollView.refreshControl = refresh
+        }
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.overrideUserInterfaceStyle = .dark
@@ -329,7 +343,7 @@ final class WebSession: NSObject, ObservableObject {
         if old.pipReturnTarget != updated.pipReturnTarget || old.pipReturnKeepsPlaying != updated.pipReturnKeepsPlaying ||
             old.swipeSeekSeconds != updated.swipeSeekSeconds || old.volumeStepPercent != updated.volumeStepPercent ||
             old.showControlsWhileScrubbing != updated.showControlsWhileScrubbing || old.scrubThumbnail != updated.scrubThumbnail ||
-            old.arrowKeysShowControls != updated.arrowKeysShowControls {
+            old.arrowKeysShowControls != updated.arrowKeysShowControls || old.exitFullscreenOnPause != updated.exitFullscreenOnPause {
             configureCompatibility()
         }
         if old.videoFit != updated.videoFit || old.pinchMode != updated.pinchMode { configureBridge() }
@@ -514,7 +528,7 @@ final class WebSession: NSObject, ObservableObject {
             positionTask = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
                     // V18: met verbonden apparaten elke 2 s (live positie), anders elke 5 s (zuinig).
-                    let interval = TabSyncService.shared.peers.isEmpty ? 5.0 : 2.0
+                    let interval = TabSyncService.shared.peers.isEmpty ? 5.0 : 1.0
                     try? await Task.sleep(for: .seconds(interval))
                     guard !Task.isCancelled, let self else { break }
                     self.capturePosition()
@@ -1248,6 +1262,9 @@ final class WebSession: NSObject, ObservableObject {
         bridge("window.JoeToepBridge?.exitFullscreen()")
         webView.evaluateJavaScript("window.JoeToepStage?.exit()", completionHandler: nil)
     }
+    /// V19.2: de nieuwe-tab-pagina ligt over deze tab heen (YouTube laadt erachter).
+    @Published var showsNewTabPage = false
+
     // MARK: V18 — tab-sync
     /// true = bij de eerste keer laden de video klaarzetten maar niet starten (tab van ander apparaat).
     var syncedStartPaused = false
@@ -1299,6 +1316,54 @@ final class WebSession: NSObject, ObservableObject {
             }
         }
     }
+    /// V19.2 — wat "trekken" (pull) doet: "fullscreen" (standaard), "refresh" of "off".
+    static var pullAction: String { UserDefaults.standard.string(forKey: "pullActionV192") ?? "fullscreen" }
+    /// Trekken bovenaan: op een videopagina de inline speler naar fullscreen, anders verversen.
+    func performPullAction() {
+        switch Self.pullAction {
+        case "refresh": reload()
+        case "fullscreen":
+            if NavigationPolicy.isPlaybackPage(currentURL) {
+                recordLifecycle("pull: fullscreen")
+                #if os(macOS)
+                enterFullscreenForHandOverIgnoringPlayState()
+                #else
+                openFullscreenFallback()
+                #endif
+            } else { reload() }
+        default: break
+        }
+    }
+
+    /// V19.1 overdracht: exacte huidige tijd (en pauzeer). Antwoord via completion.
+    func pauseAndReportTime(_ completion: @escaping (Double?) -> Void) {
+        let script = "(()=>{const p=document.getElementById('movie_player');const v=document.querySelector('video.html5-main-video')||document.querySelector('video');if(!v)return -1;const t=(p&&p.getCurrentTime)?Number(p.getCurrentTime()):v.currentTime;try{if(p&&p.pauseVideo)p.pauseVideo();else v.pause();}catch(_){v.pause();}return t;})()"
+        webView.evaluateJavaScript(script) { value, _ in
+            Task { @MainActor in
+                let time = value as? Double
+                completion(time.flatMap { $0 >= 0 ? $0 : nil })
+            }
+        }
+    }
+    /// V19.1 overdracht: spring naar precies deze tijd (zonder te pauzeren/starten).
+    func seekExact(_ time: Double) {
+        guard time.isFinite, time >= 0 else { return }
+        let t = String(format: "%.3f", time)
+        webView.evaluateJavaScript("(()=>{const p=document.getElementById('movie_player');const v=document.querySelector('video.html5-main-video')||document.querySelector('video');if(p&&p.seekTo){p.seekTo(\(t),true);}else if(v){v.currentTime=\(t);}return 0;})()", completionHandler: nil)
+        recordLifecycle("handoff: seek to \(t)")
+    }
+
+    /// V19.1: exacte snelheid (knoppen klein/medium/groot, schuif, sneltoetsen).
+    func setPlaybackRate(_ value: Double) {
+        let clamped = min(4, max(0.1, (value * 100).rounded() / 100))
+        playbackRate = clamped      // meteen tonen; de pagina bevestigt hieronder
+        webView.evaluateJavaScript("window.JoeToepControls ? window.JoeToepControls.setRate(\(clamped)) : \(clamped)") { [weak self] result, _ in
+            Task { @MainActor in if let value = result as? Double { self?.playbackRate = value } }
+        }
+    }
+    /// V19.1: snelheid met een bepaalde stap aanpassen (+ sneller, − langzamer).
+    func adjustPlaybackRate(by delta: Double) { setPlaybackRate(playbackRate + delta) }
+
     private func showRateToast(_ value: Double) {
         let text = value == floor(value) ? String(format: "%.0f×", value) : String(format: "%g×", value)
         recordLifecycle("rate \(text)")
@@ -1392,6 +1457,7 @@ final class WebSession: NSObject, ObservableObject {
                       self.navigationSerial == serial, !self.pip.isActive, !self.pip.isRequesting,
                       let window = self.webView.window else { return }
                 // Use YouTube's actual F handler, with keyboard focus on its player.
+                // (fulfillFullscreenRequest gaf "keyboard" alleen als de pagina NIET fullscreen is.)
                 window.makeFirstResponder(self.webView)
                 if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
@@ -1401,16 +1467,35 @@ final class WebSession: NSObject, ObservableObject {
                 // V19: controle na 1,6 s — kwam fullscreen er niet (YouTube was nog bezig met
                 // theatermodus of de focus sprong weg), dan één keer opnieuw. Nooit als het al
                 // fullscreen is (F is een aan/uit-knop).
+                // V19.1: de controle vraagt het de PAGINA (document.fullscreenElement / YouTube's
+                // fullscreen-attribuut). `isFullscreen` van de app kende YouTube's eigen fullscreen
+                // niet altijd — dan werd F nog eens gestuurd en schakelde fullscreen juist weer UIT
+                // (terug naar theatermodus): precies de bug die je zag.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-                    guard let self, extraChecks < 20, self.navigationSerial == serial, self.applicationActive,
-                          !self.isFullscreen, self.isPlaying, !self.pip.isActive, !self.pip.isRequesting,
-                          let window = self.webView.window else { return }
-                    self.recordLifecycle("auto-fullscreen: retry")
-                    window.makeFirstResponder(self.webView)
-                    if let retry = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                        context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
-                        self.webView.keyDown(with: retry)
+                    guard let self, self.navigationSerial == serial, self.applicationActive,
+                          self.isPlaying, !self.pip.isActive, !self.pip.isRequesting else { return }
+                    let probe = "!!(document.fullscreenElement||document.webkitFullscreenElement||document.querySelector('ytd-watch-flexy')?.hasAttribute('fullscreen')||document.querySelector('video')?.webkitDisplayingFullscreen||document.documentElement.hasAttribute('data-joetoep-stage'))"
+                    self.webView.evaluateJavaScript(probe) { [weak self] value, _ in
+                        guard let self, (value as? Bool) == false, !self.isFullscreen, let window = self.webView.window else { return }
+                        // V19.3: het VENSTER is wel macOS-fullscreen maar de video niet (je zag dan
+                        // de theater-weergave in een fullscreen venster). Eerst het venster terug,
+                        // dan pas F — zodat de video écht in YouTube's fullscreen eindigt.
+                        if window.styleMask.contains(.fullScreen) {
+                            self.recordLifecycle("auto-fullscreen: window was fullscreen without video → reset")
+                            window.toggleFullScreen(nil)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+                                guard let self, self.isPlaying, let w = self.webView.window, !w.styleMask.contains(.fullScreen) else { return }
+                                self.enterFullscreenForHandOverIgnoringPlayState()
+                            }
+                            return
+                        }
+                        self.recordLifecycle("auto-fullscreen: retry")
+                        window.makeFirstResponder(self.webView)
+                        if let retry = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
+                            self.webView.keyDown(with: retry)
+                        }
                     }
                 }
             }
@@ -1425,18 +1510,31 @@ final class WebSession: NSObject, ObservableObject {
     /// made by a script 1–2 s later can be refused. YouTube's own "F" key handler counts as
     /// such an action, so we deliver a real key press to the web view (the same trick the
     /// automatic-fullscreen feature uses). iPhone/iPad use the Apple player request.
+    /// V19.2: fullscreen ook als de video (nog) niet speelt (trekken-voor-fullscreen).
+    func enterFullscreenForHandOverIgnoringPlayState() {
+        guard !pip.isActive, !pip.isRequesting, !isFullscreen else { return }
+        enterFullscreenCore()
+    }
     func enterFullscreenForHandOver() {
         guard !pip.isActive, !pip.isRequesting, !isFullscreen, isPlaying else { return }
+        enterFullscreenCore()
+    }
+    private func enterFullscreenCore() {
         #if os(macOS)
         switch settings.macFullscreenMode {
         case .youtube:
-            guard let window = webView.window else { return }       // tab must be on screen
-            window.makeFirstResponder(webView)                         // keyboard focus → player page
-            // Build a keyDown event for the letter F (keyCode 3 on every Mac keyboard layout).
-            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
-                webView.keyDown(with: event)                           // YouTube toggles fullscreen
+            // V19.1: F is een aan/uit-knop. Eerst de pagina vragen of hij al fullscreen is; alleen
+            // zo niet, F sturen. (Een tweede F zette fullscreen weer uit → "theatermodus-bug".)
+            let probe = "!!(document.fullscreenElement||document.webkitFullscreenElement||document.querySelector('ytd-watch-flexy')?.hasAttribute('fullscreen'))"
+            webView.evaluateJavaScript(probe) { [weak self] value, _ in
+                guard let self, (value as? Bool) != true, let window = self.webView.window else { return }
+                window.makeFirstResponder(self.webView)                // keyboard focus → player page
+                // Build a keyDown event for the letter F (keyCode 3 on every Mac keyboard layout).
+                if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
+                    self.webView.keyDown(with: event)                  // YouTube toggles fullscreen
+                }
             }
         case .enhanced:
             openFullscreenFallback()                                   // JoeToep's own controls
@@ -1568,10 +1666,16 @@ final class WebSession: NSObject, ObservableObject {
         configureCompatibility()
     }
 
+    /// V19.1: op de Mac doet GestureScrubber het vegen (native); de pagina blokkeert alleen scrollen.
+    #if os(macOS)
+    static var nativeWheel: Bool { UserDefaults.standard.object(forKey: "nativeGesturesV191") as? Bool ?? true }
+    #else
+    static let nativeWheel = false
+    #endif
     private func configureCompatibility() {
         webView.evaluateJavaScript("window.JoeToepMedia?.configure({protect:\(settings.backgroundProtection),automatic:\(settings.automaticPiP),nativeFullscreen:\(settings.nativeFullscreen),macFullscreen:'\(settings.macFullscreenMode.rawValue)',fallback:\(settings.pipFallbackEnabled),elementFullscreen:\(usesElementFullscreen),returnTarget:'\(settings.pipReturnTarget.rawValue)',keepPlaying:\(settings.pipReturnKeepsPlaying)})", completionHandler: nil)
         // V19: gebaren-instellingen naar de toets/veeg-bediening.
-        webView.evaluateJavaScript("window.JoeToepControls?.configure({swipeSeek:\(settings.swipeSeekSeconds),keySeek:5,volumeStep:\(settings.volumeStepPercent / 100),showControlsOnSwipe:\(settings.showControlsWhileScrubbing),scrubThumbnail:\(settings.scrubThumbnail),showControlsOnKeys:\(settings.arrowKeysShowControls)}); 0", completionHandler: nil)
+        webView.evaluateJavaScript("window.JoeToepControls?.configure({swipeSeek:\(settings.swipeSeekSeconds),keySeek:5,volumeStep:\(settings.volumeStepPercent / 100),showControlsOnSwipe:\(settings.showControlsWhileScrubbing),scrubThumbnail:\(settings.scrubThumbnail),showControlsOnKeys:\(settings.arrowKeysShowControls),nativeWheel:\(Self.nativeWheel),exitFullscreenOnPause:\(settings.exitFullscreenOnPause),touchScrub:\(UserDefaults.standard.object(forKey: "touchScrubV192") as? Bool ?? true),touchSeekPerPx:\(UserDefaults.standard.object(forKey: "touchSeekPerPxV192") as? Double ?? 0.25),invertTouch:\(UserDefaults.standard.object(forKey: "invertTouchV192") as? Bool ?? false),seekThrottleMs:\(UserDefaults.standard.object(forKey: "seekThrottleMsV192") as? Double ?? 60)}); 0", completionHandler: nil)
         webView.evaluateJavaScript("window.JoeToepPreferences?.configure({automaticFullscreen:\(settings.automaticFullscreen),disableCaptions:\(settings.disableCaptions),disablePreviewCaptions:\(settings.disablePreviewCaptions),theater:\(settings.theaterMode)})", completionHandler: nil)
     }
 
@@ -1719,9 +1823,75 @@ final class WebSession: NSObject, ObservableObject {
     func zoom(by step: Double) {
         let current = zoomOverride ?? settings.pageZoom
         zoomOverride = min(max((current + step) * 100, 50), 300).rounded() / 100
+        Self.storeSiteZoom(zoomOverride, host: currentURL?.host)
         applyNativeSettings()
     }
-    func resetZoom() { zoomOverride = nil; applyNativeSettings() }
+    func resetZoom() { zoomOverride = nil; Self.storeSiteZoom(nil, host: currentURL?.host); applyNativeSettings() }
+
+    // MARK: V19.2 — browserfuncties
+    /// Zoom per website: onthouden per domein en bij het openen van die site weer toepassen.
+    static func siteZoom(host: String?) -> Double? {
+        guard let host = host?.lowercased() else { return nil }
+        return (UserDefaults.standard.dictionary(forKey: "siteZoomV192") as? [String: Double])?[host]
+    }
+    static func storeSiteZoom(_ value: Double?, host: String?) {
+        guard let host = host?.lowercased() else { return }
+        var all = UserDefaults.standard.dictionary(forKey: "siteZoomV192") as? [String: Double] ?? [:]
+        all[host] = value
+        UserDefaults.standard.set(all, forKey: "siteZoomV192")
+    }
+    private func applySiteZoom() {
+        let stored = Self.siteZoom(host: currentURL?.host)
+        guard stored != zoomOverride else { return }
+        zoomOverride = stored
+        applyNativeSettings()
+    }
+
+    /// Leesweergave: alleen de tekst van het artikel, rustig opgemaakt (Esc of de knop sluit hem).
+    func toggleReaderMode() {
+        let script = #"""
+        (()=>{const id='joetoep-reader';const old=document.getElementById(id);if(old){old.remove();document.documentElement.style.overflow='';return 'off';}
+        const cands=[...document.querySelectorAll('article, main, [role=main], .post, .article, .content, #content')];
+        let best=document.body,score=0;for(const c of cands){const n=(c.innerText||'').length;if(n>score){score=n;best=c;}}
+        const box=document.createElement('div');box.id=id;
+        box.style.cssText='position:fixed;inset:0;z-index:2147483647;overflow:auto;background:#fbfaf7;color:#1d1d1f;font:19px/1.6 -apple-system,Georgia,serif;padding:48px 20px';
+        const inner=document.createElement('div');inner.style.cssText='max-width:680px;margin:0 auto';
+        const h=document.createElement('h1');h.textContent=document.title;h.style.cssText='font:700 30px/1.25 -apple-system;margin:0 0 24px';
+        inner.appendChild(h);
+        for(const el of best.querySelectorAll('h2,h3,p,li,blockquote,img')){
+          if(el.closest('nav,footer,aside,form'))continue;
+          if(el.tagName==='IMG'){if(el.naturalWidth<200)continue;const i=document.createElement('img');i.src=el.currentSrc||el.src;i.style.cssText='max-width:100%;border-radius:8px;margin:12px 0';inner.appendChild(i);continue;}
+          const t=(el.innerText||'').trim();if(t.length<2)continue;const n=document.createElement(el.tagName==='LI'?'p':el.tagName.toLowerCase());n.textContent=(el.tagName==='LI'?'• ':'')+t;inner.appendChild(n);}
+        const close=document.createElement('button');close.textContent='✕ Close reader';close.style.cssText='position:fixed;top:12px;right:16px;font:600 14px -apple-system;padding:8px 12px;border-radius:10px;border:0;background:#0001;cursor:pointer';
+        close.onclick=()=>{box.remove();document.documentElement.style.overflow='';};
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById(id)){box.remove();document.documentElement.style.overflow='';}},{once:true});
+        box.appendChild(inner);box.appendChild(close);document.documentElement.appendChild(box);document.documentElement.style.overflow='hidden';return 'on';})()
+        """#
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    #if os(macOS)
+    /// Afdrukken (ook "Bewaar als PDF" via het afdrukvenster van macOS).
+    func printPage() {
+        let info = NSPrintInfo.shared
+        info.horizontalPagination = .fit; info.verticalPagination = .automatic
+        let operation = webView.printOperation(with: info)
+        operation.showsPrintPanel = true; operation.showsProgressPanel = true
+        if let window = webView.window { operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil) }
+    }
+    #endif
+
+    /// Pagina als PDF opslaan (Mac: bewaarvenster; iPhone/iPad: deelmenu).
+    func exportPDF(_ completion: @escaping (URL?) -> Void) {
+        webView.createPDF { result in
+            Task { @MainActor in
+                guard case .success(let data) = result else { completion(nil); return }
+                let name = (self.pageTitle ?? "Page").replacingOccurrences(of: "/", with: "-").prefix(60)
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name).pdf")
+                do { try data.write(to: url); completion(url) } catch { completion(nil) }
+            }
+        }
+    }
     var effectiveZoom: Double { zoomOverride ?? settings.pageZoom }
 
     #if os(iOS)
@@ -1901,6 +2071,19 @@ final class WebSession: NSObject, ObservableObject {
         }
         if event.name == .pipFailure { handlePiPFailure(event.token, message: event.message); return }
         let wasFullscreen = isFullscreen
+        #if os(macOS)
+        // V19.3: video verlaat fullscreen terwijl het venster nog in macOS-fullscreen staat (YouTube-
+        // modus, geen JoeToep-"stage") → venster ook terug, zodat je de theater-weergave in je
+        // gewone venster ziet en niet "vast" zit in een leeg fullscreen-venster.
+        if wasFullscreen && !event.fullscreen && settings.macFullscreenMode == .youtube && !isVideoStage,
+           let window = webView.window, window.styleMask.contains(.fullScreen) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, !self.isFullscreen, let w = self.webView.window, w.styleMask.contains(.fullScreen) else { return }
+                self.recordLifecycle("fullscreen ended → leave window fullscreen")
+                w.toggleFullScreen(nil)
+            }
+        }
+        #endif
         let wasNativePiP = pip.state == .native
         let previousVideo = videoID
         videoID = event.videoID
@@ -2108,6 +2291,7 @@ extension WebSession: WKNavigationDelegate {
     }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation?) {
         guard webView === self.webView else { return }
+        defer { applySiteZoom() }      // V19.2: zoom per website
         navigatingAway = false
         fullscreenReturnTask?.cancel(); fullscreenReturnDeadline = nil
         automaticHandoffTask?.cancel(); systemFullscreenHandoff = false; isVideoStage = false

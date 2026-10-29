@@ -10,6 +10,10 @@ final class JoeToepWebView: WKWebView {
     /// V17.1: "Open in nieuw venster".
     var openInNewWindow: ((URL) -> Void)?
 
+    /// V19.1: één klik pauzeert/speelt meteen, ook als het JoeToep-venster nog niet actief was
+    /// (anders "verbruikt" macOS de eerste klik om het venster naar voren te halen).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         guard let url = contextLink?() else { return }

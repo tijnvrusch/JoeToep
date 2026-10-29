@@ -9,7 +9,7 @@
   // Zoekt het video-element van de pagina op (YouTube's hoofdvideo, of anders de eerste
   // <video> die er is).
   // V19: instelbaar vanuit de app (Instellingen › Playback › Gestures).
-  const cfg = {swipeSeek: 5, keySeek: 5, volumeStep: 0.01, swipeThreshold: 28, showControlsOnSwipe: true, scrubThumbnail: true, showControlsOnKeys: false};
+  const cfg = {swipeSeek: 5, keySeek: 5, volumeStep: 0.01, swipeThreshold: 28, showControlsOnSwipe: true, scrubThumbnail: true, showControlsOnKeys: false, nativeWheel: false, exitFullscreenOnPause: true, touchScrub: true, touchSeekPerPx: 0.25, invertTouch: false, seekThrottleMs: 60};
   const pick = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
   // Checkt of het element waarop getypt wordt een tekstveld is (input, textarea, etc.),
   // zodat onze sneltoetsen daar niet per ongeluk ingrijpen terwijl iemand aan het typen is.
@@ -55,14 +55,37 @@
       revealAt.t=setTimeout(()=>{ try{ bar.dispatchEvent(new MouseEvent('mouseout',{bubbles:true,clientX:x,clientY:y})); }catch(_){} },900);
     } catch (_) {}
   }
+  // V19.2: ultra-responsief scrubben. Tijdens een veeg rekenen we verder vanaf ons EIGEN doel
+  // (niet vanaf YouTube's tijd, die na een seek even achterloopt), tekenen we het rode bolletje en
+  // de rode balk METEEN op de nieuwe plek, en laten we YouTube hooguit elke `seekThrottleMs` echt
+  // spoelen (+ altijd een laatste seek als je stopt). Zo volgt de balk je vingers per frame.
+  const scrub = {target: 0, last: 0, lastSeek: 0, timer: 0};
+  function paintProgress(p, time, duration) {
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    const f = Math.max(0, Math.min(1, time / duration));
+    const bar = p.querySelector('.ytp-progress-bar'), play = p.querySelector('.ytp-play-progress'), knob = p.querySelector('.ytp-scrubber-container');
+    const width = bar?.getBoundingClientRect().width || 0;
+    if (play) { play.style.transition = 'none'; play.style.transform = `scaleX(${f})`; }
+    if (knob && width) { knob.style.transition = 'none'; knob.style.transform = `translateX(${f * width}px)`; }
+    const label = p.querySelector('.ytp-time-current');
+    if (label) { const t = Math.floor(time), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = String(t % 60).padStart(2, '0');
+      label.textContent = h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`; }
+  }
   function seek(delta, reveal=false) {
     const p=ytPlayer();
     if(p){ try {
-      const now=Number(p.getCurrentTime()), dur=Number(p.getDuration?.())||Infinity;
-      if(Number.isFinite(now)){
-        const target=Math.max(0,Math.min(dur,now+delta));
-        p.seekTo(target,true);
+      const now=Date.now(), dur=Number(p.getDuration?.())||Infinity;
+      const base = now - scrub.last < 450 ? scrub.target : Number(p.getCurrentTime());
+      if(Number.isFinite(base)){
+        const target=Math.max(0,Math.min(dur,base+delta));
+        scrub.target = target; scrub.last = now;
         if (reveal) revealAt(p,target,dur); else hideOverlay();
+        paintProgress(p, target, dur);                     // direct zichtbaar, elk frame
+        const doSeek = () => { scrub.lastSeek = Date.now(); try { p.seekTo(scrub.target, true); } catch (_) {} paintProgress(p, scrub.target, dur); };
+        clearTimeout(scrub.timer);
+        // Pijltjestoetsen (geen veeg) spoelen altijd meteen; alleen vegen wordt gedoseerd.
+        if (!reveal || now - scrub.lastSeek >= cfg.seekThrottleMs) { doSeek(); if (!reveal) return true; }
+        scrub.timer = setTimeout(doSeek, cfg.seekThrottleMs);  // laatste positie altijd echt spoelen
         return true;
       }
     } catch(_){} }
@@ -113,6 +136,11 @@
   // écht door de gebruiker is ingedrukt (niet door een script nagemaakt) — een
   // veiligheidscheck. We negeren ook typwerk in tekstvelden en als Ctrl ingedrukt is.
   window.addEventListener('keydown', e => {
+    // V19.2: F verlaat fullscreen ook als YouTube niet de eigenaar is (zie exitAnyFullscreen hieronder).
+    if (e.isTrusted && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'f' || e.key === 'F') && !editable(e.target) &&
+        typeof foreignFullscreen === 'function' && foreignFullscreen() && exitAnyFullscreen()) {
+      e.preventDefault(); e.stopImmediatePropagation(); return;
+    }
     const v=pick();if(!e.isTrusted || !v || editable(e.target) || e.ctrlKey)return;
     let handled=false;
     // V11: YouTube's own player already toggles on Space (like K). Handling it here as well
@@ -143,6 +171,9 @@
     // Alleen in fullscreen (echte browser-fullscreen, of onze eigen "stage"-fullscreen).
     const fullscreen=document.fullscreenElement||document.documentElement.hasAttribute('data-joetoep-stage');
     if(!fullscreen)return;
+    // V19.1 (Mac): de app zelf scrubt/regelt het volume (per apparaat instelbaar). Hier alleen
+    // voorkomen dat YouTube in fullscreen gaat scrollen (en zijn videolijst omhoog schuift).
+    if(cfg.nativeWheel){e.preventDefault();e.stopImmediatePropagation();return;}
     // Als er meer dan 180ms stilte was, begint een nieuwe swipe-telling (anders zou een
     // kleine beweging lang geleden nog meetellen bij een nieuwe swipe).
     if(Date.now()-lastWheel>180){dx=0;dy=0;}lastWheel=Date.now();
@@ -161,8 +192,122 @@
     while(Math.abs(dy)>=t && Math.abs(dy)>=Math.abs(dx)){volume(dy<0?cfg.volumeStep:-cfg.volumeStep,cfg.showControlsOnSwipe);dy-=Math.sign(dy)*t;dx=0;}
     e.preventDefault();e.stopImmediatePropagation();document.dispatchEvent(new Event('joetoep-controls-used'));
   },{capture:true,passive:false});
+  // ── V19.2: scrubben met één vinger over de INLINE speler (iPhone/iPad) ─────────────────
+  // Horizontaal vegen over de video = spoelen (de YouTube-balk + voorbeeldplaatje verschijnen).
+  // Pas na 12 px én duidelijk horizontaal nemen we het over; verticaal = gewoon de pagina scrollen.
+  // In Apple's fullscreen-speler niet nodig (die heeft zijn eigen gebaren).
+  let touch = null;
+  const playerArea = t => t?.closest?.('#movie_player, .html5-video-player, ytm-player, .player-container, video');
+  window.addEventListener('touchstart', e => {
+    if (!cfg.touchScrub || e.touches.length !== 1 || !playerArea(e.target) || !ytPlayer()) { touch = null; return; }
+    const t = e.touches[0];
+    touch = {x: t.clientX, y: t.clientY, lastX: t.clientX, active: false};
+  }, {capture: true, passive: true});
+  window.addEventListener('touchmove', e => {
+    if (!touch || e.touches.length !== 1) return;
+    const t = e.touches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+    if (!touch.active) {
+      if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.4) { if (Math.abs(dy) > 16) touch = null; return; }
+      touch.active = true;
+    }
+    e.preventDefault(); e.stopImmediatePropagation();
+    const step = (t.clientX - touch.lastX) * cfg.touchSeekPerPx * (cfg.invertTouch ? -1 : 1);
+    touch.lastX = t.clientX;
+    if (Math.abs(step) >= 0.01) seek(step, cfg.showControlsOnSwipe);
+  }, {capture: true, passive: false});
+  window.addEventListener('touchend', e => {
+    if (touch?.active) { e.preventDefault(); e.stopImmediatePropagation(); document.dispatchEvent(new Event('joetoep-controls-used')); }
+    touch = null;
+  }, {capture: true, passive: false});
+
+  // ── V19.2: fullscreen ⇄ pauze, en nooit meer "vast" in fullscreen ─────────────────────
+  // Wie is er fullscreen? YouTube zelf (zijn speler/watch-pagina) of iets anders (JoeToep's
+  // eigen fullscreen, of Apple's videoweergave)? In het tweede geval dacht YouTube dat hij NIET
+  // fullscreen was: dubbelklik, F en het icoontje rechtsonder probeerden dan fullscreen AAN te
+  // zetten en deden niets — alleen Esc werkte. Nu verlaten die drie altijd fullscreen.
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  const youtubeOwnsFullscreen = () => Boolean(document.querySelector('ytd-watch-flexy[fullscreen], ytm-app [fullscreen]') ||
+    document.getElementById('movie_player')?.classList.contains('ytp-fullscreen'));
+  function exitAnyFullscreen() {
+    const v = pick();
+    try { if (fsElement()) { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); return true; } } catch (_) {}
+    try { if (v && v.webkitDisplayingFullscreen) { v.webkitExitFullscreen(); return true; } } catch (_) {}
+    try { if (v && v.webkitPresentationMode === 'fullscreen') { v.webkitSetPresentationMode('inline'); return true; } } catch (_) {}
+    if (document.documentElement.hasAttribute('data-joetoep-stage')) { window.JoeToepStage?.exit?.(); return true; }
+    return false;
+  }
+  const foreignFullscreen = () => {
+    const v = pick();
+    return Boolean((fsElement() && !youtubeOwnsFullscreen()) || (v && (v.webkitDisplayingFullscreen || v.webkitPresentationMode === 'fullscreen')));
+  };
+  // V19.3 — Dubbelklik ≠ "ingedrukt houden = 2×". De tweede mousedown van een dubbelklik start
+  // YouTube's houd-timer; door de fullscreen-overgang komt de mouseup nooit aan en blijft de video
+  // op 2× spoelen. Daarom: tweede (en verdere) klik niet aan YouTube's houd-logica geven, en na
+  // een dubbelklik / fullscreenwissel / focusverlies een loslaat-event sturen en de snelheid herstellen.
+  let rateBeforePress = null, pressTarget = null;
+  const onPlayer = t => t?.closest?.('#movie_player, .html5-video-player');
+  const releaseHold = () => {
+    const t = pressTarget || document.querySelector('#movie_player .html5-video-container, #movie_player');
+    pressTarget = null;
+    if (t) {
+      try { t.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
+      try { t.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); } catch (_) {}
+      try { t.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
+    }
+    const v = pick(), before = rateBeforePress;
+    rateBeforePress = null;
+    if (v && before != null && Math.abs(v.playbackRate - before) > 0.01) setRate(before);
+  };
+  ['pointerdown', 'mousedown'].forEach(type => window.addEventListener(type, e => {
+    if (!e.isTrusted || e.button !== 0 || !onPlayer(e.target) || e.target?.closest?.('.ytp-chrome-bottom, .ytp-chrome-top, button')) return;
+    if (e.detail >= 2) { e.stopImmediatePropagation(); return; }    // tweede klik van een dubbelklik
+    const v = pick();
+    if (v) rateBeforePress = v.playbackRate;
+    pressTarget = e.target;
+  }, true));
+  window.addEventListener('dblclick', e => { if (e.isTrusted && onPlayer(e.target)) setTimeout(releaseHold, 0); }, true);
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(t => document.addEventListener(t, () => { if (rateBeforePress != null) setTimeout(releaseHold, 0); }));
+  window.addEventListener('blur', () => { if (rateBeforePress != null) releaseHold(); });
+  window.addEventListener('mouseup', () => { pressTarget = null; setTimeout(() => { rateBeforePress = null; }, 0); }, true);
+
+  // Dubbelklik op de video of klik op YouTube's fullscreen-knop: als YouTube het niet zelf kan, doen wij het.
+  window.addEventListener('dblclick', e => {
+    if (!e.isTrusted || !foreignFullscreen() || !e.target?.closest?.('#movie_player, video, .html5-video-player')) return;
+    if (exitAnyFullscreen()) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+  window.addEventListener('click', e => {
+    if (!e.isTrusted || !foreignFullscreen() || !e.target?.closest?.('.ytp-fullscreen-button, .fullscreen-icon, button[aria-label*="ullscreen" i]')) return;
+    if (exitAnyFullscreen()) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+  // Gepauzeerd → uit fullscreen (instelbaar). Pas na 350 ms, zodat buffering, kwaliteitswissels
+  // en spoelen (korte pauzes) niet meteen fullscreen sluiten; en nooit tijdens Picture in Picture.
+  let pauseTimer = 0;
+  window.addEventListener('pause', e => {
+    const v = e.target;
+    if (!cfg.exitFullscreenOnPause || !(v instanceof HTMLVideoElement) || v !== pick()) return;
+    clearTimeout(pauseTimer);
+    pauseTimer = setTimeout(() => {
+      if (!v.paused || v.ended || v.seeking || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
+      if (window.JoeToepMedia?.diagnostics?.().rawVisibility === 'hidden') return;   // app op de achtergrond / PiP-overdracht
+      // Onthouden: bij de volgende "play" gaat de video weer automatisch fullscreen.
+      if (exitAnyFullscreen()) window.__joetoepExitedByPause = true;
+    }, 350);
+  }, true);
+  window.addEventListener('play', () => clearTimeout(pauseTimer), true);
+
   // Deze functies ook buiten dit bestand beschikbaar maken, maar wel bevroren (Object.freeze)
   // zodat niemand ze per ongeluk kan overschrijven.
-  window.JoeToepControls=Object.freeze({seek,volume,toggle,bounds,rate,
-    configure(next){ Object.assign(cfg, next||{}); return {...cfg}; },rateNow:()=>Number(ytPlayer()?.getPlaybackRate?.() ?? pick()?.playbackRate ?? 1)});
+  // V19.1: exacte snelheid (0.1–4×, op 0.01 nauwkeurig) — voor de knoppen klein/medium/groot en de schuif.
+  function setRate(value) {
+    const next=Math.round(Math.max(0.1,Math.min(4,Number(value)||1))*100)/100;
+    const p=ytPlayer(), v=pick();
+    // YouTube's eigen API accepteert alleen zijn vaste lijst; eerst die (houdt YouTube's menu gelijk)…
+    if(p && typeof p.setPlaybackRate==='function'){ try{p.setPlaybackRate(next);}catch(_){} }
+    // …en daarna altijd het element zelf, zodat élke waarde (bv. 1.15×) precies klopt.
+    if(v){ v.playbackRate=next; v.defaultPlaybackRate=next; }
+    return next;
+  }
+  window.JoeToepControls=Object.freeze({seek,volume,toggle,bounds,rate,setRate,
+    configure(next){ Object.assign(cfg, next||{}); return {...cfg}; },
+    exitFullscreen: exitAnyFullscreen,rateNow:()=>Number(ytPlayer()?.getPlaybackRate?.() ?? pick()?.playbackRate ?? 1)});
 })();

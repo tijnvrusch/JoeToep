@@ -122,8 +122,8 @@ final class TabSyncService: NSObject, ObservableObject {
     private func scheduleReconnect() {
         reconnectTask?.cancel()
         reconnectTask = Task { @MainActor [weak self] in
-            for _ in 0..<45 {                           // max. ±6 minuten, daarna bij volgende activatie weer
-                try? await Task.sleep(for: .seconds(8))
+            for _ in 0..<90 {                           // max. ±6 minuten, daarna bij volgende activatie weer
+                try? await Task.sleep(for: .seconds(4))
                 guard !Task.isCancelled, let self, self.running else { return }
                 if !(self.session?.connectedPeers.isEmpty ?? true) { return }
                 self.restartDiscovery()
@@ -132,23 +132,19 @@ final class TabSyncService: NSObject, ObservableObject {
     }
 
     private var lastRestart = Date.distantPast
-    /// Opnieuw zoeken. NOOIT dezelfde browser stoppen en meteen herstarten: dat liet de Mac
-    /// crashen in Bonjour (_BrowserCancel). We stoppen de oude, laten hem los, en maken een nieuwe.
-    /// Het adverteren blijft gewoon doorlopen. Hooguit eens per 8 s.
+    /// Apparaten die de browser ooit vond (blijven bekend, ook na een verbroken verbinding).
+    fileprivate var foundPeers: [MCPeerID: String] = [:]
+    /// Gestopte browsers/adverteerders blijven bewaard (voorkomt de "opgeruimd maar nog aangeroepen"-crash).
+    private var retired: [AnyObject] = []
+    /// V19.2 — Opnieuw verbinden ZONDER de Bonjour-browser te stoppen. Stoppen/vervangen van de
+    /// browser liet macOS crashen (Bonjour riep nog een al opgeruimde browser aan: `_MonitorCancel`
+    /// in je crashlog). De browser blijft nu de hele sessie draaien; we nodigen de apparaten die
+    /// hij al kende gewoon opnieuw uit. Hooguit eens per 8 s.
     private func restartDiscovery() {
-        guard running, Date().timeIntervalSince(lastRestart) >= 8 else { return }
+        guard running, let session, Date().timeIntervalSince(lastRestart) >= 8 else { return }
         lastRestart = Date()
-        let old = browser
-        old?.delegate = nil
-        old?.stopBrowsingForPeers()
-        let fresh = MCNearbyServiceBrowser(peer: peerID, serviceType: Self.serviceType)
-        fresh.delegate = self
-        browser = fresh
-        // Pas op de volgende runloop-beurt starten, zodat het stoppen van de oude klaar is.
-        DispatchQueue.main.async { [weak self, weak fresh] in
-            guard let self, let fresh, self.browser === fresh, self.running else { return }
-            fresh.startBrowsingForPeers()
-            _ = old   // houdt de oude browser vast tot hier
+        for (peer, otherID) in foundPeers where otherID != deviceID && !session.connectedPeers.contains(peer) {
+            browser?.invitePeer(peer, to: session, withContext: nil, timeout: 10)
         }
     }
 
@@ -158,7 +154,10 @@ final class TabSyncService: NSObject, ObservableObject {
         reconnectTask?.cancel(); reconnectTask = nil
         advertiser?.stopAdvertisingPeer(); browser?.stopBrowsingForPeers()
         session?.disconnect()
-        advertiser = nil; browser = nil; session = nil
+        // Niet vrijgeven: Bonjour kan na het stoppen nog even terugroepen (crash-oorzaak in 19.1).
+        if let browser { retired.append(browser) }
+        if let advertiser { retired.append(advertiser) }
+        advertiser = nil; browser = nil; session = nil; foundPeers = [:]
         peerDevice = [:]; refreshPeers()
     }
 
@@ -300,20 +299,23 @@ extension TabSyncService: MCNearbyServiceAdvertiserDelegate {
 extension TabSyncService: MCNearbyServiceBrowserDelegate {
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
         Task { @MainActor in
-            guard let session = self.session, let otherID = info?["id"], otherID != self.deviceID,
-                  !session.connectedPeers.contains(peerID) else { return }
+            guard let otherID = info?["id"], otherID != self.deviceID else { return }
+            self.foundPeers[peerID] = otherID
+            guard let session = self.session, !session.connectedPeers.contains(peerID) else { return }
             // Normaal nodigt alleen de kant met de kleinste id uit (geen dubbele verbindingen).
             // Staat die kant op de achtergrond, dan nodigt de andere kant na 3 s alsnog uit.
             if self.deviceID < otherID {
                 browser.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
             } else {
                 Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(3))
+                    try? await Task.sleep(for: .milliseconds(1500))
                     guard let session = self.session, !session.connectedPeers.contains(peerID) else { return }
                     self.browser?.invitePeer(peerID, to: session, withContext: nil, timeout: 10)
                 }
             }
         }
     }
-    nonisolated func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {}
+    nonisolated func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
+        Task { @MainActor in self.foundPeers[peerID] = nil }
+    }
 }

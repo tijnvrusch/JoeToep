@@ -69,13 +69,13 @@ struct JoeToepApp: App {
         .handlesExternalEvents(matching: ["*"])
         .defaultSize(width: 1240, height: 800)
         .windowStyle(.hiddenTitleBar)
-        .commands { BrowserCommands() }
         #endif
+        // V19.3: dezelfde menu's en sneltoetsen ook op iPad (met toetsenbord).
+        .commands { BrowserCommands() }
     }
 }
 // Dit hele blok bestaat alleen op macOS: het definieert de extra menu's
 // (Bestand, Bewerken, Geschiedenis, Tabbladen, Afspelen) in de menubalk.
-#if os(macOS)
 // Commands is een SwiftUI-protocol voor het beschrijven van menustructuren.
 struct BrowserCommands: Commands {
     // @FocusedValue leest een waarde die het momenteel actieve/gefocuste
@@ -159,4 +159,3 @@ struct BrowserCommands: Commands {
         }
     }
 }
-#endif

@@ -28,6 +28,8 @@ struct SettingsView: View {
     // hiermee onthoudt SwiftUI of een bevestigingsvenstertje open moet staan.
     @State private var confirmClear = false
     @State private var confirmReset = false
+    /// V19.2: zoeken in de instellingen.
+    @State private var search = ""
 
     // "var body: some View" is verplicht voor elke View: het beschrijft wat
     // er getekend wordt. "some View" betekent: een (voor Swift bekend, maar
@@ -41,6 +43,22 @@ struct SettingsView: View {
             // instellingenschermen: rijen worden netjes gegroepeerd en
             // gestyled zoals je gewend bent van bijvoorbeeld iOS-instellingen.
             Form {
+                // V19.2: zoekresultaten (naam + uitleg + pagina) zolang er iets in het zoekveld staat.
+                if !search.trimmingCharacters(in: .whitespaces).isEmpty {
+                    let results = SettingHelp.search(search)
+                    Section(results.isEmpty ? "No settings match “\(search)”" : "\(results.count) result\(results.count == 1 ? "" : "s")") {
+                        ForEach(results, id: \.title) { result in
+                            NavigationLink { page(result.page) } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(result.title)
+                                    Text(result.help).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(result.page).font(.caption2).foregroundStyle(.tint)
+                                }
+                            }
+                            .accessibilityIdentifier("settings.searchResult")
+                        }
+                    }
+                } else {
                 // Section groepeert een aantal rijen visueel bij elkaar,
                 // eventueel met een titel en/of voetnoot ("footer").
                 Section {
@@ -102,7 +120,9 @@ struct SettingsView: View {
                     Button("Reset all preferences…", role: .destructive) { confirmReset = true }
                     detail("Resets every setting to its default. Tabs, bookmarks, history and sign-in stay.")
                 }
+                }
             }
+            .searchable(text: $search, prompt: "Search settings")
             // formStyle(.grouped) kiest de "gegroepeerde" opmaak van het
             // formulier, navigationTitle zet de titel in de navigatiebalk.
             .formStyle(.grouped)
@@ -129,6 +149,19 @@ struct SettingsView: View {
         .confirmationDialog("Reset all JoeToep preferences?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive, action: settings.resetPreferences)
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    /// V19.2: de instellingenpagina bij een zoekresultaat.
+    @ViewBuilder private func page(_ name: String) -> some View {
+        switch name {
+        case "General": BrowserSettings(settings: settings, session: session, confirmClear: $confirmClear).navigationTitle(name)
+        case "Appearance": AppearanceSettings(settings: settings).navigationTitle(name)
+        case "Menu bar & buttons": LayoutSettings(settings: settings).navigationTitle(name)
+        case "Privacy & cookies": PrivacySettings(settings: settings).navigationTitle(name)
+        case "Sync & devices": SyncSettings(settings: settings)
+        case "Ad blocking & SponsorBlock": AdBlockSettings(settings: settings, session: session).navigationTitle("Ad blocking")
+        default: PlaybackSettings(settings: settings, session: session).navigationTitle("Playback & Picture in Picture")
         }
     }
 
@@ -439,6 +472,42 @@ private struct PlaybackSettings: View {
                     .disabled(!settings.showControlsWhileScrubbing)
                 SettingToggle("Show YouTube controls for arrow keys", isOn: $settings.arrowKeysShowControls)
                 detail("Fullscreen: swipe sideways with two fingers (or Mac Mouse Fix) to scrub, up/down for volume. Arrow keys: ←/→ 5 s, ⌥ 30 s, ⌥⌘ 60 s; ↑/↓ five volume steps.")
+            }
+            #if os(macOS)
+            AdvancedGestureSettings()
+            #else
+            TouchGestureSettings()
+            #endif
+            GesturePresetSection()
+            Section("Browsing & fullscreen") {
+                SettingToggle("Show new tab page (search & shortcuts)", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "newTabPageV192") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "newTabPageV192") }))
+                SettingToggle("Leave fullscreen when paused", isOn: $settings.exitFullscreenOnPause)
+                    .accessibilityIdentifier("settings.exitFullscreenOnPause")
+                SettingPicker("Pull down action", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "pullActionV192") ?? "fullscreen" },
+                    set: { UserDefaults.standard.set($0, forKey: "pullActionV192") })) {
+                    Text("Fullscreen (video pages)").tag("fullscreen")
+                    Text("Refresh").tag("refresh")
+                    Text("Off").tag("off")
+                }
+                SettingToggle("Swipe back to previous page", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "backSwipeV192") as? Bool ?? false },
+                    set: { UserDefaults.standard.set($0, forKey: "backSwipeV192") }))
+                detail("Horizontal swipes scrub the video by default, so swiping back is off. The Back button is always in the menu bar. Changes to swiping back apply to new tabs.")
+            }
+            Section("Playback speed steps") {
+                Stepper(value: $settings.speedStepSmall, in: 0.01...0.5, step: 0.01) {
+                    SettingLabel(title: String(format: "Small step: %.2f×", settings.speedStepSmall))
+                }
+                Stepper(value: $settings.speedStepMedium, in: 0.05...1, step: 0.05) {
+                    SettingLabel(title: String(format: "Medium step: %.2f×", settings.speedStepMedium))
+                }
+                Stepper(value: $settings.speedStepLarge, in: 0.1...2, step: 0.1) {
+                    SettingLabel(title: String(format: "Large step: %.2f×", settings.speedStepLarge))
+                }
+                detail("− and + in the menu bar use the small step; tap the speed for all steps, a slider and presets. Mac: ⌥, / ⌥. small · ⌥⇧ medium · ⌃⌥ large · ⌥0 back to 1×.")
             }
             Section("Watching") {
                 SettingToggle("Theater mode (full width)", isOn: $settings.theaterMode)
@@ -1080,5 +1149,120 @@ private struct SyncSettings: View {
             }
         }
         .navigationTitle("Sync & devices")
+    }
+}
+
+
+#if os(macOS)
+/// V19.1 — Diepgaande instellingen voor vegen met trackpad en muis (ook Mac Mouse Fix).
+private struct AdvancedGestureSettings: View {
+    @AppStorage("nativeGesturesV191") private var native = true
+    @AppStorage("gestureModeV191") private var mode = "continuous"
+    @AppStorage("invertTrackpadXV191") private var invertTrackpadX = false
+    @AppStorage("invertTrackpadYV191") private var invertTrackpadY = false
+    @AppStorage("invertMouseXV191") private var invertMouseX = false
+    @AppStorage("invertMouseYV191") private var invertMouseY = false
+    @AppStorage("seekPerPointTrackpadV191") private var seekTrackpad = 0.05
+    @AppStorage("seekPerPointMouseV191") private var seekMouse = 0.2
+    @AppStorage("volumePerPointTrackpadV191") private var volumeTrackpad = 0.3
+    @AppStorage("volumePerPointMouseV191") private var volumeMouse = 1.0
+    @AppStorage("ignoreMomentumV191") private var ignoreMomentum = true
+    @AppStorage("axisLockPointsV191") private var axisLock = 6.0
+    @AppStorage("axisRatioV191") private var axisRatio = 1.3
+    @AppStorage("stepThresholdV191") private var stepThreshold = 28.0
+    @AppStorage("gesturesInWindowFullscreenV191") private var windowFullscreen = true
+    @AppStorage("scrubInlineV192") private var scrubInline = true
+    @AppStorage("seekThrottleMsV192") private var seekThrottle = 60.0
+
+    var body: some View {
+        Section("Trackpad & mouse gestures (fullscreen)") {
+            Toggle("Native gestures (recommended)", isOn: $native)
+            Toggle("Scrub with a sideways swipe on the normal (inline) player too", isOn: $scrubInline)
+            Picker("Feel", selection: $mode) {
+                Text("Continuous (smooth)").tag("continuous")
+                Text("Steps").tag("steps")
+            }
+            detail("Continuous follows your fingers exactly; Steps jumps by the swipe/volume step above.")
+        }
+        Section("Trackpad (MacBook)") {
+            Toggle("Flip scrub direction", isOn: $invertTrackpadX)
+            Toggle("Flip volume direction", isOn: $invertTrackpadY)
+            slider("Scrub speed", $seekTrackpad, 0.005...0.5, "%.3f s/pt")
+            slider("Volume speed", $volumeTrackpad, 0.02...2, "%.2f %%/pt")
+            Toggle("Ignore momentum after lifting fingers", isOn: $ignoreMomentum)
+        }
+        Section("Mouse (e.g. Razer + Mac Mouse Fix)") {
+            Toggle("Flip scrub direction", isOn: $invertMouseX)
+            Toggle("Flip volume direction", isOn: $invertMouseY)
+            slider("Scrub speed", $seekMouse, 0.01...2, "%.2f s/pt")
+            slider("Volume speed", $volumeMouse, 0.05...5, "%.2f %%/pt")
+            detail("Mac Mouse Fix's smooth scrolling can look like a trackpad to macOS; if the direction is wrong, flip it in the Trackpad section instead.")
+        }
+        Section("For nerds") {
+            slider("Axis lock distance", $axisLock, 0...30, "%.0f pt")
+            slider("Axis dominance ratio", $axisRatio, 1...3, "%.2f×")
+            slider("Step threshold", $stepThreshold, 4...80, "%.0f pt")
+            slider("Seek rate limit (lower = more responsive)", $seekThrottle, 0...250, "%.0f ms")
+            Toggle("Also in macOS window fullscreen", isOn: $windowFullscreen)
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                Text("Last gesture: " + (GestureScrubber.shared.lastSummary.isEmpty ? "—" : GestureScrubber.shared.lastSummary))
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private func slider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>, _ format: String) -> some View {
+        HStack {
+            Text(title)
+            Slider(value: value, in: range)
+            Text(String(format: format, value.wrappedValue)).monospacedDigit().frame(width: 84, alignment: .trailing)
+        }
+    }
+}
+#endif
+
+
+/// V19.2 — Scrubben met je vinger over de gewone (inline) speler op iPhone/iPad.
+private struct TouchGestureSettings: View {
+    @AppStorage("touchScrubV192") private var touchScrub = true
+    @AppStorage("touchSeekPerPxV192") private var perPx = 0.25
+    @AppStorage("invertTouchV192") private var invert = false
+    var body: some View {
+        Section("Touch scrubbing (inline player)") {
+            Toggle("Swipe over the video to scrub", isOn: $touchScrub)
+            HStack {
+                Text("Speed")
+                Slider(value: $perPx, in: 0.02...2)
+                Text(String(format: "%.2f s/pt", perPx)).monospacedDigit().frame(width: 76, alignment: .trailing)
+            }
+            Toggle("Flip direction", isOn: $invert)
+            detail("Swipe sideways over a video that is not fullscreen. Up/down still scrolls the page. In fullscreen, Apple's player gestures apply.")
+        }
+    }
+}
+
+/// V19.2 — Voorinstellingen voor alle gebaren + terug naar standaard.
+private struct GesturePresetSection: View {
+    var body: some View {
+        Section("Gesture presets") {
+            Button("Precise (small steps)") { Self.apply(seek: 0.02, mouseSeek: 0.08, volume: 0.15, touch: 0.1) }
+            Button("Balanced (default)") { Self.reset() }
+            Button("Fast (big jumps)") { Self.apply(seek: 0.15, mouseSeek: 0.6, volume: 0.8, touch: 0.8) }
+            Button("Reset all gestures to defaults", role: .destructive) { Self.reset() }
+                .accessibilityIdentifier("settings.resetGestures")
+        }
+    }
+    static func apply(seek: Double, mouseSeek: Double, volume: Double, touch: Double) {
+        let d = UserDefaults.standard
+        d.set(seek, forKey: "seekPerPointTrackpadV191"); d.set(mouseSeek, forKey: "seekPerPointMouseV191")
+        d.set(volume, forKey: "volumePerPointTrackpadV191"); d.set(volume * 3, forKey: "volumePerPointMouseV191")
+        d.set(touch, forKey: "touchSeekPerPxV192")
+    }
+    static func reset() {
+        let d = UserDefaults.standard
+        for key in ["nativeGesturesV191", "gestureModeV191", "invertTrackpadXV191", "invertTrackpadYV191", "invertMouseXV191",
+                    "invertMouseYV191", "seekPerPointTrackpadV191", "seekPerPointMouseV191", "volumePerPointTrackpadV191",
+                    "volumePerPointMouseV191", "ignoreMomentumV191", "axisLockPointsV191", "axisRatioV191", "stepThresholdV191",
+                    "gesturesInWindowFullscreenV191", "touchScrubV192", "touchSeekPerPxV192", "invertTouchV192", "scrubInlineV192",
+                    "pullActionV192", "backSwipeV192"] { d.removeObject(forKey: key) }
     }
 }

@@ -18,6 +18,11 @@ struct PlayerControlBar: View {
     @State private var showingCreatorTools = false
     /// V18: is het downloadpaneel open?
     @State private var showingDownload = false
+    @State private var showingDownloadsList = false
+    /// V19.1: snelheidspaneel.
+    @State private var showingSpeedPanel = false
+    /// V19.2: tabs doorzoeken.
+    @State private var showingTabSearch = false
 
     private var iconSize: CGFloat { min(17 * settings.toolbarDensity.scale, buttonSize * 0.55) }   // V17.1: krimpt mee
     /// V17.1: hoeveel knoppen staan er in de balk? Nodig om ze passend te maken zonder scrollen.
@@ -60,7 +65,7 @@ struct PlayerControlBar: View {
                 .frame(maxWidth: .infinity, minHeight: buttonSize, alignment: .leading)
             #if os(iOS)
             if settings.showAirPlayButton {
-                control("airplay.video", "AirPlay video", action: session.showVideoAirPlay)
+                control("airplay.video", "AirPlay video · hold for fullscreen", action: session.showVideoAirPlay, secondary: session.openFullscreenFallback)
                     .accessibilityIdentifier("toolbar.airplay")
             }
             #endif
@@ -69,7 +74,7 @@ struct PlayerControlBar: View {
             if settings.showSpeedControl { speedControl }
             // V18: offline opslaan.
             if settings.showDownloadButton {
-                control("arrow.down.circle", "Download for offline", action: { showingDownload = true })
+                control("arrow.down.circle", "Download for offline · hold for downloads", action: { showingDownload = true }, secondary: { showingDownloadsList = true })
                     .accessibilityIdentifier("toolbar.download")
             }
             if settings.showPiPButton {
@@ -77,12 +82,12 @@ struct PlayerControlBar: View {
             }
             // V17: knop voor Creator tools (snelheid, A-B-loop, tap tempo, frame-stap).
             if settings.showCreatorTools {
-                control("slider.horizontal.3", "Creator tools", action: { showingCreatorTools = true })
+                control("slider.horizontal.3", "Creator tools · hold for speed panel", action: { showingCreatorTools = true }, secondary: { showingSpeedPanel = true })
                     .accessibilityIdentifier("toolbar.creator")
             }
             if settings.showMoreMenu { moreMenu }
             if settings.showSettingsButton {
-                control("gearshape", "Settings", action: showSettings)
+                control("gearshape", "Settings · hold to search tabs", action: showSettings, secondary: { showingTabSearch = true })
                     .accessibilityIdentifier("toolbar.settings")
             }
         }
@@ -94,36 +99,69 @@ struct PlayerControlBar: View {
         // V17: het Creator-tools-paneel als "sheet" (schuift over het scherm).
         .sheet(isPresented: $showingCreatorTools) { CreatorToolsView(session: session) }
         .sheet(isPresented: $showingDownload) { DownloadSheet(session: session) }
+        .sheet(isPresented: $showingDownloadsList) { NavigationStack { DownloadsView() } }
+        .sheet(isPresented: $showingTabSearch) { TabSearchView() }
         #if os(macOS)
         .overlay(alignment: .bottom) { theme.style.separator.opacity(0.5).frame(height: 0.5).allowsHitTesting(false) }
         #endif
     }
 
-    /// V18: − [1×] + — de middelste tekst toont de huidige snelheid (tik = terug naar 1×).
+    /// V19.1: − [1.00×] + — kleine stapjes met − en +; tik op de snelheid voor het paneel met
+    /// klein/medium/groot, een schuif en vaste waarden. Vasthouden van − of + = terug naar 1×.
     private var speedControl: some View {
         HStack(spacing: 0) {
-            control("minus", "Slower · hold for 1×", action: { session.stepPlaybackRate(-1) },
-                    secondary: { session.stepPlaybackRate(0) })
+            control("minus", "Slower (−\(Self.rateLabel(settings.speedStepSmall))) · hold for 1×",
+                    action: { session.adjustPlaybackRate(by: -settings.speedStepSmall) },
+                    secondary: { session.setPlaybackRate(1) })
                 .accessibilityIdentifier("toolbar.slower")
-            Button { session.stepPlaybackRate(0) } label: {
+            Button { showingSpeedPanel = true } label: {
                 Text(Self.rateLabel(session.playbackRate))
                     .font(.system(size: max(10, iconSize * 0.72), weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(session.playbackRate == 1 ? theme.secondary : theme.accent)
-                    .frame(minWidth: buttonSize * 0.9, minHeight: buttonSize)
+                    .frame(minWidth: buttonSize * 1.1, minHeight: buttonSize)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Playback speed · click for 1×")
+            .help("Playback speed · click for fine control")
             .accessibilityLabel("Playback speed \(Self.rateLabel(session.playbackRate))")
             .accessibilityIdentifier("toolbar.rate")
-            control("plus", "Faster · hold for 1×", action: { session.stepPlaybackRate(1) },
-                    secondary: { session.stepPlaybackRate(0) })
+            .popover(isPresented: $showingSpeedPanel, arrowEdge: .bottom) {
+                SpeedPanel(session: session, settings: settings)
+                    #if os(iOS)
+                    .presentationCompactAdaptation(.popover)
+                    #endif
+            }
+            control("plus", "Faster (+\(Self.rateLabel(settings.speedStepSmall))) · hold for 1×",
+                    action: { session.adjustPlaybackRate(by: settings.speedStepSmall) },
+                    secondary: { session.setPlaybackRate(1) })
                 .accessibilityIdentifier("toolbar.faster")
         }
     }
+    /// V19.2: pagina als PDF bewaren (Mac: bewaarvenster; iPhone/iPad: deelmenu).
+    private func savePDF() {
+        session.exportPDF { url in
+            guard let url else { return }
+            #if os(macOS)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = url.lastPathComponent
+            panel.allowedContentTypes = [.pdf]
+            if panel.runModal() == .OK, let target = panel.url {
+                try? FileManager.default.removeItem(at: target)
+                try? FileManager.default.copyItem(at: url, to: target)
+            }
+            #else
+            let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            let root = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.rootViewController
+            var top = root; while let next = top?.presentedViewController { top = next }
+            sheet.popoverPresentationController?.sourceView = top?.view
+            top?.present(sheet, animated: true)
+            #endif
+        }
+    }
+
     static func rateLabel(_ rate: Double) -> String {
-        rate == rate.rounded() ? String(format: "%.0f×", rate) : String(format: "%g×", rate)
+        rate == rate.rounded() ? String(format: "%.0f×", rate) : String(format: "%.2f×", rate).replacingOccurrences(of: "0×", with: "×")
     }
 
     @ViewBuilder
@@ -131,13 +169,12 @@ struct PlayerControlBar: View {
         HStack(spacing: 0) {
             #if os(iOS)
             if settings.showBrand {
-                Button(action: session.goHome) { BrandMark(compact: true).frame(width: buttonSize, height: 44) }
-                    .buttonStyle(.plain).accessibilityIdentifier("toolbar.brandHome")
+                HoldButton(action: session.goHome, hold: { actions?.newTab() }) { BrandMark(compact: true).frame(width: buttonSize, height: 44) }.accessibilityIdentifier("toolbar.brandHome")
             }
             #endif
             if settings.showNavigationControls {
-                control("chevron.backward", "Back", enabled: session.canGoBack || settings.backClosesTab, action: session.goBack).accessibilityIdentifier("toolbar.back")
-                control("chevron.forward", "Forward", enabled: session.canGoForward, action: session.goForward).accessibilityIdentifier("toolbar.forward")
+                control("chevron.backward", "Back · hold for home", enabled: session.canGoBack || settings.backClosesTab, action: session.goBack, secondary: session.goHome).accessibilityIdentifier("toolbar.back")
+                control("chevron.forward", "Forward · hold to reopen closed tab", enabled: session.canGoForward || actions != nil, action: session.goForward, secondary: { actions?.reopenClosedTab() }).accessibilityIdentifier("toolbar.forward")
             }
             if settings.showRefreshButton {
                 // V16: hold / middle-click = force refresh (restarts the player when PiP or YouTube is stuck).
@@ -152,7 +189,7 @@ struct PlayerControlBar: View {
             }
             if settings.showBookmarkButton {
                 control("bookmark", library.isBookmarked(session.currentURL) ? "Remove bookmark" : "Add bookmark",
-                        active: library.isBookmarked(session.currentURL)) { actions?.toggleBookmark() }
+                        active: library.isBookmarked(session.currentURL), action: { actions?.toggleBookmark() }, secondary: { actions?.showLibrary() })
                     .accessibilityIdentifier("toolbar.bookmark")
             }
             if settings.showConnectionStatus {
@@ -202,8 +239,15 @@ struct PlayerControlBar: View {
             MoreAction("Force Refresh", "arrow.triangle.2.circlepath") { session.forceRefresh() },
             MoreAction("Creator Tools", "slider.horizontal.3") { showingCreatorTools = true },
             MoreAction("Download", "arrow.down.circle") { showingDownload = true },
+            // V19.2: extra browserfuncties.
+            MoreAction("Reader", "doc.plaintext") { session.toggleReaderMode() },
+            MoreAction("Save as PDF", "doc.richtext") { savePDF() },
+            MoreAction("Search Tabs", "rectangle.and.text.magnifyingglass") { showingTabSearch = true },
             MoreAction("Settings", "gearshape") { showSettings() },
         ]
+        #if os(macOS)
+        list.insert(MoreAction("Print…", "printer") { session.printPage() }, at: max(0, list.count - 1))
+        #endif
         return list
     }
 
@@ -327,25 +371,16 @@ struct PlayerControlBar: View {
         .accessibilityIdentifier("toolbar.quality")
     }
 
-    /// Button with an optional secondary action: long-press (touch) or middle-click / long-press (Mac).
+    /// V19.3: echte knop — één tik werkt direct (ook iPad/iPhone); vasthouden = passende extra functie.
     private func control(_ symbol: String, _ title: String, enabled: Bool = true, active: Bool = false,
                          action: @escaping () -> Void, secondary: (() -> Void)? = nil) -> some View {
-        Image(systemName: symbol).themedIcon(theme, size: iconSize, active: active, enabled: enabled)
-            .frame(width: buttonSize, height: buttonSize).contentShape(Rectangle())
-            .gesture(LongPressGesture(minimumDuration: 0.45, maximumDistance: 18)
-                .exclusively(before: TapGesture()).onEnded { value in
-                    switch value {
-                    case .first(true): if let secondary { secondary() } else { action() }
-                    case .second: action()
-                    default: break
-                    }
-                })
-            .middleClick(secondary ?? action)
-            .help(title)
-            .accessibilityElement()
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(title)
-            .accessibilityAction { action() }
+        HoldButton(action: action, hold: secondary) {
+            Image(systemName: symbol).themedIcon(theme, size: iconSize, active: active, enabled: enabled)
+                .frame(width: buttonSize, height: buttonSize).contentShape(Rectangle())
+        }
+        .middleClick(secondary ?? action)
+        .help(title)
+        .accessibilityLabel(title)
     }
 }
 
@@ -395,5 +430,122 @@ struct MoreActionsPanel: View {
         .padding(10)
         .frame(width: 330)
         .tint(theme.accent)
+    }
+}
+
+
+/// V19.1 — Nauwkeurige afspeelsnelheid: klein/medium/groot omlaag en omhoog, een schuif
+/// (0,25–4×, stapjes van 0,01) en snelle vaste waarden.
+struct SpeedPanel: View {
+    @ObservedObject var session: WebSession
+    @ObservedObject var settings: AppSettings
+    @State private var slider: Double = 1
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(PlayerControlBar.rateLabel(session.playbackRate))
+                .font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
+                .accessibilityIdentifier("speed.value")
+            HStack(spacing: 8) {
+                step(-settings.speedStepLarge, "chevron.backward.2")
+                step(-settings.speedStepMedium, "chevron.backward")
+                step(-settings.speedStepSmall, "minus")
+                step(settings.speedStepSmall, "plus")
+                step(settings.speedStepMedium, "chevron.forward")
+                step(settings.speedStepLarge, "chevron.forward.2")
+            }
+            Slider(value: $slider, in: 0.25...4, step: 0.01) { editing in
+                if !editing { session.setPlaybackRate(slider) }
+            }
+            .onChange(of: slider) { _, value in session.setPlaybackRate(value) }
+            .accessibilityIdentifier("speed.slider")
+            HStack(spacing: 6) {
+                ForEach([0.5, 0.75, 1, 1.25, 1.5, 2], id: \.self) { value in
+                    Button(PlayerControlBar.rateLabel(value)) { session.setPlaybackRate(value); slider = value }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .tint(abs(session.playbackRate - value) < 0.001 ? .accentColor : .secondary)
+                }
+            }
+            #if os(macOS)
+            Text("⌥, / ⌥.  small   ·   ⌥⇧, / ⌥⇧.  medium   ·   ⌃⌥, / ⌃⌥.  large   ·   ⌥0  1×")
+                .font(.caption2).foregroundStyle(.secondary)
+            #endif
+        }
+        .padding(18)
+        .frame(width: 340)
+        .onAppear { slider = session.playbackRate }
+        .onChange(of: session.playbackRate) { _, value in if abs(value - slider) > 0.004 { slider = value } }
+    }
+    private func step(_ delta: Double, _ symbol: String) -> some View {
+        Button { session.adjustPlaybackRate(by: delta) } label: {
+            VStack(spacing: 2) {
+                Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
+                Text((delta > 0 ? "+" : "−") + String(format: "%g", abs(delta))).font(.caption2).monospacedDigit()
+            }
+            .frame(width: 44, height: 40)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel((delta > 0 ? "Faster by " : "Slower by ") + String(format: "%g", abs(delta)))
+    }
+}
+
+
+/// V19.2 — Zoeken in je open tabs (titel en adres); tik om ernaartoe te gaan.
+struct TabSearchView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    var body: some View {
+        NavigationStack {
+            List {
+                let tabs = BrowserWorkspace.active?.tabs ?? []
+                let q = query.lowercased()
+                ForEach(tabs.filter { q.isEmpty || $0.fullTitle.lowercased().contains(q) || ($0.currentURL?.absoluteString.lowercased().contains(q) ?? false) }) { tab in
+                    Button {
+                        BrowserWorkspace.active?.select(tab); dismiss()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tab.fullTitle).lineLimit(1)
+                            Text(tab.currentURL?.host ?? "").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search open tabs")
+            .navigationTitle("Tabs")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+        #if os(macOS)
+        .frame(minWidth: 420, minHeight: 420)
+        #endif
+    }
+}
+
+
+/// V19.3 — Knop met directe tik en een aparte "ingedrukt houden"-actie. De tik gaat via een
+/// gewone Button (dus nooit wachten tot een lang-indrukken mislukt); het vasthouden loopt er
+/// gelijktijdig naast en onderdrukt dan de tik die bij het loslaten volgt.
+struct HoldButton<Label: View>: View {
+    let action: () -> Void
+    var hold: (() -> Void)?
+    var holdDuration: Double = 0.5
+    @ViewBuilder var label: () -> Label
+    @State private var suppressTap = false
+
+    var body: some View {
+        Button {
+            if suppressTap { suppressTap = false; return }
+            action()
+        } label: { label() }
+        .buttonStyle(.plain)
+        .simultaneousGesture(LongPressGesture(minimumDuration: holdDuration, maximumDistance: 20).onEnded { _ in
+            guard let hold else { return }
+            suppressTap = true
+            #if os(iOS)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            #endif
+            hold()
+            // Als het systeem na een lange druk géén tik meer stuurt, niet de vólgende tik opslokken.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { suppressTap = false }
+        })
+        .accessibilityAction(named: "Hold action") { hold?() }
     }
 }

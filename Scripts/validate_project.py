@@ -118,8 +118,17 @@ def check_project_file() -> None:
             "Expected test bundle identifier is missing")
 
 
+def check_setting_help():
+    import collections, re as _re
+    text = (ROOT / "JoeToep/Views/SettingHelp.swift").read_text()
+    body = text[text.index("static let texts"):]
+    body = body[:body.index("    ]")]
+    keys = _re.findall(r'^\s*"([^"]+)":', body, _re.M)
+    dup = [k for k, c in collections.Counter(keys).items() if c > 1]
+    require(not dup, "SettingHelp duplicate keys: " + ", ".join(dup))
+
 def main() -> int:
-    checks = [check_required_files, check_plists, check_assets, check_sources, check_project_file, check_v2, check_v3, check_v4, check_v5, check_v6, check_v7]
+    checks = [check_required_files, check_plists, check_assets, check_sources, check_project_file, check_v2, check_v3, check_v4, check_v5, check_v6, check_v7, check_setting_help]
     for check in checks:
         check()
         print(f"PASS {check.__name__}")
@@ -147,7 +156,7 @@ def check_v2() -> None:
     definitions = re.findall(r"^\t\t([A-F0-9]{24})\s*(?:/\*.*?\*/\s*)?=\s*\{", project, re.M)
     require(len(definitions) == len(set(definitions)), "Duplicate Xcode object id")
     require(set(re.findall(r"\b[A-F0-9]{24}\b", project)) <= set(definitions), "Dangling Xcode object reference")
-    require("MARKETING_VERSION = 19.0.0;" in project, "V3 version missing")
+    require("MARKETING_VERSION = 20.0.0;" in project, "V3 version missing")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     require({item.get("BlueprintName") for item in scheme.findall(".//TestableReference/BuildableReference")}
             == {"JoeToepTests", "JoeToepUITests"}, "Scheme omits a test target")
@@ -199,7 +208,7 @@ def check_v4() -> None:
     project = (ROOT / "JoeToep.xcodeproj/project.pbxproj").read_text()
     require(project.count("PRODUCT_NAME = JoeToep;") == 2, "Product name differs across configurations")
     require(project.count("PRODUCT_MODULE_NAME = JoeToep;") == 2, "Stable module name lost")
-    require(project.count("CURRENT_PROJECT_VERSION = 23;") >= 2, "Build version mismatch")
+    require(project.count("CURRENT_PROJECT_VERSION = 27;") >= 2, "Build version mismatch")
     scheme = ET.parse(ROOT / "JoeToep.xcodeproj/xcshareddata/xcschemes/JoeToep.xcscheme")
     for item in scheme.findall(".//BuildableReference"):
         require(item.get("ReferencedContainer") == "container:JoeToep.xcodeproj", "Old scheme project path")

@@ -171,6 +171,12 @@ final class AppSettings: ObservableObject {
     @Published var scrubThumbnail: Bool { didSet { save(scrubThumbnail, "scrubThumbnailV19") } }
     /// YouTube-bediening ook tonen bij de pijltjestoetsen (standaard onzichtbaar).
     @Published var arrowKeysShowControls: Bool { didSet { save(arrowKeysShowControls, "arrowKeysShowControlsV19") } }
+    /// V19.2: gepauzeerd → uit fullscreen; verder spelen → weer fullscreen.
+    @Published var exitFullscreenOnPause: Bool { didSet { save(exitFullscreenOnPause, "exitFullscreenOnPauseV192") } }
+    // MARK: V19.1 snelheid
+    @Published var speedStepSmall: Double { didSet { save(speedStepSmall, "speedStepSmallV191") } }
+    @Published var speedStepMedium: Double { didSet { save(speedStepMedium, "speedStepMediumV191") } }
+    @Published var speedStepLarge: Double { didSet { save(speedStepLarge, "speedStepLargeV191") } }
     /// Downloadknop (offline opslaan) in de menubalk.
     @Published var showDownloadButton: Bool { didSet { save(showDownloadButton, "showDownloadButtonV18") } }
     @Published var showTabIcons: Bool { didSet { save(showTabIcons, "showTabIconsV15") } }
@@ -372,6 +378,10 @@ final class AppSettings: ObservableObject {
         showControlsWhileScrubbing = flag("showControlsWhileScrubbingV19", true)
         scrubThumbnail = flag("scrubThumbnailV19", true)
         arrowKeysShowControls = flag("arrowKeysShowControlsV19", false)
+        exitFullscreenOnPause = flag("exitFullscreenOnPauseV192", true)
+        speedStepSmall = min(max((defaults.object(forKey: "speedStepSmallV191") as? Double) ?? 0.05, 0.01), 0.5)
+        speedStepMedium = min(max((defaults.object(forKey: "speedStepMediumV191") as? Double) ?? 0.25, 0.05), 1)
+        speedStepLarge = min(max((defaults.object(forKey: "speedStepLargeV191") as? Double) ?? 0.5, 0.1), 2)
         showTabIcons = flag("showTabIconsV15", true)
         showMoreMenu = flag("showMoreMenuV15", true)
         showBookmarkButton = flag("showBookmarkButtonV15", false)
@@ -428,6 +438,22 @@ final class AppSettings: ObservableObject {
             ToolbarPreset.minimal.apply(to: self)
             iconWeight = .light
         }
+        // V19.2: Mac en iPad krijgen de desktop-indeling (meer knoppen direct zichtbaar) en
+        // automatisch fullscreen staat overal aan. Eén keer; daarna blijft je eigen keuze staan.
+        if !defaults.bool(forKey: "layoutAppliedV192") {
+            defaults.set(true, forKey: "layoutAppliedV192")
+            if Self.isDesktopClass { ToolbarPreset.standard.apply(to: self) }
+            automaticFullscreen = true
+            showNavigationControls = true
+        }
+    }
+    /// Mac of iPad (grote schermen) → desktop-indeling.
+    static var isDesktopClass: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return UIDevice.current.userInterfaceIdiom == .pad
+        #endif
     }
     // snapshot is een berekende property die alle instellingen samenvat in
     // één SettingsSnapshot-waarde (bijvoorbeeld om ze in één keer door te
@@ -458,7 +484,7 @@ final class AppSettings: ObservableObject {
             smartMultiMonitorPiP: smartMultiMonitorPiP,
             swipeSeekSeconds: swipeSeekSeconds, volumeStepPercent: volumeStepPercent,
             showControlsWhileScrubbing: showControlsWhileScrubbing, scrubThumbnail: scrubThumbnail,
-            arrowKeysShowControls: arrowKeysShowControls)
+            arrowKeysShowControls: arrowKeysShowControls, exitFullscreenOnPause: exitFullscreenOnPause)
     }
     // Een gewone functie (geen property): wordt aangeroepen als de
     // gebruiker de servicemelding accepteert, en zet de bijbehorende
@@ -497,6 +523,7 @@ final class AppSettings: ObservableObject {
         switchToNewTabs = true; pipOnAllSites = true; showCreatorTools = true
         smartMultiMonitorPiP = true; tabSync = true; showSpeedControl = true; showDownloadButton = true
         swipeSeekSeconds = 5; volumeStepPercent = 1; showControlsWhileScrubbing = true; scrubThumbnail = true; arrowKeysShowControls = false
+        speedStepSmall = 0.05; speedStepMedium = 0.25; speedStepLarge = 0.5; exitFullscreenOnPause = true
         showMoreMenu = true; showBookmarkButton = false
         aiTabSummary = true; tabSummaryLength = .short; useAppleIntelligence = true; openNewTabsNextToCurrent = true
         openWebLinksInApp = true; searchEngine = .youtube; recordHistory = true

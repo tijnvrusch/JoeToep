@@ -18,33 +18,12 @@ struct PiPButton: View {
     @Environment(\.joeToepTheme) private var theme
     var body: some View {
         // Een "pip"-icoon (systeemicoon voor Picture-in-Picture).
-        Image(systemName: "pip")
-            // Een zelfgemaakte modifier (elders gedefinieerd) die het icoon
-            // stijl geeft op basis van het thema, en een andere kleur toont
-            // als PiP actief is.
-            .themedIcon(theme, size: iconSize, active: session.isInPictureInPicture)
-            // Zorgt dat het aanraakgebied minstens 44 punten hoog is (Apple's
-            // aanbevolen minimum), ook als "size" kleiner is.
-            .frame(width: size, height: max(size, 44)).contentShape(Rectangle())
-            // Hier worden twee gebaren gecombineerd: een lange druk (0.3
-            // seconden, mag maximaal 18 punten bewegen) en een gewone tik.
-            // ".exclusively(before:)" zorgt dat als de lange druk lukt, de tik
-            // NIET ook nog wordt geactiveerd (vandaar de opmerking bovenaan:
-            // deze twee gebaren sluiten elkaar uit).
-            .gesture(LongPressGesture(minimumDuration: 0.3, maximumDistance: 18)
-                .exclusively(before: TapGesture()).onEnded { value in
-                    // "switch" op het resultaat van het gecombineerde gebaar:
-                    switch value {
-                    // .first(true) betekent: de lange druk is voltooid →
-                    // Picture-in-Picture resetten.
-                    case .first(true): session.resetPictureInPicture()
-                    // .second betekent: het was een gewone tik → PiP aan/uit
-                    // zetten, maar alleen als er niet al een aanvraag loopt.
-                    case .second: if !session.isPiPRequesting { session.togglePictureInPicture() }
-                    // Overige (zeldzame) gevallen: niets doen.
-                    default: break
-                    }
-                })
+        HoldButton(action: { if !session.isPiPRequesting { session.togglePictureInPicture() } },
+                   hold: session.resetPictureInPicture, holdDuration: 0.4) {
+            Image(systemName: "pip")
+                .themedIcon(theme, size: iconSize, active: session.isInPictureInPicture)
+                .frame(width: size, height: max(size, 44)).contentShape(Rectangle())
+        }
             // Toont een klein laad-draaitje bovenop de knop zolang er een PiP-
             // aanvraag loopt. ".allowsHitTesting(false)" zorgt dat dit draaitje
             // zelf niet aanklikbaar is en de knop eronder niet blokkeert.

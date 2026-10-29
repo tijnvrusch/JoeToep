@@ -76,5 +76,7 @@ struct SettingsSnapshot: Equatable, Sendable {
     var showControlsWhileScrubbing = true
     var scrubThumbnail = true
     var arrowKeysShowControls = false
+    /// V19.2: pauze → uit fullscreen (en bij verder spelen weer fullscreen).
+    var exitFullscreenOnPause = true
     static let standard = SettingsSnapshot()
 }

@@ -132,6 +132,21 @@
   // Bij deze video-events, bij YouTube's eigen "pagina-navigatie klaar"-event, en bij de
   // browser-terugknop (popstate) plannen we een nieuwe toepassing van onze voorkeuren.
   for (const event of ['playing', 'loadedmetadata', 'canplay']) window.addEventListener(event, schedule, true);
+  // V19.2: pauze haalde de video uit fullscreen → bij verder spelen weer fullscreen (één keer).
+  window.addEventListener('playing', () => {
+    if (window.__joetoepExitedByPause) { window.__joetoepExitedByPause = false; lastFullscreenKey = ''; schedule(); }
+  }, true);
+  // V19.3: na het VERLATEN van fullscreen altijd weer theatermodus (als die instelling aan staat).
+  // YouTube zet theater soms uit bij het verlaten van fullscreen; dan zie je een kleine speler.
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement || !configured || !config.theater || !watchPage()) return;
+    queueMicrotask(() => requestAnimationFrame(() => {
+      const w = document.querySelector('ytd-watch-flexy');
+      if (w && !w.hasAttribute('theater') && !w.hasAttribute('fullscreen') && !document.fullscreenElement) {
+        document.querySelector('.ytp-size-button')?.click();
+      }
+    }));
+  });
   // Vangnet als het theater-attribuut nooit komt: bij de eerstvolgende tijd-update opnieuw kijken.
   window.addEventListener('timeupdate', () => { if (waitingForTheater) schedule(); }, true);
   document.addEventListener('yt-navigate-finish', schedule);

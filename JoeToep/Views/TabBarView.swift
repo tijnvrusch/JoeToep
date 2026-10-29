@@ -56,20 +56,7 @@ struct TabBarView: View {
             }
             .frame(maxWidth: .infinity)
             if !editing && settings.showNewTabButton {
-                // The + button: a click opens a new tab; right-click shows a small menu.
-                Button(action: workspace.addTab) {
-                    Image(systemName: "plus").themedIcon(theme, size: 15 * theme.density.scale)
-                        .frame(width: 36, height: theme.tabHeight + 4).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button { workspace.addTab() } label: { Label("New Tab", systemImage: "plus.square") }
-                    Button { workspace.addPrivateTab() } label: { Label("New Private Tab", systemImage: "eyeglasses") }
-                    Button { workspace.reopenClosedTab() } label: { Label("Reopen Closed Tab", systemImage: "arrow.uturn.backward") }
-                        .disabled(workspace.closedTabs.isEmpty)
-                }
-                .accessibilityLabel("New tab").accessibilityIdentifier("tabs.new")
-                .help("New tab (⌘T) · right-click for a private tab")
+                // V19.2: de +-knop staat nu direct achter de laatste tab (zie `strip`).
                 #if os(macOS)
                 Button { openWindow(id: "main") } label: {
                     Image(systemName: "macwindow.badge.plus").themedIcon(theme, size: 14 * theme.density.scale)
@@ -113,13 +100,16 @@ struct TabBarView: View {
             // gelijk verdeeld worden over de beschikbare breedte.
             let count = CGFloat(max(workspace.tabs.count, 1))
             let spacing: CGFloat = 4
-            let natural = (geometry.size.width - spacing * (count - 1)) / count
+            // V19.2: ruimte voor de +-knop direct achter de tabs.
+            let plusWidth: CGFloat = settings.showNewTabButton ? 36 + spacing : 0
+            let room = geometry.size.width - plusWidth
+            let natural = (room - spacing * (count - 1)) / count
             // Maar nooit smaller dan het minimum; anders scrollen we liever.
             // V17.1 (Mac en iPad): met 1–3 tabs worden tabs niet meer over de hele breedte
             // uitgerekt maar maximaal `fewTabsMaxWidth` breed; pas vanaf 4 tabs delen ze de ruimte.
-            let width = workspace.tabs.count < 4 && !isPhone
-                ? min(max(natural, minimumTabWidth), fewTabsMaxWidth)
-                : max(natural, minimumTabWidth)
+            // V19.2: 1 tab ≈ de halve breedte, 2 tabs = samen de volle breedte, 3+ = kleiner (gelijk
+            // verdeeld, nooit onder het minimum; daarna scrollen).
+            let width = workspace.tabs.count == 1 ? max(room / 2, minimumTabWidth) : max(natural, minimumTabWidth)
             // ScrollViewReader geeft toegang tot "proxy", waarmee we
             // programmatisch naar een specifiek tabblad kunnen scrollen.
             ScrollViewReader { proxy in
@@ -129,12 +119,33 @@ struct TabBarView: View {
                             TabChip(tab: tab, session: tab.session, selected: workspace.selectedID == tab.id, width: width,
                                     select: { tapped(tab) }, close: { workspace.close(tab) })
                                 .contextMenu { menu(for: tab) }
+                                // V19.1: slepen om te herordenen (Mac, iPad en iPhone). Laat je een tab
+                                // op een andere tab los, dan komt hij op die plek te staan.
+                                .draggable(tab.id.uuidString) {
+                                    Text(tab.title).font(.caption).padding(6)
+                                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                                }
+                                .dropDestination(for: String.self) { items, _ in
+                                    guard let raw = items.first, let id = UUID(uuidString: raw) else { return false }
+                                    return workspace.moveTab(id: id, before: tab.id)
+                                }
                                 // .id() geeft deze view een uniek label, zodat
                                 // scrollTo(id) hem later kan terugvinden.
                                 .id(tab.id)
                                 .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .leading).combined(with: .opacity),
                                                         removal: .scale(scale: 0.6).combined(with: .opacity)))
                         }
+                        if settings.showNewTabButton { newTabButton }
+                        // V19.2: sleep je een tab voorbij de laatste (op + of de lege ruimte), dan komt hij achteraan.
+                        Color.clear.frame(maxWidth: .infinity, minHeight: theme.tabHeight)
+                            .contentShape(Rectangle())
+                            // V19.3 (Mac): dubbelklik op de lege balk bovenin = venster maximaliseren
+                            // (volgt je macOS-instelling: zoomen/vullen of minimaliseren).
+                            .onTapGesture(count: 2) { WindowZoom.titleBarDoubleClick() }
+                            .dropDestination(for: String.self) { items, _ in
+                                guard let raw = items.first, let id = UUID(uuidString: raw) else { return false }
+                                return workspace.moveTabToEnd(id: id)
+                            }
                     }
                     .frame(minWidth: geometry.size.width, alignment: .leading)
                     .animation(theme.animation, value: workspace.tabs.map(\.id))
@@ -154,6 +165,27 @@ struct TabBarView: View {
             }
         }
         .frame(height: theme.tabHeight + 4)
+    }
+
+    /// V19.2: de +-knop, direct achter de laatste tab. Ook een plek om een tab achteraan neer te zetten.
+    private var newTabButton: some View {
+        Button(action: workspace.addTab) {
+            Image(systemName: "plus").themedIcon(theme, size: 15 * theme.density.scale)
+                .frame(width: 36, height: theme.tabHeight + 4).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button { workspace.addTab() } label: { Label("New Tab", systemImage: "plus.square") }
+            Button { workspace.addPrivateTab() } label: { Label("New Private Tab", systemImage: "eyeglasses") }
+            Button { workspace.reopenClosedTab() } label: { Label("Reopen Closed Tab", systemImage: "arrow.uturn.backward") }
+                .disabled(workspace.closedTabs.isEmpty)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let id = UUID(uuidString: raw) else { return false }
+            return workspace.moveTabToEnd(id: id)
+        }
+        .accessibilityLabel("New tab").accessibilityIdentifier("tabs.new")
+        .help("New tab (⌘T) · right-click for a private tab")
     }
 
     // De adresbalk die verschijnt zodra je op het geselecteerde tabblad tikt.
@@ -355,6 +387,22 @@ enum Clipboard {
         #else
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        #endif
+    }
+}
+
+
+/// V19.3 — Dubbelklikken op de balk bovenin, zoals bij elke Mac-app.
+enum WindowZoom {
+    static func titleBarDoubleClick() {
+        #if os(macOS)
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+        switch action {
+        case "Minimize": window.miniaturize(nil)
+        case "None": break
+        default: window.zoom(nil)          // "Maximize"/"Fill": venster zo groot mogelijk
+        }
         #endif
     }
 }

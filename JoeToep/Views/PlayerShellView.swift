@@ -59,6 +59,11 @@ struct TabPlayerView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("debug.lifecycle")
                     }
+                    // V19.2: nieuwe-tab-pagina (meteen typen, platform kiezen, snelkoppelingen).
+                    if session.showsNewTabPage && !session.isTestMode {
+                        NewTabPage(session: session, settings: settings)
+                            .transition(.opacity)
+                    }
                     // Als de video losgekoppeld in een zwevend mini-venster
                     // (Picture-in-Picture) afspeelt, tonen we hier een melding
                     // in plaats van de gewone webpagina.
