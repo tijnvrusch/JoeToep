@@ -224,6 +224,12 @@
     // V11: YouTube's own player already toggles on Space (like K). Handling it here as well
     // toggled twice, so Space from pause played and immediately paused again on Mac.
     const youtubeOwnsSpace=Boolean(document.getElementById('movie_player')) && !document.documentElement.hasAttribute('data-joetoep-stage');
+    // V24.0.1 (Mac): in YouTube's fullscreen doen de gewone pijltjes precies wat YouTube doet — YouTube
+    // zelf spoelt 5 s / regelt 5 % volume en toont zijn eigen "5 seconden"- en volume-plaatje + balk.
+    // Alleen ⌥/⌘-combinaties (30/60 s) blijven van JoeToep.
+    const youtubeFullscreenKeys = !window.JOETOEP_MOBILE && youtubeOwnsSpace && Boolean(fsElement()) &&
+      ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key) && !e.metaKey && !e.altKey && !e.shiftKey;
+    if (youtubeFullscreenKeys) return;
     // Spatie pauzeert/speelt af, maar alleen als YouTube's eigen speler dat nog niet zelf doet.
     if(e.key===' ' && !e.metaKey && !e.altKey && !youtubeOwnsSpace)handled=toggle();
     // Pijl-links/rechts spoelt: normaal 5 seconden, met Alt 30, met Alt+Cmd 60.
@@ -417,21 +423,33 @@
         let b = document.getElementById('joetoep-click-bezel');
         if (!b) {
           b = document.createElement('div'); b.id = 'joetoep-click-bezel'; b.setAttribute('aria-hidden', 'true');
-          b.style.cssText = 'position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;' +
+          // V24.0.1: maten en animatie van YouTube's eigen bezel (52 px, 0,5 s vervagen + vergroten ×2).
+          b.style.cssText = 'position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;' +
             'background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2147483646;' +
             'opacity:0;transform:scale(1);visibility:visible!important';
         }
         if (b.parentNode !== host) host.appendChild(b);
         b.style.position = host === document.body ? 'fixed' : 'absolute';
         const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'), path = document.createElementNS(NS, 'path');
-        svg.setAttribute('width', '30'); svg.setAttribute('height', '30'); svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '36'); svg.setAttribute('height', '36'); svg.setAttribute('viewBox', '0 0 24 24');
         path.setAttribute('fill', '#fff');
         path.setAttribute('d', playing ? 'M8 5.5v13l10.5-6.5z' : 'M7 5.5h3.6v13H7zM13.4 5.5H17v13h-3.6z');
         svg.appendChild(path); b.replaceChildren(svg);
         b.getAnimations?.().forEach(a => a.cancel());
         if (typeof b.animate === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          b.animate([{opacity: 0.95, transform: 'scale(1)'}, {opacity: 0, transform: 'scale(1.6)'}], {duration: 480, easing: 'ease-out'});
+          b.animate([{opacity: 1, transform: 'scale(1)'}, {opacity: 0, transform: 'scale(2)'}], {duration: 500, easing: 'linear'});
         } else { b.style.opacity = '0.9'; clearTimeout(playBezel.t); playBezel.t = setTimeout(() => { b.style.opacity = '0'; }, 350); }
+      } catch (_) {}
+    }
+    // V24.0.1: zoals op YouTube verschijnt bij een klik ook de bedieningsbalk + titel; YouTube verbergt
+    // hem zelf weer (bij spelen na ±3 s, bij pauze blijft hij staan).
+    function revealControls() {
+      try {
+        const mp = document.getElementById('movie_player'); if (!mp) return;
+        mp.classList.remove('joetoep-quiet', 'ytp-autohide');
+        const r = mp.getBoundingClientRect();
+        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+        for (const type of ['mouseover', 'mousemove']) mp.dispatchEvent(new MouseEvent(type, {bubbles: true, clientX: x, clientY: y}));
       } catch (_) {}
     }
     let firstClick = null;          // {at, wasPlaying} — voor de terugzet bij een dubbelklik
@@ -462,6 +480,7 @@
       firstClick = {at: now, wasPlaying};
       setPlaying(!wasPlaying);
       playBezel(!wasPlaying);
+      revealControls();
       document.dispatchEvent(new Event('joetoep-controls-used'));
       return wasPlaying ? 'paused' : 'playing';
     }

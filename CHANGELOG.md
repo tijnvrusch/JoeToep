@@ -1,3 +1,41 @@
+# 24.0.0 (36)
+
+## Mac: de app crashte (opgelost)
+- **Oorzaak (uit de crashrapporten van 14 en 15 oktober, alle 7 identiek):** `SpotifyController.shared` ververste zichzelf al tijdens zijn eigen initialisatie. Draaide Spotify níet, dan meldde hij meteen "Spotify staat uit" aan het mediacentrum; dat vroeg op zijn beurt `SpotifyController.shared` op — terwijl die nog aan het initialiseren was. libdispatch stopt de app dan hard ("BUG IN CLIENT OF LIBDISPATCH: trying to lock recursively", SIGTRAP), precies op het moment dat de spelerbalk met de mediacentrum-knop voor het eerst verscheen. Daarom crashte de app vaak meteen na het starten, en meerdere keren achter elkaar.
+- **Oplossing:** de eerste Spotify-controle gebeurt pas één runloop-ronde ná de initialisatie, en het mediacentrum herbouwt zijn lijst bij Spotify-meldingen nooit meer synchroon (meerdere meldingen → één herbouw). Alle andere singletons zijn op hetzelfde patroon nagekeken: geen andere kringverwijzing.
+- **Tweede crashrisico weggenomen:** een tab twee keer sluiten (sync én klik, of twee snelle ⌘W's) liep op een geforceerde index vast. Sluiten van een tab die al weg is doet nu niets.
+
+## Mac: fullscreen verlaten = inline blijven (na test met Tijn)
+- **Probleem:** ging je kort na het automatisch fullscreen gaan er zelf uit (F, Esc of dubbelklik), dan sprong de video binnen een seconde wéér fullscreen. De nieuwe zelfcontrole van 24.0 zag "niet fullscreen" en drukte zelf nog eens F.
+- **Oplossing:** de controle stopt zodra fullscreen één keer bereikt is, zodra fullscreen verlaten wordt, én zodra jij zelf F, Esc of dubbelklik gebruikt. Na zo'n eigen keuze vraagt de pagina voor die video ook nooit meer automatisch fullscreen aan; je wisselt daarna zelf vrij tussen fullscreen en inline. Esc vlak vóór of tijdens het automatisch openen annuleert het verzoek; komt fullscreen toch nog binnen, dan gaat het meteen weer uit.
+- Getest op de Mac (BenQ en HP): F in/uit, Esc, dubbelklik in/uit, en "nieuwe video → automatisch fullscreen → binnen 1 s F/dubbelklik" → blijft inline doorspelen. YouTube's eigen overlay (balk bij muisbeweging, verdwijnt na een paar seconden, blijft staan bij pauze) werkt in fullscreen.
+
+## Mac: bediening in fullscreen zoals YouTube
+- **Pijltjes:** in fullscreen gaan ←/→ (5 s spoelen) en ↑/↓ (5 % volume) weer naar YouTube zelf, met YouTube's eigen "5 seconden"-plaatje, volume-plaatje en bedieningsbalk. ⌥/⌘-combinaties (30/60 s) blijven van JoeToep.
+- **Klik op het beeld:** pauze/afspelen direct (zoals in 23.1), nu met het ▶/❚❚-plaatje in YouTube's maat en animatie (52 px, 0,5 s vervagen en vergroten), én de bedieningsbalk met titel verschijnt even — bij spelen verbergt YouTube hem zelf weer, bij pauze blijft hij staan.
+- **F, Esc, dubbelklik, spatie/K:** ongewijzigd YouTube-gedrag; na verlaten blijft de video inline doorspelen (zie hierboven).
+
+## Mac: automatisch fullscreen altijd betrouwbaar
+- **Oorzaak:** automatisch fullscreen was één poging per video. Kon de app het verzoek op dat moment niet uitvoeren (app net niet actief, PiP- of overdrachtsovergang, focus elders), dan was die video "op" en ging hij nooit meer vanzelf fullscreen. Daarnaast was er maar één controle (na 1,6 s), die alleen werkte als de app de video al als "spelend" zag.
+- **Oplossing:** automatisch fullscreen controleert zichzelf. Na het verzoek meet de app tot 3× (1,2 / 2,4 / 4 s) of de video écht fullscreen staat; zo niet, dan opnieuw — maar alleen als twee metingen 0,3 s na elkaar het eens zijn én er geen WebKit-fullscreen-venster in aanmaak is (F is een aan/uit-knop, dus nooit sturen tijdens een overgang). Een verzoek dat niet uitgevoerd kon worden wordt in de pagina opnieuw "gewapend" en bij de volgende keer spelen of activeren van de app alsnog uitgevoerd. Nooit opnieuw als fullscreen voor die video al gelukt was: zelf verlaten blijft verlaten. Alles komt in het lifecycle-logboek ("auto-fullscreen requested / ok after retry / re-armed / FAILED").
+- Werkt in alle drie de fullscreen-modi (YouTube, Enhanced, Safe).
+- Eerdere fullscreen-wensen ongewijzigd behouden: 100 %-bewaker (V23), klik = pauze/afspelen en dubbelklik = fullscreen uit in fullscreen (V23.1), snel in/uit zonder zwarte tab (V23.1).
+
+## iPhone: automatisch landscape — soepel, snel en stabiel
+- **Landscape vanaf het eerste frame:** de draai startte pas als de pagina "fullscreen" meldde — ná het begin van de fullscreen-animatie. Je zag dan eerst een staande fullscreen-video die daarna nog eens draaide (twee bewegingen, verspringend beeld). Nu zet JoeToep de landscape-klem zodra WebKit/AVKit het fullscreen-venster zichtbaar maakt, en het venster vraagt vanaf het begin alleen landscape: iOS presenteert de video meteen liggend, in één beweging. Dat geldt ook voor de terugkeer uit Picture in Picture naar fullscreen.
+- **Geen dubbele draaiverzoeken meer:** staat de interface al in landscape, dan volgt geen tweede verzoek (dat gaf een schok midden in de draai). De controles daarna (0,35 / 0,8 s) vragen alleen opnieuw als iOS echt niet gedraaid is.
+- **Rotatievergrendeling + telefoon zelf kantelen:** kantelde je de telefoon tijdens automatisch-landscape-fullscreen, dan haalde JoeToep de klem eraf; met rotatievergrendeling aan sprong iOS daardoor terug naar portrait terwijl de video fullscreen bleef. De klem blijft nu tot fullscreen dicht gaat. "Rechtop = fullscreen uit" werkt nog steeds (via de apparaat-oriëntatie).
+- **Telefoon al liggend bij openen:** met rotatievergrendeling aan en de telefoon al liggend werd er niet gedraaid (er werd naar de fysieke stand gekeken in plaats van de interface) → fullscreen bleef staand. Opgelost.
+- **De pagina eronder draait niet meer mee:** zonder de portret-instelling draaide tijdens automatisch-landscape ook de hele YouTube-pagina mee, die na het sluiten opnieuw moest opmaken (verspringen bij terugkeer). Het app-venster blijft nu altijd rechtop onder een automatisch gedraaide video.
+- **Vangnet:** blijkt een venster geen blijvend fullscreen-venster, dan gaat de klem na 1,5 s vanzelf weer los.
+
+## Tests
+- Nieuw: `Scripts/test_v24_scripts.cjs` (8 scenario's, o.a. 1.000 wegval/opnieuw-wapen-cycli) en `JoeToepTests/V24FeatureTests.swift` (singleton-regressie met 2.000 Spotify-meldingen, versie, iPhone-venster-oriëntaties).
+- Alle bestaande JS-suites groen: bridge 17, mediaCompatibility 134, V15 12, V17 13, V23.1 11, V24 8.
+
+## Overig
+- Versie 24.0.0 (36).
+
 # 23.1.0 (35)
 
 ## Mac: klikken in fullscreen werkt altijd

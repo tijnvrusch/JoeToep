@@ -111,7 +111,20 @@ final class MediaHub: ObservableObject {
         }
     }
 
-    func spotifyChanged(_ state: SpotifyState) { rebuild() }
+    /// V24: nooit synchroon herbouwen vanuit SpotifyController (kan midden in diens `init` of
+    /// `publish` zitten — her-intree gaf een crash). Meerdere wijzigingen → één herbouw.
+    private var spotifyRebuildQueued = false
+    func spotifyChanged(_ state: SpotifyState) {
+        guard !spotifyRebuildQueued else { return }
+        spotifyRebuildQueued = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.spotifyRebuildQueued = false
+                self.rebuild()
+            }
+        }
+    }
 
     private func rebuild() {
         var list = Array(tabStates.values)

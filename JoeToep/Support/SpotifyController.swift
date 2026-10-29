@@ -85,7 +85,13 @@ final class SpotifyController: ObservableObject {
                 }
             }
         }
-        refresh()
+        // V24 — CRASHFIX: nooit synchroon verversen tijdens `init`. Draaide Spotify niet, dan riep
+        // refresh() meteen publish() aan → MediaHub.rebuild() → `SpotifyController.shared`, terwijl
+        // die nog aan het initialiseren was: libdispatch "trying to lock recursively" (SIGTRAP) zodra
+        // de spelerbalk voor het eerst verscheen. Nu pas één runloop-ronde ná de initialisatie.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
         #endif
     }
 

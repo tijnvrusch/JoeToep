@@ -32,17 +32,65 @@ enum OrientationCoordinator {
     /// soms tijdens de presentatie-animatie van de fullscreen-speler).
     static func beginFullscreenLandscape(appWindow: Bool) {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        let already = fullscreenLandscape && appWindowRotates == appWindow
         fullscreenLandscape = true
         appWindowRotates = appWindow
+        fullscreenExpectedUntil = nil
+        // V24: staat de interface al in landscape (bijv. het venster-signaal hieronder was eerder),
+        // dan géén tweede verzoek — een dubbel verzoek tijdens de draai gaf een zichtbare schok.
+        if already, let scene = activeScene(), scene.interfaceOrientation.isLandscape { return }
         refreshSupportedOrientations()
         requestRepeatedly(.landscape, until: { $0.isLandscape })
     }
-    /// De telefoon is fysiek naar landscape gedraaid: klem eraf (normale rotatie werkt weer).
-    static func releaseFullscreenLandscapeClamp() {
-        guard fullscreenLandscape else { return }
-        fullscreenLandscape = false
-        appWindowRotates = false
-        refreshSupportedOrientations()
+    /// V24: bewust GEEN klem-vrijgave meer bij fysiek kantelen. Met rotatievergrendeling aan liet
+    /// die vrijgave iOS meteen terugspringen naar portrait terwijl de video fullscreen bleef.
+    /// "Rechtop = fullscreen uit" werkt via de apparaat-oriëntatie en heeft de vrijgave niet nodig.
+    static func releaseFullscreenLandscapeClamp() {}
+
+    // MARK: V24 — draaien vanaf het allereerste frame
+    /// De zichtbare tab staat op een pagina met een video (gezet door WebSession).
+    static var videoContextActive = false
+    /// Een fullscreen-verzoek is net gedaan (knop, automatisch, terug uit PiP).
+    private static var fullscreenExpectedUntil: Date?
+    static func expectFullscreen() {
+        guard UIDevice.current.userInterfaceIdiom == .phone, autoRotateEnabled else { return }
+        fullscreenExpectedUntil = Date().addingTimeInterval(2)
+    }
+    private static var expectingFullscreen: Bool { (fullscreenExpectedUntil ?? .distantPast) > Date() }
+    /// Is dit (vermoedelijk) het fullscreen-venster van WebKit/AVKit? Toetsenbord-, tekst-, menu- en
+    /// meldingsvensters tellen nooit mee.
+    static func isVideoFullscreenWindow(_ window: UIWindow?) -> Bool {
+        guard let window, window.windowLevel == .normal, !isAppInterfaceWindow(window) else { return false }
+        let name = String(describing: type(of: window)) + "|" + window.rootViewController.map { String(describing: type(of: $0)) }.orEmpty
+        for bad in ["Keyboard", "TextEffects", "Remote", "Alert", "Menu", "Callout", "Status", "Sheet", "Edit"] where name.contains(bad) { return false }
+        return true
+    }
+    private static var windowObserver: NSObjectProtocol?
+    /// Zodra WebKit/AVKit zijn fullscreen-venster zichtbaar maakt — nog vóór het bridge-event — al de
+    /// landscape-klem zetten. Dan presenteert iOS de video direct liggend: één beweging, geen
+    /// tussenbeeld in portrait en geen tweede draai erachteraan.
+    static func installWindowObserver() {
+        guard windowObserver == nil, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        windowObserver = NotificationCenter.default.addObserver(forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: .main) { note in
+            let window = note.object as? UIWindow
+            MainActor.assumeIsolated {
+                guard autoRotateEnabled, videoContextActive || expectingFullscreen, isVideoFullscreenWindow(window),
+                      UIApplication.shared.applicationState == .active else { return }
+                log?("fullscreen window visible: landscape from first frame")
+                beginFullscreenLandscape(appWindow: false)
+                // Vangnet: bleek het geen blijvend fullscreen-venster, dan na 1,5 s de klem eraf.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    MainActor.assumeIsolated {
+                        guard fullscreenLandscape, !appWindowRotates, let scene = activeScene() else { return }
+                        let stillThere = scene.windows.contains { !$0.isHidden && isVideoFullscreenWindow($0) }
+                        if !stillThere {
+                            log?("fullscreen window gone: release landscape")
+                            endFullscreenLandscape(returnToPortrait: true)
+                        }
+                    }
+                }
+            }
+        }
     }
     /// Fullscreen dicht → klem eraf en (optioneel) meteen terug naar portrait.
     static func endFullscreenLandscape(returnToPortrait: Bool) {
@@ -57,7 +105,7 @@ enum OrientationCoordinator {
     private static func requestRepeatedly(_ mask: UIInterfaceOrientationMask, until done: @escaping @MainActor (UIInterfaceOrientation) -> Bool) {
         retryWork.forEach { $0.cancel() }; retryWork.removeAll()
         request(mask)
-        for delay in [0.25, 0.7] {
+        for delay in [0.35, 0.8] {
             let work = DispatchWorkItem {
                 MainActor.assumeIsolated {
                     guard let scene = activeScene() else { return }
@@ -100,7 +148,13 @@ enum OrientationCoordinator {
         // V23.1: fullscreen automatisch gedraaid → alleen landscape (het app-venster zelf blijft
         // rechtop, behalve bij JoeToep's eigen "veilige" fullscreen die ín dat venster zit).
         if fullscreenLandscape {
-            if isAppInterfaceWindow(window) && portraitLocked && !appWindowRotates { return .portrait }
+            // V24: het app-venster blijft ALTIJD rechtop onder een automatisch gedraaide video (ook
+            // zonder portretklem) — anders draaide de hele pagina mee en verschoof hij na het sluiten.
+            if isAppInterfaceWindow(window) && !appWindowRotates { return .portrait }
+            return .landscape
+        }
+        // V24: een fullscreen-venster dat net verschijnt, meteen liggend presenteren.
+        if autoRotateEnabled && (expectingFullscreen || videoContextActive) && isVideoFullscreenWindow(window) {
             return .landscape
         }
         if portraitLocked && isAppInterfaceWindow(window) { return .portrait }
@@ -116,6 +170,7 @@ final class JoeToepAppDelegate: NSObject, UIApplicationDelegate {
     /// zijn vóórdat er een venster bestaat.
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         MainActor.assumeIsolated {
+            OrientationCoordinator.installWindowObserver()   // V24
             WatchBridge.shared.activateSession()
             if UserDefaults.standard.object(forKey: "tabSyncV18") as? Bool ?? true { TabSyncService.shared.start() }
             // V22.2: ook bij een achtergrondstart widgets/Live Activity/Watch-toestand bijhouden (idempotent).
@@ -123,5 +178,11 @@ final class JoeToepAppDelegate: NSObject, UIApplicationDelegate {
         }
         return true
     }
+}
+#endif
+
+#if os(iOS)
+private extension Optional where Wrapped == String {
+    var orEmpty: String { self ?? "" }
 }
 #endif

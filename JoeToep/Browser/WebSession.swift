@@ -1339,6 +1339,9 @@ final class WebSession: NSObject, ObservableObject {
                   self.videoID == expectedVideo, expectedVideo != 0,
                   !self.pip.isActive, !self.pip.isRequesting, !self.isFullscreen else { return }
             self.recordLifecycle("restore fullscreen after PiP")
+            #if os(iOS)
+            OrientationCoordinator.expectFullscreen()   // V24: liggend vanaf het eerste frame
+            #endif
             self.webView.evaluateJavaScript("window.JoeToepMedia?.restoreFullscreen()", completionHandler: nil)
             self.verifyFullscreenRestore(document: expectedDocument, video: expectedVideo, attempt: 1)
         }
@@ -1687,69 +1690,164 @@ final class WebSession: NSObject, ObservableObject {
         #if os(macOS)
         let keyboard = settings.macFullscreenMode == .youtube
         let serial = navigationSerial
-        // V17: met animaties uit wacht automatisch-fullscreen 0.2 s in plaats van 0.5 s.
-        // V23.1: zo snel mogelijk fullscreen (was 0,08/0,2/0,35 s); de pagina controleert zelf of de
-        // video al speelt en genoeg geladen is.
+        // V23.1: zo snel mogelijk fullscreen; de pagina controleert zelf of de video al speelt.
         let firstWait = settings.animationsOff ? 0.0 : (settings.instantTransitions ? 0.04 : 0.1)
         DispatchQueue.main.asyncAfter(deadline: .now() + (extraChecks == 0 ? firstWait : 0.15)) { [weak self] in
-            guard let self, self.navigationSerial == serial, self.applicationActive,
-                  self.settings.automaticFullscreen || self.settings.fullscreenOnPlay, !self.pip.isActive, !self.pip.isRequesting else { return }
-            // V16.2.1: another tab is still closing its PiP window for a hand-over → check again
-            // in 0.15 s (max. 12 times ≈ 1.8 s), so fullscreen only starts once PiP is gone.
+            guard let self, self.navigationSerial == serial,
+                  self.settings.automaticFullscreen || self.settings.fullscreenOnPlay else { return }
+            // V24: kan het nú niet (app even niet actief, PiP bezig), dan het verzoek in de pagina
+            // opnieuw "wapenen" — vroeger was automatische fullscreen voor die video dan verloren.
+            guard self.applicationActive, !self.pip.isActive, !self.pip.isRequesting else {
+                self.rearmAutomaticFullscreen("app not ready"); return
+            }
+            // V16.2.1: een andere tab sluit nog zijn PiP-venster voor een overdracht → max. 12× 0,15 s.
             if Self.handOverClosingUntil > Date() && extraChecks < 12 {
                 self.fulfillAutomaticFullscreen(extraChecks: extraChecks + 1); return
             }
             self.webView.evaluateJavaScript("window.JoeToepPreferences?.fulfillFullscreenRequest(\(keyboard))") { [weak self] result, _ in
-                guard let self, result as? String == "keyboard", self.applicationActive,
-                      self.navigationSerial == serial, !self.pip.isActive, !self.pip.isRequesting,
-                      let window = self.webView.window else { return }
-                // Use YouTube's actual F handler, with keyboard focus on its player.
-                // (fulfillFullscreenRequest gaf "keyboard" alleen als de pagina NIET fullscreen is.)
-                window.makeFirstResponder(self.webView)
-                if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                    context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
-                    self.webView.keyDown(with: event)
+                guard let self, self.navigationSerial == serial else { return }
+                let viaKeyboard = result as? String == "keyboard"
+                let viaScript = (result as? Bool) == true
+                guard viaKeyboard || viaScript else { return }   // pagina zegt: niet (meer) nodig
+                guard self.applicationActive, !self.pip.isActive, !self.pip.isRequesting,
+                      let window = self.webView.window else {
+                    self.rearmAutomaticFullscreen("lost focus"); return
                 }
-                // V19: controle na 1,6 s — kwam fullscreen er niet (YouTube was nog bezig met
-                // theatermodus of de focus sprong weg), dan één keer opnieuw. Nooit als het al
-                // fullscreen is (F is een aan/uit-knop).
-                // V19.1: de controle vraagt het de PAGINA (document.fullscreenElement / YouTube's
-                // fullscreen-attribuut). `isFullscreen` van de app kende YouTube's eigen fullscreen
-                // niet altijd — dan werd F nog eens gestuurd en schakelde fullscreen juist weer UIT
-                // (terug naar theatermodus): precies de bug die je zag.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-                    guard let self, self.navigationSerial == serial, self.applicationActive,
-                          self.isPlaying, !self.pip.isActive, !self.pip.isRequesting else { return }
-                    let probe = "!!(document.fullscreenElement||document.webkitFullscreenElement||document.querySelector('ytd-watch-flexy')?.hasAttribute('fullscreen')||document.querySelector('video')?.webkitDisplayingFullscreen||document.documentElement.hasAttribute('data-joetoep-stage'))"
-                    self.webView.evaluateJavaScript(probe) { [weak self] value, _ in
-                        guard let self, (value as? Bool) == false, !self.isFullscreen, let window = self.webView.window else { return }
-                        // V19.3: het VENSTER is wel macOS-fullscreen maar de video niet (je zag dan
-                        // de theater-weergave in een fullscreen venster). Eerst het venster terug,
-                        // dan pas F — zodat de video écht in YouTube's fullscreen eindigt.
-                        if window.styleMask.contains(.fullScreen) && !window.isWebKitFullScreenWindow {
-                            self.recordLifecycle("auto-fullscreen: window was fullscreen without video → reset")
-                            window.toggleFullScreen(nil)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
-                                guard let self, self.isPlaying, let w = self.webView.window, !w.styleMask.contains(.fullScreen) else { return }
-                                self.enterFullscreenForHandOverIgnoringPlayState()
-                            }
-                            return
+                if Date().timeIntervalSince(self.lastInlineEscAt) < 2 {
+                    self.recordLifecycle("auto-fullscreen skipped: Esc just pressed")
+                    self.webView.evaluateJavaScript("window.JoeToepPreferences?.userTookOverFullscreen?.()", completionHandler: nil)
+                    return
+                }
+                if viaKeyboard { self.sendYouTubeFullscreenKey(in: window) }
+                self.recordLifecycle("auto-fullscreen requested")
+                self.autoFullscreenRequestedAt = Date()
+                self.autoFullscreenAttempt &+= 1
+                self.verifyAutomaticFullscreen(serial: serial, attempt: 1, id: self.autoFullscreenAttempt)
+            }
+        }
+        #else
+        OrientationCoordinator.expectFullscreen()   // V24
+        webView.evaluateJavaScript("window.JoeToepPreferences?.fulfillFullscreenRequest()", completionHandler: nil)
+        #endif
+    }
+
+    #if os(macOS)
+    /// V24: echte F-toets naar YouTube's speler (script-fullscreen zonder gebaar wordt geweigerd).
+    private func sendYouTubeFullscreenKey(in window: NSWindow) {
+        window.makeFirstResponder(webView)
+        if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
+            webView.keyDown(with: event)
+        }
+    }
+
+    /// Staat er (ergens in de app) een WebKit-fullscreen-venster open? Dan is fullscreen bezig of klaar.
+    private var webKitFullscreenWindowVisible: Bool {
+        NSApp.windows.contains { $0.isWebKitFullScreenWindow && $0.isVisible }
+    }
+
+    /// V24 — automatische fullscreen is nu zelfcontrolerend. Na het verzoek meet de app tot 3×
+    /// (1,2 / 2,4 / 4 s) of de video écht fullscreen staat. Zo niet — en twee metingen 0,3 s na
+    /// elkaar zijn het eens, en er is geen WebKit-fullscreen-venster in aanmaak (F is een aan/uit-
+    /// knop: nooit sturen tijdens een overgang) — dan opnieuw. Stopt zodra de gebruiker pauzeert,
+    /// een andere video kiest, PiP start of de app verlaat (dan opnieuw wapenen).
+    /// V24.0.1: elke nieuwe poging krijgt een nummer. Zodra fullscreen ÉÉN keer bereikt is, of jij
+    /// zelf F / Esc / dubbelklik gebruikt, of fullscreen verlaat, wordt het nummer opgehoogd en stopt
+    /// de controle-ronde meteen. Daardoor kan JoeToep nooit meer zelf "terug" fullscreen gaan nadat je
+    /// het verlaten hebt (in 24.0 zag de controle na jouw F/Esc "niet fullscreen" en drukte F opnieuw).
+    private var autoFullscreenAttempt = 0
+    /// V24.0.1: Esc tijdens de fullscreen-INGANG (animatie) negeert WebKit. Dan onthouden we hem
+    /// 2 s en verlaten we fullscreen zodra het klaar is — Esc betekent altijd "eruit".
+    private var pendingUserExitUntil = Date.distantPast
+    private var autoFullscreenRequestedAt = Date.distantPast
+    /// Esc terwijl de video nog inline stond: een automatisch verzoek dat binnen 2 s volgt, vervalt.
+    private var lastInlineEscAt = Date.distantPast
+    func cancelAutomaticFullscreenFollowUp(_ why: String) {
+        // Alleen als JoeToep net zelf (automatisch) fullscreen aanvroeg; F of dubbelklik = jouw nieuwe keuze.
+        if why == "Esc" && !isFullscreen { lastInlineEscAt = Date() }
+        if why == "Esc" && !isFullscreen && Date().timeIntervalSince(autoFullscreenRequestedAt) < 2.5 {
+            pendingUserExitUntil = Date().addingTimeInterval(2)
+        } else if why != "Esc" { pendingUserExitUntil = .distantPast }
+        autoFullscreenAttempt &+= 1
+        webView.evaluateJavaScript("window.JoeToepPreferences?.userTookOverFullscreen?.()", completionHandler: nil)
+        recordLifecycle("auto-fullscreen follow-up cancelled (\(why))")
+    }
+    private func verifyAutomaticFullscreen(serial: Int, attempt: Int, id: Int) {
+        guard id == autoFullscreenAttempt else { return }
+        let delays: [Double] = [1.2, 1.2, 1.6]
+        guard attempt <= delays.count else {
+            recordLifecycle("auto-fullscreen FAILED after \(delays.count) checks"); return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delays[attempt - 1]) { [weak self] in
+            guard let self, id == self.autoFullscreenAttempt else { return }
+            self.probeAutomaticFullscreen(serial: serial) { [weak self] state in
+                guard let self, let state, id == self.autoFullscreenAttempt else { return }
+                if state.fs || state.achieved {
+                    if attempt > 1 { self.recordLifecycle("auto-fullscreen ok after retry \(attempt - 1)") }
+                    return
+                }
+                guard state.watch, state.playing else { return }          // gebruiker pauzeerde / ging weg
+                guard self.applicationActive, self.isVisibleTab, !self.pip.isActive, !self.pip.isRequesting,
+                      let window = self.webView.window else { self.rearmAutomaticFullscreen("interrupted"); return }
+                if self.webKitFullscreenWindowVisible || self.isFullscreen {
+                    self.verifyAutomaticFullscreen(serial: serial, attempt: attempt + 1, id: id); return
+                }
+                // V19.3: het VENSTER is macOS-fullscreen maar de video niet → eerst het venster terug.
+                if window.styleMask.contains(.fullScreen) && !window.isWebKitFullScreenWindow {
+                    self.recordLifecycle("auto-fullscreen: window was fullscreen without video → reset")
+                    window.toggleFullScreen(nil)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+                        guard let self, self.navigationSerial == serial, self.isPlaying,
+                              let w = self.webView.window, !w.styleMask.contains(.fullScreen) else { return }
+                        guard id == self.autoFullscreenAttempt else { return }
+                        self.enterFullscreenForHandOverIgnoringPlayState()
+                        self.verifyAutomaticFullscreen(serial: serial, attempt: attempt + 1, id: id)
+                    }
+                    return
+                }
+                // Tweede meting 0,3 s later: alleen opnieuw als het dan nog steeds niet fullscreen is.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.probeAutomaticFullscreen(serial: serial) { [weak self] again in
+                        guard let self, let again, id == self.autoFullscreenAttempt, !again.fs, !again.achieved, again.watch, again.playing,
+                              self.applicationActive, self.isVisibleTab, !self.pip.isActive, !self.pip.isRequesting,
+                              !self.webKitFullscreenWindowVisible, !self.isFullscreen,
+                              let window = self.webView.window else { return }
+                        self.recordLifecycle("auto-fullscreen: retry \(attempt)")
+                        switch self.settings.macFullscreenMode {
+                        case .youtube: self.sendYouTubeFullscreenKey(in: window)
+                        case .enhanced: self.openFullscreenFallback()
+                        case .safe: self.openSafeFullscreen()
                         }
-                        self.recordLifecycle("auto-fullscreen: retry")
-                        window.makeFirstResponder(self.webView)
-                        if let retry = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                            context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3) {
-                            self.webView.keyDown(with: retry)
-                        }
+                        self.verifyAutomaticFullscreen(serial: serial, attempt: attempt + 1, id: id)
                     }
                 }
             }
         }
-        #else
-        webView.evaluateJavaScript("window.JoeToepPreferences?.fulfillFullscreenRequest()", completionHandler: nil)
-        #endif
+    }
+
+    private struct AutoFullscreenState: Decodable { let fs: Bool; let watch: Bool; let playing: Bool; let achieved: Bool }
+    private func probeAutomaticFullscreen(serial: Int, _ done: @escaping @MainActor (AutoFullscreenState?) -> Void) {
+        guard navigationSerial == serial else { done(nil); return }
+        webView.evaluateJavaScript("window.JoeToepPreferences?.automaticFullscreenState?.()") { [weak self] value, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.navigationSerial == serial, let text = value as? String,
+                      let data = text.data(using: .utf8),
+                      let state = try? JSONDecoder().decode(AutoFullscreenState.self, from: data) else { done(nil); return }
+                done(state)
+            }
+        }
+    }
+    #endif
+
+    /// V24: zet een automatisch-fullscreen-verzoek in de pagina terug, zodat het bij de volgende
+    /// 'playing' (of activering van de app) opnieuw wordt geprobeerd.
+    private func rearmAutomaticFullscreen(_ why: String) {
+        webView.evaluateJavaScript("window.JoeToepPreferences?.rearmAutomaticFullscreen?.()") { [weak self] value, _ in
+            MainActor.assumeIsolated {
+                if (value as? Bool) == true { self?.recordLifecycle("auto-fullscreen re-armed (\(why))") }
+            }
+        }
     }
 
     /// V16.2.1 — step 3 of a hand-over: put THIS tab's (new) video in fullscreen.
@@ -2412,6 +2510,16 @@ final class WebSession: NSObject, ObservableObject {
         playbackSession.notePlayback(event.playing)
         isFullscreen = event.fullscreen
         #if os(macOS)
+        // V24.0.1: fullscreen bereikt of verlaten → automatische controle-ronde klaar (nooit meer zelf F).
+        if wasFullscreen != event.fullscreen { autoFullscreenAttempt &+= 1 }
+        if !wasFullscreen && event.fullscreen && pendingUserExitUntil > Date() {
+            pendingUserExitUntil = .distantPast
+            recordLifecycle("Esc during fullscreen entry → leave fullscreen")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.isFullscreen else { return }
+                self.webView.evaluateJavaScript("(()=>{try{const d=document;if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d);return 1}}catch(_){}return 0})()", completionHandler: nil)
+            }
+        } else if wasFullscreen && !event.fullscreen { pendingUserExitUntil = .distantPast }
         if wasFullscreen != event.fullscreen || (event.fullscreen && event.stage != isVideoStage) { fullscreenFit?.fullscreenChanged(event.fullscreen) }
         #endif
         let wasStage = isVideoStage
@@ -2456,6 +2564,11 @@ final class WebSession: NSObject, ObservableObject {
                 #endif
             }
         }
+        #if os(iOS)
+        // V24: weet de oriëntatie-coördinator dat de zichtbare tab een video heeft, dan kan het
+        // fullscreen-venster vanaf het eerste frame liggend verschijnen.
+        if isVisibleTab { OrientationCoordinator.videoContextActive = event.videoID != 0 || event.fullscreen }
+        #endif
         if !wasFullscreen && event.fullscreen {
             suppressExitPiP = false
             #if os(iOS)
@@ -2468,7 +2581,7 @@ final class WebSession: NSObject, ObservableObject {
             // telefoon zelf kantelt.
             if OrientationCoordinator.autoRotateEnabled && UIDevice.current.userInterfaceIdiom == .phone {
                 orientationTask?.cancel()
-                if !pip.isActive && !pip.isRequesting && applicationActive && isVisibleTab && !UIDevice.current.orientation.isLandscape {
+                if !pip.isActive && !pip.isRequesting && applicationActive && isVisibleTab {   // V24: beginFullscreenLandscape kijkt zelf naar de interface-stand (rotatievergrendeling + liggend vasthouden gaf anders portrait-fullscreen)
                     OrientationCoordinator.log = { [weak self] line in self?.recordLifecycle(line) }
                     recordLifecycle("fullscreen: auto-rotate to landscape")
                     OrientationCoordinator.beginFullscreenLandscape(appWindow: event.stage)

@@ -99,6 +99,21 @@ final class MacNavigationMonitor {
             MainActor.assumeIsolated { MacNavigationMonitor.exitWindowFullscreenIfPageIsInline(window) }
             return event
         }) { monitors.append(m) }
+        // V24.0.1: jij bedient fullscreen zelf (F, Esc, dubbelklik) → JoeToep's automatische
+        // fullscreen-controle stopt meteen en gaat nooit meer "terug" fullscreen voor deze video.
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown], handler: { event in
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            let isF = event.type == .keyDown && event.keyCode == 3 && flags.isEmpty && !event.isARepeat
+            let isEsc = event.type == .keyDown && (event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}")
+            let isDouble = event.type == .leftMouseDown && event.clickCount == 2
+            guard isF || isEsc || isDouble, !(event.window?.firstResponder is NSTextView) else { return event }
+            MainActor.assumeIsolated {
+                guard let session = BrowserWorkspace.active?.selected.session,
+                      NavigationPolicy.isPlaybackPage(session.currentURL) else { return }
+                session.cancelAutomaticFullscreenFollowUp(isF ? "F" : isEsc ? "Esc" : "double-click")
+            }
+            return event
+        }) { monitors.append(m) }
         // V23.1: klikken op het beeld in fullscreen komen ALTIJD aan. Op een GEPAUZEERDE video legt WebKit
         // in fullscreen een VisionKit-laag (Live Text: VKCImageAnalysisOverlayView) over het beeld; die
         // slikte elke klik in: klik = afspelen en dubbelklik = fullscreen uit deden niets (toetsen wel).

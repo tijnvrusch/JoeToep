@@ -26,6 +26,9 @@
   // queued: voorkomt dat we apply() meerdere keren inplannen binnen dezelfde "tick".
   let lastFullscreenKey = '', pendingFullscreenKey = '', queued = false;
   let startedKey = '', resumeRequested = false, wasPausedInline = false;
+  // V24: voor welke video automatische fullscreen écht gelukt is, en of het verzoek een
+  // eerste start was (nodig om een weggevallen verzoek opnieuw te kunnen "wapenen").
+  let achievedKey = '', requestWasFirstStart = false;
   let configured = !window.JOETOEP_NATIVE_HOST;
   // WeakMap: een soort Map (sleutel/waarde-opslag), maar de sleutels (hier: video-elementen)
   // mogen door de browser opgeruimd worden uit het geheugen zodra ze nergens anders meer
@@ -100,6 +103,7 @@
     if (window.JoeToepMedia.diagnostics().rawVisibility !== "visible" || !allowed || !watchPage() || !v || v.paused || v.ended || v.readyState < 2 ||
         lastFullscreenKey === key() || v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
     // Only one attempt per video; exiting fullscreen never immediately reopens it.
+    requestWasFirstStart = firstStart;
     lastFullscreenKey = key(); startedKey = key(); resumeRequested = false;
     if (window.JOETOEP_NATIVE_HOST) {
       // In de native app kunnen we niet zomaar zelf fullscreen aanzetten (dat vereist vaak
@@ -126,6 +130,46 @@
       if (player && !document.fullscreenElement) { player.focus(); return 'keyboard'; }
     }
     return window.JoeToepMedia.fullscreen();
+  }
+  const pageIsFullscreen = () => {
+    const v = video();
+    return Boolean(document.fullscreenElement || document.webkitFullscreenElement ||
+      document.querySelector('ytd-watch-flexy')?.hasAttribute('fullscreen') || v?.webkitDisplayingFullscreen ||
+      document.documentElement.hasAttribute('data-joetoep-stage'));
+  };
+  // V24: de app kon een automatisch-fullscreen-verzoek niet uitvoeren (app even niet actief,
+  // PiP-overgang, focus weg). Vroeger was die video dan "op": nooit meer automatisch fullscreen.
+  // Nu mag het opnieuw zodra de video (weer) speelt — maar nooit als fullscreen voor deze video al
+  // gelukt was (zelf verlaten = verlaten).
+  function rearmAutomaticFullscreen() {
+    if (!watchPage() || achievedKey === key() || pageIsFullscreen()) return false;
+    if (lastFullscreenKey !== key() && pendingFullscreenKey !== key()) return false;
+    lastFullscreenKey = ''; pendingFullscreenKey = '';
+    if (requestWasFirstStart) startedKey = ''; else resumeRequested = true;
+    schedule();
+    return true;
+  }
+  // V24: korte toestand voor de controle-ronde van de app.
+  function automaticFullscreenState() {
+    const v = video();
+    return JSON.stringify({fs: pageIsFullscreen(), watch: watchPage(), playing: !!(v && !v.paused && !v.ended),
+      achieved: achievedKey === key(), key: key()});
+  }
+  // V24.0.1: fullscreen bereikt → "gelukt" voor deze video. Ook gelukt voor de video waarvoor het
+  // en geen tweede automatisch verzoek voor deze video (ook niet als YouTube de URL pas later bijwerkt).
+  const noteAchieved = () => {
+    if (!(document.fullscreenElement || document.webkitFullscreenElement) || !watchPage()) return;
+    achievedKey = key(); lastFullscreenKey = key();
+    pendingFullscreenKey = '';
+  };
+  document.addEventListener('fullscreenchange', noteAchieved);
+  document.addEventListener('webkitfullscreenchange', noteAchieved);
+  // V24.0.1: jij gebruikte zelf F / Esc / dubbelklik → voor deze video nooit meer automatisch.
+  function userTookOverFullscreen() {
+    if (!watchPage()) return false;
+    achievedKey = key(); lastFullscreenKey = key(); startedKey = key(); pendingFullscreenKey = '';
+    resumeRequested = false;
+    return true;
   }
   // Plant apply() in om één keer uit te voeren zodra de browser even niets anders te doen
   // heeft (queueMicrotask). Zo voorkomen we dat meerdere events vlak na elkaar (bijv.
@@ -266,7 +310,7 @@
   for (const event of ['loadedmetadata', 'canplay', 'playing']) window.addEventListener(event, applyResume, true);
   // De publieke API voor de native app: fullscreen bevestigen, zoeken activeren, een
   // hervat-tijdstip doorgeven, en de instellingen (config) bijwerken.
-  window.JoeToepPreferences = Object.freeze({fulfillFullscreenRequest, focusSearch, expectResume,
+  window.JoeToepPreferences = Object.freeze({fulfillFullscreenRequest, rearmAutomaticFullscreen, automaticFullscreenState, userTookOverFullscreen, focusSearch, expectResume,
     configure(next) { configured = true; config = {...config, ...next}; schedule(); }});
   // Als YouTube zelf het "dark"-attribuut op <html> verandert (bijvoorbeeld doordat de
   // gebruiker zelf het thema wisselt), passen we onze voorkeuren opnieuw toe.

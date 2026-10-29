@@ -1,3 +1,15 @@
+# Build report V24 — 24.0.0 (36), 15-10-2026
+
+| Platform | Gebouwd/geïnstalleerd | Getest |
+|---|---|---|
+| Mac (M1 Max, macOS 27.2) | **nog niet** — Xcode-beta 27.0 b3 vroeg eerst "Install Required" (systeemcomponenten, apart proces; door Tijn geïnstalleerd) en het V24-project staat niet in de recente lijst; het Open-paneel mag niet bediend worden | crash-oorzaak vastgesteld uit 7 crashrapporten (14–15 okt); code-review van alle singletons en geforceerde indexen |
+| iPhone 13 Pro "eiFoon" (kabel) | nog niet (zelfde reden) | — |
+
+JS (jsdom): bridge 17, mediaCompatibility 134, V15 12, V17 13, V23.1 11, **V24 8 (nieuw, incl. 1.000 cycli)** — alles groen.
+Swift: nieuwe unit tests `V24FeatureTests` staan klaar voor de eerstvolgende test-run (⌘U vanuit Xcode).
+
+Eerstvolgende stap: project openen uit `~/Documents/Claude/JoeToep-V24`, Run op Mac en eiFoon, unit tests draaien, en de iPhone-rotatie met/zonder rotatievergrendeling bekijken.
+
 # Build report V23.1 — 23.1.0 (35), 13-10-2026
 
 | Platform | Gebouwd/geïnstalleerd | Getest |

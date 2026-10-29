@@ -1136,6 +1136,9 @@ final class BrowserWorkspace: ObservableObject {
     }
     func close(_ tab: BrowserTab) { close(tab, remember: true) }
     func close(_ tab: BrowserTab, remember: Bool) {
+        // V24: een tab die al weg is (dubbel sluiten: sync + klik, of twee snelle ⌘W's) → niets doen.
+        // Voorheen crashte de geforceerde index hieronder.
+        guard tabs.contains(where: { $0.id == tab.id }) else { return }
         guard tabs.count > 1 else {
             tab.session.goHome(); return
         }
@@ -1151,9 +1154,9 @@ final class BrowserWorkspace: ObservableObject {
         }
         tab.session.closeTab()
         playbackObservers[tab.id] = nil; urlObservers[tab.id] = nil; resumeObservers[tab.id] = nil; titleObservers[tab.id] = nil
-        let index = tabs.firstIndex(where: { $0.id == tab.id })!
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { persist(); return }
         tabs.remove(at: index)
-        if selectedID == tab.id { selectedID = tabs[min(index, tabs.count - 1)].id }
+        if selectedID == tab.id, !tabs.isEmpty { selectedID = tabs[min(index, tabs.count - 1)].id }
         persist(); updateIdleTimer()
     }
     func closeOthers(_ keep: BrowserTab) {
